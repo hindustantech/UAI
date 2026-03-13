@@ -7,8 +7,6 @@ import fs from 'fs';
 import path from 'path';
 import { uploadToCloudinary } from '../utils/Cloudinary.js';
 import admin from '../utils/firebaseadmin.js';
-import notification from '../models/notification.js';
-import ReferralUsage from '../models/ReferralUsage.js'
 import mongoose from "mongoose";
 import logger from '../utils/logger.js';
 import PatnerProfile from '../models/PatnerProfile.js';
@@ -837,17 +835,6 @@ export const broadcastNotification = async (req, res) => {
 
     }
 
-    // Save notification in DB
-    const newNotification = await notification.create({
-      title,
-      message: body,
-      type,
-      location: type === 'location' ? address : undefined,
-      users: [], // empty since this is broadcast
-      createdBy: req.user?._id || null,
-      createdAt: new Date(),
-    });
-
     const endTime = Date.now();
     const duration = ((endTime - startTime) / 1000).toFixed(2);
 
@@ -1571,17 +1558,7 @@ const verifyOtp = async (req, res) => {
 
     await user.save();
 
-    // 4. Referral usage tracking
-    if (user.referredBy) {
-      const referrer = await User.findOne({ referalCode: user.referredBy });
-      if (referrer) {
-        await ReferralUsage.create({
-          referralCode: user.referredBy,
-          referrerId: referrer._id,
-          referredUserId: user._id,
-        });
-      }
-    }
+   
 
     // 5. Token response
     res.json({
