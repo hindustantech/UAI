@@ -13,6 +13,7 @@ import appsettingroutes from './routes/appsetting.js'
 import holiday from './routes/Attandance/Holiday.js'
 import attandance from './routes/Attandance/Attandance.js'
 import employee from './routes/Attandance/Employee.route.js'
+import attendanceRequestRoutes from './routes/Attandance/Request.js'
 import { startAttendanceCron } from './controllers/attandance/attendanceAutoClose.job.js';
 import categoryAdvertisment from './routes/Attandance/categoryAdvertisment.js'
 import advertisment from './routes/Attandance/Advertisement.Routes.js'
@@ -54,7 +55,7 @@ app.use('/api/advertisements', advertisment);
 app.use('/api/appsetting', appsettingroutes);
 app.use('/api/auth', authRoutes);
 
-
+app.use("/api/attendance/requests", attendanceRequestRoutes);
 app.use('/api/patnerProfile', patnerProfile);
 
 
