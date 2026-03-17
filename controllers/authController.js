@@ -10,6 +10,7 @@ import admin from '../utils/firebaseadmin.js';
 import mongoose from "mongoose";
 import logger from '../utils/logger.js';
 import PatnerProfile from '../models/PatnerProfile.js';
+import jwt from 'jsonwebtoken';
 
 import { Parser } from 'json2csv';
 
@@ -1596,7 +1597,7 @@ const verifyOtp = async (req, res) => {
 
     await user.save();
 
-
+   
 
     // 5. Token response
     res.json({
