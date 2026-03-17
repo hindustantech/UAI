@@ -13,6 +13,7 @@ import PatnerProfile from '../models/PatnerProfile.js';
 import jwt from 'jsonwebtoken';
 
 import { Parser } from 'json2csv';
+const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep this secret in env
 
 
 
