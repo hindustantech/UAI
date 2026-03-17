@@ -17,6 +17,7 @@ import attendanceRequestRoutes from './routes/Attandance/Request.js'
 import { startAttendanceCron } from './controllers/attandance/attendanceAutoClose.job.js';
 import categoryAdvertisment from './routes/Attandance/categoryAdvertisment.js'
 import advertisment from './routes/Attandance/Advertisement.Routes.js'
+import payment  from './routes/Attandance/Payment.js'
 dotenv.config();
 await connectDB();
 // START BACKGROUND WORKER HERE
@@ -35,7 +36,7 @@ app.use(express.urlencoded({ limit: "50mb", extended: true })); // For
 // Test route
 // ---------------------------
 app.get('/', (req, res) => {
-  res.send('inshop is Running Smoothly!');
+  res.send('UAI is Running Smoothly!');
 });
 app.use(
   "/exports",

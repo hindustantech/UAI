@@ -29,7 +29,8 @@ import {
     exportUsersByLocation,
     restoreAccount,
     requestAccountDeletion,
-    getDeletionStatus
+    getDeletionStatus,
+    generateTheQRCode
 } from '../controllers/authController.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import profileUploadMiddleware from '../middlewares/profileUploadMiddleware.js';
@@ -42,6 +43,7 @@ upload.single("images")
 router.post('/updateUserLocation', authMiddleware, updateUserLocation);
 
 router.get('/getuserbyreferal', getUserIdsAndNamesByReferralCodesController);
+router.get('/generateTheQRCode', authMiddleware, generateTheQRCode);
 
 router.post('/UpdateManualAddress', authMiddleware, UpdateManualAddress);
 

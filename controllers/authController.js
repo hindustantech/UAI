@@ -16,6 +16,44 @@ import { Parser } from 'json2csv';
 
 
 
+export const generateTheQRCode = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const user = await User.findById(userId);
+    if (!user || user.type !== "partner") {
+      return res.status(404).json({
+        success: false,
+        message: "User not found or not a partner"
+      });
+    }
+
+    // Generate a JWT token that expires in 10 minutes
+    const token = jwt.sign(
+      { userId: user._id },
+      JWT_SECRET,
+      // { expiresIn: "10m" } // 10 minutes
+    );
+
+    // Generate QR code from the token
+    const qrCodeUrl = await QRCode.toDataURL(token);
+
+    return res.status(200).json({
+      success: true,
+      message: "QR Code generated successfully",
+      data: { qrCodeUrl }
+    });
+
+  } catch (error) {
+    console.error("Error generating QR code:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error generating QR code",
+      error: error.message
+    });
+  }
+};
+
 
 export const updateProfileMedia = async (req, res) => {
   const session = await mongoose.startSession();
@@ -1558,7 +1596,7 @@ const verifyOtp = async (req, res) => {
 
     await user.save();
 
-   
+
 
     // 5. Token response
     res.json({

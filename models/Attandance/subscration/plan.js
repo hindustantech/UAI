@@ -1,34 +1,87 @@
-// models/Plan.js
 import mongoose from "mongoose";
 
-const planSchema = new mongoose.Schema({
-    code: { type: String, unique: true }, // FREE, STARTER, BUSINESS
-
-    name: String,
-
-    price: Number, // INR
-
-    currency: { type: String, default: "INR" },
-
-    billingCycle: {
+const featureSchema = new mongoose.Schema({
+    key: {
+        type: String, // e.g. "MAX_EMPLOYEES", "ATTENDANCE_REPORTS"
+        required: true,
+    },
+    value: {
+        type: mongoose.Schema.Types.Mixed,
+        // number | boolean | string (flexible for scaling)
+        required: true,
+    },
+    description: {
         type: String,
-        enum: ["lifetime", "monthly", "quarterly", "yearly"]
+    }
+}, { _id: false });
+
+const planSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true,
     },
 
-    limits: {
-        maxEmployees: Number,
-        maxAttendancePerMonth: Number
+    price: {
+        type: Number,
+        required: true,
+        min: 0,
     },
 
-    features: {
-        payroll: Boolean,
-        geoFencing: Boolean,
-        apiAccess: Boolean,
-        reports: Boolean
+    discount: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100,
     },
 
-    razorpayPlanId: String 
+    finalPrice: {
+        type: Number,
+    },
 
-}, { timestamps: true });
+    validityDays: {
+        type: Number,
+        required: true, // e.g. 30, 90, 365
+    },
+
+    features: [featureSchema],
+
+    // Example:
+    // [
+    //   { key: "MAX_EMPLOYEES", value: 50 },
+    //   { key: "CAN_EXPORT_REPORT", value: true }
+    // ]
+
+    isActive: {
+        type: Boolean,
+        default: true,
+    },
+
+    planType: {
+        type: String,
+        enum: ["FREE", "BASIC", "PREMIUM", "ENTERPRISE"],
+        default: "BASIC",
+    },
+
+    metadata: {
+        type: Map,
+        of: String,
+    }
+
+}, {
+    timestamps: true
+});
+
+
+// Middleware for auto final price calculation
+planSchema.pre("save", function (next) {
+    if (this.discount > 0) {
+        this.finalPrice = this.price - (this.price * this.discount / 100);
+    } else {
+        this.finalPrice = this.price;
+    }
+    next();
+});
 
 export default mongoose.model("Plan", planSchema);
