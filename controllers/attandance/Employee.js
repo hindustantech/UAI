@@ -5,7 +5,7 @@ import Holiday from "../../models/Attandance/Holiday.js";
 import Payroll from "../../models/Attandance/Payroll.js";
 import mongoose from "mongoose";
 import PatnerProfile from "../../models/PatnerProfile.js";
-
+import Shift from "../../models/Attandance/Shift.js";
 
 
 // controllers/companyController.js
@@ -144,6 +144,7 @@ export const createEmployee = async (req, res) => {
             empCode,
             user_name,
             jobInfo,
+            shift,
             salaryStructure,
             bankDetails,
             officeLocation,
@@ -168,6 +169,13 @@ export const createEmployee = async (req, res) => {
             });
         }
 
+        const sh = await Shift.findById(shift)
+        if (!sh) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
+            });
+        }
         /* ---------------------------------------------
            4. Prevent Duplicate Employee
         ---------------------------------------------- */
@@ -196,7 +204,7 @@ export const createEmployee = async (req, res) => {
             empCode,
             user_name,
             role: role || "employee",
-
+            shift,
             jobInfo: {
                 designation: jobInfo?.designation,
                 department: jobInfo?.department,

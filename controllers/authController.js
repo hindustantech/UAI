@@ -21,7 +21,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep th
 
 export const generateTheQRCode = async (req, res) => {
   try {
-    const userId = req.user._id;
+        const {userId } = req.query;
 
     const user = await User.findById(userId);
     if (!user || user.type !== "partner") {
@@ -56,6 +56,8 @@ export const generateTheQRCode = async (req, res) => {
     });
   }
 };
+
+
 
 
 export const updateProfileMedia = async (req, res) => {

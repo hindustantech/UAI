@@ -10,7 +10,11 @@ const employeeSchema = new mongoose.Schema({
         required: true,
         index: true
     },
- 
+    shift: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Shift",
+        index: true
+    },
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
@@ -19,7 +23,7 @@ const employeeSchema = new mongoose.Schema({
     user_name: {
         type: String,
     },
-    
+
     empCode: {
         type: String,
 
@@ -30,8 +34,10 @@ const employeeSchema = new mongoose.Schema({
     jobInfo: {
         designation: String,
         department: String,
+        department_code: String,
+        grade: String,
+        grade_code: String,
         joiningDate: Date,
-
         reportingManager: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User"
