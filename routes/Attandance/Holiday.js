@@ -9,7 +9,8 @@ import {
     updateHoliday,
     deleteHoliday,
     getAllHolidays,
-    getHolidayById
+    getHolidayById,
+    getAllEmpHolidays
 } from "../../controllers/attandance/Holiday.js";
 
 
@@ -67,6 +68,11 @@ router.get(
     "/",
     authMiddleware,
     getAllHolidays
+);
+router.get(
+    "/getAllEmpHolidays",
+    authMiddleware,
+    getAllEmpHolidays
 );
 
 /**

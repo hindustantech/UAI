@@ -21,8 +21,9 @@ const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep th
 
 export const generateTheQRCode = async (req, res) => {
   try {
-        const {userId } = req.query;
-
+    // const { userId } = req.query;
+    const userId = req.user._id
+    
     const user = await User.findById(userId);
     if (!user || user.type !== "partner") {
       return res.status(404).json({
@@ -1601,7 +1602,7 @@ const verifyOtp = async (req, res) => {
 
     await user.save();
 
-   
+
 
     // 5. Token response
     res.json({
