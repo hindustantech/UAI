@@ -4,11 +4,12 @@ import mongoose from "mongoose";
 
 
 
+
 export const getAllEmpHolidays = async (req, res) => {
     try {
-        /* -----------------------------------------
-           1. AUTH CONTEXT
-        ----------------------------------------- */
+        /* =========================================
+           1. AUTH VALIDATION
+        ========================================= */
         const userId = req.user?._id;
 
         if (!userId) {
@@ -18,9 +19,9 @@ export const getAllEmpHolidays = async (req, res) => {
             });
         }
 
-        /* -----------------------------------------
-           2. FETCH EMPLOYEE (CRITICAL STEP)
-        ----------------------------------------- */
+        /* =========================================
+           2. FETCH EMPLOYEE
+        ========================================= */
         const employee = await Employee.findOne({ userId }).lean();
 
         if (!employee) {
@@ -31,67 +32,19 @@ export const getAllEmpHolidays = async (req, res) => {
         }
 
         const companyId = employee.companyId;
-        const department = employee.jobInfo?.department;
-        const role = employee.role;
 
-        /* -----------------------------------------
-           3. QUERY PARAMS
-        ----------------------------------------- */
-        const { year, type, isPaid } = req.query;
-
-        /* -----------------------------------------
-           4. BASE FILTER (MULTI-TENANT SAFE)
-        ----------------------------------------- */
-        const filter = {
+        /* =========================================
+           3. FETCH ALL HOLIDAYS (NO FILTER)
+        ========================================= */
+        const holidays = await Holiday.find({
             companyId: new mongoose.Types.ObjectId(companyId)
-        };
+        })
+        .sort({ date: 1 })
+        .lean();
 
-        /* -----------------------------------------
-           5. YEAR FILTER
-        ----------------------------------------- */
-        if (year) {
-            filter.date = {
-                $gte: new Date(`${year}-01-01`),
-                $lte: new Date(`${year}-12-31`)
-            };
-        }
-
-        /* -----------------------------------------
-           6. TYPE FILTER
-        ----------------------------------------- */
-        if (type) {
-            filter.type = type;
-        }
-
-        /* -----------------------------------------
-           7. PAID FILTER
-        ----------------------------------------- */
-        if (isPaid !== undefined) {
-            filter.isPaid = isPaid === "true";
-        }
-
-        /* -----------------------------------------
-           8. APPLICABILITY FILTER (ADVANCED LOGIC)
-           - Show global holidays
-           - OR department specific
-           - OR role specific
-        ----------------------------------------- */
-        filter.$or = [
-            { applicableTo: { $exists: false } }, // global
-            { "applicableTo.departments": { $in: [department] } },
-            { "applicableTo.roles": { $in: [role] } }
-        ];
-
-        /* -----------------------------------------
-           9. QUERY EXECUTION
-        ----------------------------------------- */
-        const holidays = await Holiday.find(filter)
-            .sort({ date: 1 })
-            .lean();
-
-        /* -----------------------------------------
-           10. RESPONSE
-        ----------------------------------------- */
+        /* =========================================
+           4. RESPONSE
+        ========================================= */
         return res.status(200).json({
             success: true,
             count: holidays.length,
