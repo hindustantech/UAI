@@ -21,6 +21,127 @@ export const buildMonthRange = (year, month) => {
 };
 
 
+export const getAttendanceSummary = async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const { date, month, year } = req.query;
+
+        // Validate companyId
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid company ID"
+            });
+        }
+
+        let startDate, endDate;
+
+        // If specific date is provided (YYYY-MM-DD)
+        if (date) {
+            startDate = new Date(date);
+            startDate.setHours(0, 0, 0, 0);
+
+            endDate = new Date(date);
+            endDate.setHours(23, 59, 59, 999);
+        }
+        // If month and year are provided
+        else if (month && year) {
+            startDate = new Date(year, month - 1, 1); // month is 0-indexed in JS
+            startDate.setHours(0, 0, 0, 0);
+
+            endDate = new Date(year, month, 0); // Last day of the month
+            endDate.setHours(23, 59, 59, 999);
+        }
+        // Default to today
+        else {
+            startDate = new Date();
+            startDate.setHours(0, 0, 0, 0);
+
+            endDate = new Date();
+            endDate.setHours(23, 59, 59, 999);
+        }
+
+        // Get total active employees count for the company
+        const totalEmployees = await Employee.countDocuments({
+            companyId: companyId,
+            isActive: true // Assuming you have an isActive field
+        });
+
+        // Get attendance summary using aggregation
+        const attendanceSummary = await Attendance.aggregate([
+            {
+                $match: {
+                    companyId: new mongoose.Types.ObjectId(companyId),
+                    date: {
+                        $gte: startDate,
+                        $lte: endDate
+                    }
+                }
+            },
+            {
+                $group: {
+                    _id: "$status",
+                    count: { $sum: 1 },
+                    employees: { $addToSet: "$employeeId" } // Get unique employees
+                }
+            }
+        ]);
+
+        // Format the results
+        const summary = {
+            present: 0,
+            absent: 0,
+            leave: 0,
+            holiday: 0,
+            half_day: 0,
+            week_off: 0,
+            pending_approval: 0,
+            rejected: 0,
+            totalEmployees,
+            uniqueEmployees: 0
+        };
+
+        let uniqueEmployeeIds = new Set();
+
+        attendanceSummary.forEach(item => {
+            if (summary.hasOwnProperty(item._id)) {
+                summary[item._id] = item.count;
+            }
+
+            // Add employee IDs to the set
+            item.employees.forEach(empId => uniqueEmployeeIds.add(empId.toString()));
+        });
+
+        summary.uniqueEmployees = uniqueEmployeeIds.size;
+
+        // Calculate absent employees
+        // Absent = total active employees - employees who have any attendance record
+        const presentEmployees = uniqueEmployeeIds.size;
+        summary.absent = Math.max(0, totalEmployees - presentEmployees);
+
+        // Add date range info
+        summary.dateRange = {
+            from: startDate,
+            to: endDate,
+            type: date ? "daily" : (month && year ? "monthly" : "today")
+        };
+
+        res.status(200).json({
+            success: true,
+            data: summary
+        });
+
+    } catch (error) {
+        console.error("Error in getAttendanceSummary:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching attendance summary",
+            error: error.message
+        });
+    }
+};
+
+
 export const getUTCDayRange = (inputDate = new Date()) => {
     const start = new Date(Date.UTC(
         inputDate.getUTCFullYear(),
