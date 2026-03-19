@@ -1446,8 +1446,7 @@ export const completeProfile = async (req, res) => {
     /* ---------- Email Validation ---------- */
 
     if (email) {
-      const emailRegex =
-        /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
       if (!emailRegex.test(email)) {
         return res.status(400).json({
@@ -1479,9 +1478,11 @@ export const completeProfile = async (req, res) => {
     /* ---------- Handle Image Upload ---------- */
     if (req.file) {
       try {
+        // Upload to 'profiles' folder instead of 'products'
         const result = await uploadToCloudinary(req.file.buffer, 'profiles');
         update.profileImage = result.secure_url;
       } catch (uploadError) {
+        console.error('Cloudinary upload error:', uploadError);
         return res.status(400).json({
           message: "Failed to upload profile image",
           error: uploadError.message
@@ -1520,7 +1521,7 @@ export const completeProfile = async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error('Profile update error:', err);
 
     if (err.code === 11000) {
       return res.status(409).json({
