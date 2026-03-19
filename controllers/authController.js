@@ -24,7 +24,7 @@ export const generateTheQRCode = async (req, res) => {
   try {
     // const { userId } = req.query;
     const userId = req.user._id
-    
+
     const user = await User.findById(userId);
     if (!user || user.type !== "partner") {
       return res.status(404).json({
@@ -705,7 +705,7 @@ export const getProfile = async (req, res) => {
        1. AUTH CONTEXT
     ---------------------------------------------- */
     const userId = req.user?._id || req.user?.id;
-    const companyId = req.user?.companyId || req.user?._id; // for company users
+
 
     if (!userId) {
       return res.status(400).json({
@@ -724,7 +724,6 @@ export const getProfile = async (req, res) => {
 
       Employee.findOne({
         userId: userId,
-        companyId: companyId
       })
         .select(`
           empCode role weeklyOff employmentStatus
