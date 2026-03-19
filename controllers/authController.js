@@ -705,7 +705,7 @@ export const getProfile = async (req, res) => {
        1. AUTH CONTEXT
     ---------------------------------------------- */
     const userId = req.user?._id || req.user?.id;
-
+    
 
     if (!userId) {
       return res.status(400).json({
