@@ -155,12 +155,13 @@ export const getAttendanceRequests = async (req, res) => {
             startDate,
             endDate,
             page = 1,
-            limit = 10
+            limit = 10,
+            companyId,
         } = req.query;
 
         const userId = req.user._id;
         const userRole = req.user.role;
-        const companyId = req.user.companyId;
+      
 
         // Build query based on user role
         let query = { companyId };
