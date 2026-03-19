@@ -1467,15 +1467,63 @@ export const completeProfile = async (req, res) => {
 
     /* ---------- Profile Image ---------- */
     if (profileImage) {
-      if (profileImage.startsWith("data:image")) {
-        const base64Data = profileImage.split(";base64,").pop();
-        const buffer = Buffer.from(base64Data, "base64");
+      try {
+        // Check if it's a base64 image (needs upload to Cloudinary)
+        if (profileImage.startsWith("data:image")) {
+          // Extract base64 data and upload to Cloudinary
+          const base64Data = profileImage.split(";base64,").pop();
+          const buffer = Buffer.from(base64Data, "base64");
 
-        const result = await uploadToCloudinary(buffer, "profile_images");
+          // Validate buffer size (e.g., max 5MB)
+          const maxSize = 5 * 1024 * 1024; // 5MB
+          if (buffer.length > maxSize) {
+            return res.status(400).json({
+              message: "Image size too large. Maximum size is 5MB",
+            });
+          }
 
-        update.profileImage = result.secure_url;
-      } else {
-        update.profileImage = profileImage;
+          // Upload to Cloudinary and get URL
+          const result = await uploadToCloudinary(buffer, "profile_images");
+
+          // Store ONLY the Cloudinary URL in database
+          update.profileImage = result.secure_url;
+
+          // Optional: Delete old profile image from Cloudinary if it exists
+          const currentUser = await User.findById(userId);
+          if (currentUser?.profileImage) {
+            const oldPublicId = extractPublicIdFromUrl(currentUser.profileImage);
+            if (oldPublicId) {
+              // Fire and forget - don't await to avoid slowing down response
+              deleteFromCloudinary(oldPublicId).catch(err =>
+                console.error("Failed to delete old image:", err)
+              );
+            }
+          }
+        }
+        // If it's already a URL (from Cloudinary or other CDN)
+        else if (isValidUrl(profileImage)) {
+          // Validate that it's an image URL (optional)
+          const isImageUrl = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff)$/i.test(profileImage.split('?')[0]);
+
+          if (!isImageUrl) {
+            return res.status(400).json({
+              message: "URL must point to an image file",
+            });
+          }
+
+          update.profileImage = profileImage; // Store the URL directly
+        }
+        else {
+          return res.status(400).json({
+            message: "Invalid profile image format. Must be a base64 image or valid image URL",
+          });
+        }
+      } catch (imageError) {
+        console.error("IMAGE_UPLOAD_ERROR:", imageError);
+        return res.status(400).json({
+          message: "Failed to process profile image",
+          error: imageError.message,
+        });
       }
     }
 
@@ -1484,6 +1532,7 @@ export const completeProfile = async (req, res) => {
       update.data = data;
     }
 
+    // Set profile completion flag
     update.isProfileCompleted = true;
 
     const user = await User.findByIdAndUpdate(
@@ -1498,7 +1547,7 @@ export const completeProfile = async (req, res) => {
 
     return res.json({
       message: "Profile completed successfully",
-      user,
+      user, // user.profileImage will be a URL string, not base64
     });
 
   } catch (err) {
@@ -1516,6 +1565,16 @@ export const completeProfile = async (req, res) => {
     });
   }
 };
+
+// Helper function to validate URLs
+function isValidUrl(string) {
+  try {
+    new URL(string);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
 
 export const findUserByReferralOwner = async (req, res) => {
   try {
