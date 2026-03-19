@@ -699,83 +699,149 @@ export const getUserProfile = async (req, res) => {
 
 
 
+
+/**
+ * @desc    Get Profile (User + Employee)
+ * @route   GET /api/profile
+ * @access  Private
+ */
 export const getProfile = async (req, res) => {
+  const requestId = new mongoose.Types.ObjectId().toString(); // trace id
+
   try {
     /* ---------------------------------------------
        1. AUTH CONTEXT
     ---------------------------------------------- */
     const userId = req.user?._id || req.user?.id;
 
-
-    if (!userId) {
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         success: false,
-        message: "User ID is required"
+        requestId,
+        message: "Invalid or missing user ID"
       });
     }
 
     /* ---------------------------------------------
-       2. PARALLEL FETCH (PERFORMANCE OPTIMIZED)
+       2. TIMEOUT WRAPPER (FAIL FAST STRATEGY)
     ---------------------------------------------- */
-    const [user, employee] = await Promise.all([
-      User.findById(userId)
-        .select("name phone email profileImage couponCount type referalCode referredBy")
-        .lean(),
-
-      Employee.findOne({
-        userId: userId,
-      })
-        .select(`
-          empCode role weeklyOff employmentStatus
-          jobInfo salaryStructure bankDetails officeLocation
-        `)
-        .populate("jobInfo.reportingManager", "name email")
-        .populate("shift", "name startTime endTime")
-        .lean()
-    ]);
+    const timeout = (promise, ms = 5000) => {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("DB_TIMEOUT")), ms)
+        )
+      ]);
+    };
 
     /* ---------------------------------------------
-       3. VALIDATION
+       3. PARALLEL FETCH (OPTIMIZED)
+    ---------------------------------------------- */
+    const userQuery = User.findById(userId)
+      .select("name phone email profileImage couponCount type referalCode referredBy")
+      .lean();
+
+    const employeeQuery = Employee.findOne({ userId })
+      .select(`
+        empCode role weeklyOff employmentStatus
+        jobInfo salaryStructure bankDetails officeLocation shift
+      `)
+      .populate({
+        path: "jobInfo.reportingManager",
+        select: "name email",
+        options: { lean: true }
+      })
+      .populate({
+        path: "shift",
+        select: "name startTime endTime",
+        options: { lean: true }
+      })
+      .lean();
+
+    const [user, employee] = await timeout(
+      Promise.all([userQuery, employeeQuery]),
+      7000
+    );
+
+    /* ---------------------------------------------
+       4. VALIDATION
     ---------------------------------------------- */
     if (!user) {
       return res.status(404).json({
         success: false,
+        requestId,
         message: "User not found"
       });
     }
 
     /* ---------------------------------------------
-       4. RESPONSE STRUCTURE (ENTERPRISE FORMAT)
+       5. SAFE RESPONSE MAPPING (DEFENSIVE DESIGN)
     ---------------------------------------------- */
     const response = {
       user: {
         id: user._id,
-        name: user.name,
-        phone: user.phone,
-        email: user.email,
-        profileImage: user.profileImage,
-        couponCount: user.couponCount,
-        type: user.type,
-        referalCode: user.referalCode,
-        referredBy: user.referredBy
+        name: user.name || null,
+        phone: user.phone || null,
+        email: user.email || null,
+        profileImage: user.profileImage || null,
+        couponCount: user.couponCount || 0,
+        type: user.type || null,
+        referalCode: user.referalCode || null,
+        referredBy: user.referredBy || null
       },
-      employee: employee || null // safe fallback
+      employee: employee
+        ? {
+          empCode: employee.empCode || null,
+          role: employee.role || null,
+          weeklyOff: employee.weeklyOff || [],
+          employmentStatus: employee.employmentStatus || null,
+
+          jobInfo: {
+            ...employee.jobInfo,
+            reportingManager:
+              employee.jobInfo?.reportingManager || null
+          },
+
+          salaryStructure: employee.salaryStructure || {},
+          bankDetails: employee.bankDetails || {},
+          officeLocation: employee.officeLocation || null,
+          shift: employee.shift || null
+        }
+        : null
     };
 
     /* ---------------------------------------------
-       5. RESPONSE
+       6. SUCCESS RESPONSE
     ---------------------------------------------- */
     return res.status(200).json({
       success: true,
+      requestId,
       message: "Profile fetched successfully",
       data: response
     });
 
   } catch (error) {
-    console.error("GET_PROFILE_ERROR:", error);
+    /* ---------------------------------------------
+       7. ERROR HANDLING (OBSERVABILITY)
+    ---------------------------------------------- */
+    console.error("GET_PROFILE_ERROR:", {
+      requestId,
+      error: error.message,
+      stack: error.stack
+    });
+
+    // Specific error handling
+    if (error.message === "DB_TIMEOUT") {
+      return res.status(503).json({
+        success: false,
+        requestId,
+        message: "Database timeout. Please try again."
+      });
+    }
 
     return res.status(500).json({
       success: false,
+      requestId,
       message: "Internal Server Error"
     });
   }
