@@ -23,7 +23,11 @@ const employeeSchema = new mongoose.Schema({
     user_name: {
         type: String,
     },
-
+    weeklyOff: [{
+        type: String,
+        enum: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+        default: "Sunday"
+    }],
     empCode: {
         type: String,
 

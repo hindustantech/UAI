@@ -145,6 +145,7 @@ export const createEmployee = async (req, res) => {
             user_name,
             jobInfo,
             shift,
+            weeklyOff,
             salaryStructure,
             bankDetails,
             officeLocation,
@@ -201,6 +202,7 @@ export const createEmployee = async (req, res) => {
         const employeePayload = {
             companyId,
             userId,
+            weeklyOff,
             empCode,
             user_name,
             role: role || "employee",
@@ -290,6 +292,18 @@ export const createEmployee = async (req, res) => {
    Update EMPLOYEE (ENTERPRISE LEVEL)
 ---------------------------------------------- */
 
+
+
+const VALID_DAYS = [
+    "Sunday", "Monday", "Tuesday",
+    "Wednesday", "Thursday", "Friday", "Saturday"
+];
+
+const normalizeDay = (day) => {
+    if (!day) return null;
+    return day.charAt(0).toUpperCase() + day.slice(1).toLowerCase();
+};
+
 export const updateEmployee = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -340,7 +354,7 @@ export const updateEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           3. Build Safe Update Payload (Field Whitelisting)
+           3. Extract Input
         ---------------------------------------------- */
         const {
             user_name,
@@ -348,19 +362,78 @@ export const updateEmployee = async (req, res) => {
             jobInfo,
             salaryStructure,
             bankDetails,
+            shift,
+            weeklyOff,
             officeLocation,
             employmentStatus
         } = req.body;
 
         const updatePayload = {};
 
+        /* ---------------------------------------------
+           4. Basic Fields
+        ---------------------------------------------- */
         if (user_name !== undefined) updatePayload.user_name = user_name;
 
         if (role && ['employee', 'manager', 'hr', 'admin', 'super_admin'].includes(role)) {
             updatePayload.role = role;
         }
 
-        /* -------- Job Info -------- */
+        /* ---------------------------------------------
+           5. SHIFT (Critical Validation)
+        ---------------------------------------------- */
+        if (shift !== undefined) {
+            if (!mongoose.Types.ObjectId.isValid(shift)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid shift ID",
+                });
+            }
+
+            const shiftDoc = await Shift.findOne({
+                _id: shift,
+                companyId
+            }).session(session);
+
+            if (!shiftDoc) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Shift not found or not belongs to your company",
+                });
+            }
+
+            updatePayload.shift = shift;
+        }
+
+        /* ---------------------------------------------
+           6. WEEKLY OFF (Strict Enum Validation)
+        ---------------------------------------------- */
+        if (weeklyOff !== undefined) {
+            if (!Array.isArray(weeklyOff)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "weeklyOff must be an array",
+                });
+            }
+
+            const normalizedDays = weeklyOff.map(normalizeDay);
+
+            const invalidDays = normalizedDays.filter(day => !VALID_DAYS.includes(day));
+
+            if (invalidDays.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid weeklyOff values: ${invalidDays.join(", ")}`,
+                });
+            }
+
+            // remove duplicates
+            updatePayload.weeklyOff = [...new Set(normalizedDays)];
+        }
+
+        /* ---------------------------------------------
+           7. Nested Structures (Safe Merge)
+        ---------------------------------------------- */
         if (jobInfo) {
             updatePayload.jobInfo = {
                 ...existingEmployee.jobInfo.toObject(),
@@ -368,7 +441,6 @@ export const updateEmployee = async (req, res) => {
             };
         }
 
-        /* -------- Salary -------- */
         if (salaryStructure) {
             updatePayload.salaryStructure = {
                 ...existingEmployee.salaryStructure.toObject(),
@@ -376,7 +448,6 @@ export const updateEmployee = async (req, res) => {
             };
         }
 
-        /* -------- Bank -------- */
         if (bankDetails) {
             updatePayload.bankDetails = {
                 ...existingEmployee.bankDetails.toObject(),
@@ -384,7 +455,9 @@ export const updateEmployee = async (req, res) => {
             };
         }
 
-        /* -------- Geo Location -------- */
+        /* ---------------------------------------------
+           8. GEO LOCATION
+        ---------------------------------------------- */
         if (officeLocation?.coordinates) {
             if (!Array.isArray(officeLocation.coordinates) || officeLocation.coordinates.length !== 2) {
                 return res.status(400).json({
@@ -405,7 +478,7 @@ export const updateEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           4. Atomic Update (No Hydration = Faster)
+           9. Atomic Update
         ---------------------------------------------- */
         const updatedEmployee = await Employee.findOneAndUpdate(
             { _id: employeeId, companyId },
@@ -418,7 +491,7 @@ export const updateEmployee = async (req, res) => {
         );
 
         /* ---------------------------------------------
-           5. Commit Transaction
+           10. Commit
         ---------------------------------------------- */
         await session.commitTransaction();
         session.endSession();
