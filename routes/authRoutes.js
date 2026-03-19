@@ -62,7 +62,7 @@ router.delete("/deleteUser", authMiddleware, deleteUser);
 
 router.post('/startAuth', startAuth);
 router.post('/completOtp', completOtp);
-router.post('/completeProfile', authMiddleware, completeProfile);
+router.post('/completeProfile', authMiddleware, upload.single('profileImage'), completeProfile);
 router.post('/restoreAccount', authMiddleware, restoreAccount);
 router.post('/requestAccountDeletion', authMiddleware, requestAccountDeletion);
 router.get('/getDeletionStatus', authMiddleware, getDeletionStatus);

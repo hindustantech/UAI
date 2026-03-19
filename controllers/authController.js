@@ -705,7 +705,7 @@ export const getProfile = async (req, res) => {
        1. AUTH CONTEXT
     ---------------------------------------------- */
     const userId = req.user?._id || req.user?.id;
-    
+
 
     if (!userId) {
       return res.status(400).json({
@@ -1361,16 +1361,8 @@ export const completOtp = async (req, res) => {
 
 export const completeProfile = async (req, res) => {
   try {
-    const userId = req.user.id; // from JWT middleware
-
-    const {
-      name,
-      email,
-      profileImage,
-      data,
-    } = req.body;
-
-    /* ---------- Validation ---------- */
+    const userId = req.user.id;
+    const { name, email, profileImage, data } = req.body;
 
     if (!name && !email && !profileImage && !data) {
       return res.status(400).json({
@@ -1378,11 +1370,14 @@ export const completeProfile = async (req, res) => {
       });
     }
 
-    /* ---------- Email Validation ---------- */
+    const update = {};
 
+    /* ---------- Name ---------- */
+    if (name) update.name = name.trim();
+
+    /* ---------- Email ---------- */
     if (email) {
-      const emailRegex =
-        /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
       if (!emailRegex.test(email)) {
         return res.status(400).json({
@@ -1400,44 +1395,40 @@ export const completeProfile = async (req, res) => {
           message: "Email already in use",
         });
       }
+
+      update.email = email.toLowerCase().trim();
     }
 
-    /* ---------- Build Update Object ---------- */
+    /* ---------- Profile Image ---------- */
+    if (profileImage) {
+      if (profileImage.startsWith("data:image")) {
+        const base64Data = profileImage.split(";base64,").pop();
+        const buffer = Buffer.from(base64Data, "base64");
 
-    const update = {};
+        const result = await uploadToCloudinary(buffer, "profile_images");
 
-    if (name) update.name = name.trim();
+        update.profileImage = result.secure_url;
+      } else {
+        update.profileImage = profileImage;
+      }
+    }
 
-    if (email)
-      update.email = email.toLowerCase().trim();
-
-    if (profileImage)
-      update.profileImage = profileImage;
-
-    if (data && typeof data === "object")
+    /* ---------- Extra Data ---------- */
+    if (data && typeof data === "object") {
       update.data = data;
+    }
 
-    // Mark profile as completed
     update.isProfileCompleted = true;
-
-    /* ---------- Atomic Update ---------- */
 
     const user = await User.findByIdAndUpdate(
       userId,
       { $set: update },
-      {
-        new: true,
-        runValidators: true,
-      }
+      { new: true, runValidators: true }
     ).select("-password -otp");
 
     if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
+      return res.status(404).json({ message: "User not found" });
     }
-
-    /* ---------- Response ---------- */
 
     return res.json({
       message: "Profile completed successfully",
@@ -1445,7 +1436,7 @@ export const completeProfile = async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("COMPLETE_PROFILE_ERROR:", err);
 
     if (err.code === 11000) {
       return res.status(409).json({
@@ -1453,7 +1444,7 @@ export const completeProfile = async (req, res) => {
       });
     }
 
-    res.status(500).json({
+    return res.status(500).json({
       message: "Profile update failed",
       error: err.message,
     });
