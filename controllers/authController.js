@@ -1427,23 +1427,27 @@ export const completOtp = async (req, res) => {
 
 export const completeProfile = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { name, email, profileImage, data } = req.body;
+    const userId = req.user.id; // from JWT middleware
 
-    if (!name && !email && !profileImage && !data) {
+    const {
+      name,
+      email,
+      data,
+    } = req.body;
+
+    /* ---------- Validation ---------- */
+
+    if (!name && !email && !req.file && !data) {
       return res.status(400).json({
         message: "At least one field is required",
       });
     }
 
-    const update = {};
+    /* ---------- Email Validation ---------- */
 
-    /* ---------- Name ---------- */
-    if (name) update.name = name.trim();
-
-    /* ---------- Email ---------- */
     if (email) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const emailRegex =
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
       if (!emailRegex.test(email)) {
         return res.status(400).json({
@@ -1461,97 +1465,62 @@ export const completeProfile = async (req, res) => {
           message: "Email already in use",
         });
       }
-
-      update.email = email.toLowerCase().trim();
     }
 
-    /* ---------- Profile Image ---------- */
-    if (profileImage) {
+    /* ---------- Build Update Object ---------- */
+
+    const update = {};
+
+    if (name) update.name = name.trim();
+
+    if (email)
+      update.email = email.toLowerCase().trim();
+
+    /* ---------- Handle Image Upload ---------- */
+    if (req.file) {
       try {
-        // Check if it's a base64 image (needs upload to Cloudinary)
-        if (profileImage.startsWith("data:image")) {
-          // Extract base64 data and upload to Cloudinary
-          const base64Data = profileImage.split(";base64,").pop();
-          const buffer = Buffer.from(base64Data, "base64");
-
-          // Validate buffer size (e.g., max 5MB)
-          const maxSize = 5 * 1024 * 1024; // 5MB
-          if (buffer.length > maxSize) {
-            return res.status(400).json({
-              message: "Image size too large. Maximum size is 5MB",
-            });
-          }
-
-          // Upload to Cloudinary and get URL
-          const result = await uploadToCloudinary(buffer, "profile_images");
-
-          // Store ONLY the Cloudinary URL in database
-          update.profileImage = result.secure_url;
-
-          // Optional: Delete old profile image from Cloudinary if it exists
-          const currentUser = await User.findById(userId);
-          if (currentUser?.profileImage) {
-            const oldPublicId = extractPublicIdFromUrl(currentUser.profileImage);
-            if (oldPublicId) {
-              // Fire and forget - don't await to avoid slowing down response
-              deleteFromCloudinary(oldPublicId).catch(err =>
-                console.error("Failed to delete old image:", err)
-              );
-            }
-          }
-        }
-        // If it's already a URL (from Cloudinary or other CDN)
-        else if (isValidUrl(profileImage)) {
-          // Validate that it's an image URL (optional)
-          const isImageUrl = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff)$/i.test(profileImage.split('?')[0]);
-
-          if (!isImageUrl) {
-            return res.status(400).json({
-              message: "URL must point to an image file",
-            });
-          }
-
-          update.profileImage = profileImage; // Store the URL directly
-        }
-        else {
-          return res.status(400).json({
-            message: "Invalid profile image format. Must be a base64 image or valid image URL",
-          });
-        }
-      } catch (imageError) {
-        console.error("IMAGE_UPLOAD_ERROR:", imageError);
+        const result = await uploadToCloudinary(req.file.buffer, 'profiles');
+        update.profileImage = result.secure_url;
+      } catch (uploadError) {
         return res.status(400).json({
-          message: "Failed to process profile image",
-          error: imageError.message,
+          message: "Failed to upload profile image",
+          error: uploadError.message
         });
       }
     }
 
-    /* ---------- Extra Data ---------- */
-    if (data && typeof data === "object") {
+    if (data && typeof data === "object")
       update.data = data;
-    }
 
-    // Set profile completion flag
+    // Mark profile as completed
     update.isProfileCompleted = true;
+
+    /* ---------- Atomic Update ---------- */
 
     const user = await User.findByIdAndUpdate(
       userId,
       { $set: update },
-      { new: true, runValidators: true }
+      {
+        new: true,
+        runValidators: true,
+      }
     ).select("-password -otp");
 
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({
+        message: "User not found",
+      });
     }
+
+    /* ---------- Response ---------- */
 
     return res.json({
       message: "Profile completed successfully",
-      user, // user.profileImage will be a URL string, not base64
+      user,
     });
 
   } catch (err) {
-    console.error("COMPLETE_PROFILE_ERROR:", err);
+    console.error(err);
 
     if (err.code === 11000) {
       return res.status(409).json({
@@ -1559,22 +1528,12 @@ export const completeProfile = async (req, res) => {
       });
     }
 
-    return res.status(500).json({
+    res.status(500).json({
       message: "Profile update failed",
       error: err.message,
     });
   }
 };
-
-// Helper function to validate URLs
-function isValidUrl(string) {
-  try {
-    new URL(string);
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
 
 export const findUserByReferralOwner = async (req, res) => {
   try {
