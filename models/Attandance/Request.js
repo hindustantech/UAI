@@ -22,6 +22,7 @@ const attendanceRequestSchema = new Schema(
             enum: [
                 "leave",
                 "punch_in_out",
+                "punch_in",
                 "punch_in_and_out"
             ],
             required: true,
