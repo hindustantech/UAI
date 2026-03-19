@@ -107,9 +107,8 @@ export const getCompanyByUser = async (req, res) => {
 };
 
 
-/* ---------------------------------------------
-   CREATE EMPLOYEE (ENTERPRISE LEVEL)
----------------------------------------------- */
+// ?   CREATE EMPLOYEE (ENTERPRISE LEVEL)
+// ---------------------------------------------- */
 export const createEmployee = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
