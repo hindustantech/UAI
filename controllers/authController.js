@@ -10,6 +10,7 @@ import admin from '../utils/firebaseadmin.js';
 import mongoose from "mongoose";
 import logger from '../utils/logger.js';
 import PatnerProfile from '../models/PatnerProfile.js';
+import Employee from '../models/Attandance/Employee.js';
 import jwt from 'jsonwebtoken';
 import QRCode from "qrcode";
 
@@ -696,29 +697,90 @@ export const getUserProfile = async (req, res) => {
 
 
 
+
+
 export const getProfile = async (req, res) => {
   try {
-    const userId = req.user?.id; // from auth middleware
+    /* ---------------------------------------------
+       1. AUTH CONTEXT
+    ---------------------------------------------- */
+    const userId = req.user?._id || req.user?.id;
+    const companyId = req.user?.companyId || req.user?._id; // for company users
 
     if (!userId) {
-      return res.status(400).json({ success: false, message: "User ID is required" });
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required"
+      });
     }
 
-    const user = await User.findById(userId)
-      .select('name phone email profileImage couponCount type referalCode referredBy')
-      .lean();
+    /* ---------------------------------------------
+       2. PARALLEL FETCH (PERFORMANCE OPTIMIZED)
+    ---------------------------------------------- */
+    const [user, employee] = await Promise.all([
+      User.findById(userId)
+        .select("name phone email profileImage couponCount type referalCode referredBy")
+        .lean(),
 
+      Employee.findOne({
+        userId: userId,
+        companyId: companyId
+      })
+        .select(`
+          empCode role weeklyOff employmentStatus
+          jobInfo salaryStructure bankDetails officeLocation
+        `)
+        .populate("jobInfo.reportingManager", "name email")
+        .populate("shift", "name startTime endTime")
+        .lean()
+    ]);
+
+    /* ---------------------------------------------
+       3. VALIDATION
+    ---------------------------------------------- */
     if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
     }
 
-    res.status(200).json({ success: true, data: user });
-  } catch (error) {
+    /* ---------------------------------------------
+       4. RESPONSE STRUCTURE (ENTERPRISE FORMAT)
+    ---------------------------------------------- */
+    const response = {
+      user: {
+        id: user._id,
+        name: user.name,
+        phone: user.phone,
+        email: user.email,
+        profileImage: user.profileImage,
+        couponCount: user.couponCount,
+        type: user.type,
+        referalCode: user.referalCode,
+        referredBy: user.referredBy
+      },
+      employee: employee || null // safe fallback
+    };
 
-    res.status(500).json({ success: false, message: "Server error" });
+    /* ---------------------------------------------
+       5. RESPONSE
+    ---------------------------------------------- */
+    return res.status(200).json({
+      success: true,
+      message: "Profile fetched successfully",
+      data: response
+    });
+
+  } catch (error) {
+    console.error("GET_PROFILE_ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
+    });
   }
 };
-
 
 export const updateProfileImage = async (req, res) => {
   try {
