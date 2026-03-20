@@ -1469,11 +1469,6 @@ export const startAdminAuth = async (req, res) => {
       });
     }
 
-
-  
-
-    
-
     /* ---------- Send OTP ---------- */
     const otpResponse = await sendWhatsAppOtp(phone);
 
@@ -1502,7 +1497,7 @@ export const startAdminAuth = async (req, res) => {
       message: "OTP sent successfully",
       userId: user._id,
       phone: user.phone,
-      expiresIn: 300 // OTP valid for 5 minutes
+      
     });
 
   } catch (err) {
@@ -1527,7 +1522,7 @@ export const completeAdminOtp = async (req, res) => {
       });
     }
 
-    if (!otp.match(/^\d{6}$/)) {
+    if (!otp.match(/^\d{4}$/)) {
       return res.status(400).json({
         success: false,
         message: "Invalid OTP format. OTP must be 6 digits."
