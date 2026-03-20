@@ -56,6 +56,44 @@ export const createPlan = async (req, res) => {
     }
 };
 
+
+/**
+ * @desc Get Plan By ID
+ * @route GET /api/plan/:id
+ */
+export const getPlanById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid Plan ID"
+            });
+        }
+
+        const plan = await Plan.findById(id);
+
+        if (!plan) {
+            return res.status(404).json({
+                success: false,
+                message: "Plan not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: plan
+        });
+
+    } catch (error) {
+        console.error("Get Plan By ID Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        });
+    }
+};
 /**
  * @desc Update Plan
  * @route PUT /api/plan/:id
