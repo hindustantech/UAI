@@ -18,6 +18,7 @@ import { startAttendanceCron } from './controllers/attandance/attendanceAutoClos
 import categoryAdvertisment from './routes/Attandance/categoryAdvertisment.js'
 import advertisment from './routes/Attandance/Advertisement.Routes.js'
 import payment from './routes/Attandance/Payment.js'
+import planRoutes from './routes/plan.js'
 import shift from './routes/Attandance/Shift.js'
 import './models/Attandance/Holiydaycron.js'
 dotenv.config();
@@ -54,7 +55,7 @@ app.use('/api/employee', employee);
 app.use('/api/categoryAdvertisment', categoryAdvertisment);
 app.use('/api/advertisements', advertisment);
 // API routes
-
+app.use('/api/plan', planRoutes);
 app.use('/api/appsetting', appsettingroutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/shift', shift);
