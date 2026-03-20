@@ -2,12 +2,11 @@ import mongoose from "mongoose";
 
 const featureSchema = new mongoose.Schema({
     key: {
-        type: String, // e.g. "MAX_EMPLOYEES", "ATTENDANCE_REPORTS"
+        type: String,
         required: true,
     },
     value: {
         type: mongoose.Schema.Types.Mixed,
-        // number | boolean | string (flexible for scaling)
         required: true,
     },
     description: {
@@ -22,62 +21,47 @@ const planSchema = new mongoose.Schema({
         unique: true,
         trim: true,
     },
-
     price: {
         type: Number,
         required: true,
         min: 0,
     },
-
     discount: {
         type: Number,
         default: 0,
         min: 0,
         max: 100,
     },
-
     finalPrice: {
         type: Number,
     },
-
     validityDays: {
         type: Number,
-        required: true, // e.g. 30, 90, 365
+        required: true,
     },
-
-    features: [featureSchema],
-
-    // Example:
-    // [
-    //   { key: "MAX_EMPLOYEES", value: 50 },
-    //   { key: "CAN_EXPORT_REPORT", value: true }
-    // ]
-
+    features: [featureSchema],   // Array of objects
     isActive: {
         type: Boolean,
         default: true,
     },
-
     planType: {
         type: String,
-        enum: ["FREE", "BASIC", "PREMIUM", "ENTERPRISE"],
+        enum: ["FREE", "BASIC", "STANDARD", "PREMIUM", "ENTERPRISE"],
         default: "BASIC",
+        uppercase: true,
     },
-
     metadata: {
         type: Map,
         of: String,
     }
-
 }, {
     timestamps: true
 });
 
-
-// Middleware for auto final price calculation
+// Auto calculate finalPrice before saving
 planSchema.pre("save", function (next) {
     if (this.discount > 0) {
-        this.finalPrice = this.price - (this.price * this.discount / 100);
+        this.finalPrice = Math.round(this.price * (1 - this.discount / 100));
     } else {
         this.finalPrice = this.price;
     }

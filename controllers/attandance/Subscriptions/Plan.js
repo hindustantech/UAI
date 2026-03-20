@@ -7,17 +7,8 @@ import mongoose from "mongoose";
  */
 export const createPlan = async (req, res) => {
     try {
-        const {
-            name,
-            price,
-            discount = 0,
-            validityDays,
-            features,
-            planType,
-            metadata
-        } = req.body;
+        const { name, price, discount = 0, validityDays, features = [], planType = "BASIC" } = req.body;
 
-        // Validation
         if (!name || !price || !validityDays) {
             return res.status(400).json({
                 success: false,
@@ -25,23 +16,29 @@ export const createPlan = async (req, res) => {
             });
         }
 
-        // Check duplicate
-        const existing = await Plan.findOne({ name });
+        // Check duplicate (case insensitive)
+        const existing = await Plan.findOne({ name: { $regex: new RegExp(`^${name}$`, "i") } });
         if (existing) {
             return res.status(400).json({
                 success: false,
-                message: "Plan already exists"
+                message: "Plan with this name already exists"
             });
         }
 
+        // Convert simple string features to schema format
+        const formattedFeatures = features.map((feature, index) => ({
+            key: `FEATURE_${index + 1}`,
+            value: feature,
+            description: feature
+        }));
+
         const plan = await Plan.create({
-            name,
-            price,
-            discount,
-            validityDays,
-            features,
-            planType,
-            metadata
+            name: name.trim(),
+            price: Number(price),
+            discount: Number(discount),
+            validityDays: Number(validityDays),
+            features: formattedFeatures,
+            planType: planType.toUpperCase(),
         });
 
         return res.status(201).json({
@@ -59,7 +56,6 @@ export const createPlan = async (req, res) => {
     }
 };
 
-
 /**
  * @desc Update Plan
  * @route PUT /api/plan/:id
@@ -75,9 +71,21 @@ export const updatePlan = async (req, res) => {
             });
         }
 
+        const { features = [], planType, ...rest } = req.body;
+
+        const formattedFeatures = features.map((feature, index) => ({
+            key: `FEATURE_${index + 1}`,
+            value: feature,
+            description: feature
+        }));
+
         const updatedPlan = await Plan.findByIdAndUpdate(
             id,
-            req.body,
+            {
+                ...rest,
+                features: formattedFeatures,
+                planType: planType ? planType.toUpperCase() : undefined,
+            },
             { new: true, runValidators: true }
         );
 
@@ -103,9 +111,8 @@ export const updatePlan = async (req, res) => {
     }
 };
 
-
 /**
- * @desc Delete Plan (Hard Delete)
+ * @desc Delete Plan
  * @route DELETE /api/plan/:id
  */
 export const deletePlan = async (req, res) => {
@@ -113,19 +120,13 @@ export const deletePlan = async (req, res) => {
         const { id } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid Plan ID"
-            });
+            return res.status(400).json({ success: false, message: "Invalid Plan ID" });
         }
 
         const deleted = await Plan.findByIdAndDelete(id);
 
         if (!deleted) {
-            return res.status(404).json({
-                success: false,
-                message: "Plan not found"
-            });
+            return res.status(404).json({ success: false, message: "Plan not found" });
         }
 
         return res.status(200).json({
@@ -135,16 +136,12 @@ export const deletePlan = async (req, res) => {
 
     } catch (error) {
         console.error("Delete Plan Error:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Internal Server Error"
-        });
+        return res.status(500).json({ success: false, message: "Internal Server Error" });
     }
 };
 
-
 /**
- * @desc Toggle Active/Inactive
+ * @desc Toggle Plan Status
  * @route PATCH /api/plan/toggle/:id
  */
 export const togglePlanStatus = async (req, res) => {
@@ -153,10 +150,7 @@ export const togglePlanStatus = async (req, res) => {
 
         const plan = await Plan.findById(id);
         if (!plan) {
-            return res.status(404).json({
-                success: false,
-                message: "Plan not found"
-            });
+            return res.status(404).json({ success: false, message: "Plan not found" });
         }
 
         plan.isActive = !plan.isActive;
@@ -170,52 +164,35 @@ export const togglePlanStatus = async (req, res) => {
 
     } catch (error) {
         console.error("Toggle Plan Error:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Internal Server Error"
-        });
+        return res.status(500).json({ success: false, message: "Internal Server Error" });
     }
 };
 
-
 /**
- * @desc Get All Plans (with pagination + filters)
+ * @desc Get All Plans
  * @route GET /api/plan
  */
 export const getAllPlans = async (req, res) => {
     try {
-        let {
-            page = 1,
-            limit = 10,
-            search,
-            isActive,
-            planType,
-            sortBy = "createdAt",
-            sortOrder = "desc"
-        } = req.query;
+        let { page = 1, limit = 15, search, isActive, planType } = req.query;
 
         page = parseInt(page);
         limit = parseInt(limit);
 
         const query = {};
 
-        // Search by name
         if (search) {
             query.name = { $regex: search, $options: "i" };
         }
-
-        // Filter Active/Inactive
         if (isActive !== undefined) {
             query.isActive = isActive === "true";
         }
-
-        // Filter Plan Type
         if (planType) {
-            query.planType = planType;
+            query.planType = planType.toUpperCase();
         }
 
         const plans = await Plan.find(query)
-            .sort({ [sortBy]: sortOrder === "asc" ? 1 : -1 })
+            .sort({ createdAt: -1 })
             .skip((page - 1) * limit)
             .limit(limit);
 
@@ -233,45 +210,6 @@ export const getAllPlans = async (req, res) => {
 
     } catch (error) {
         console.error("Get All Plans Error:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Internal Server Error"
-        });
-    }
-};
-
-
-/**
- * @desc Get Plan By ID
- * @route GET /api/plan/:id
- */
-export const getPlanById = async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid Plan ID"
-            });
-        }
-
-        const plan = await Plan.findById(id);
-
-        if (!plan) {
-            return res.status(404).json({
-                success: false,
-                message: "Plan not found"
-            });
-        }
-
-        return res.status(200).json({
-            success: true,
-            data: plan
-        });
-
-    } catch (error) {
-        console.error("Get Plan By ID Error:", error);
         return res.status(500).json({
             success: false,
             message: "Internal Server Error"
