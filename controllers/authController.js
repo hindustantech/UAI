@@ -1424,6 +1424,176 @@ export const completOtp = async (req, res) => {
   }
 };
 
+export const startAdminAuth = async (req, res) => {
+  try {
+    const { phone, type } = req.body;
+
+    /* ---------- Validation ---------- */
+    if (!phone || !type) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone and type are required"
+      });
+    }
+
+    // Only allow super_admin type
+    if (type !== 'super_admin') {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid access type"
+      });
+    }
+
+    const cleanPhone = phone.trim();
+
+    // Validate phone format (basic validation)
+    const phoneRegex = /^[0-9]{10,15}$/;
+    if (!phoneRegex.test(cleanPhone.replace(/[^0-9]/g, ''))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid phone number format"
+      });
+    }
+
+    /* ---------- Find Existing Super Admin ---------- */
+    const user = await User.findOne({
+      phone: cleanPhone,
+      type: 'super_admin' // Ensure only super_admin can login through this endpoint
+    });
+
+    // Don't create new user - super admin must exist in system
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials. Super admin account not found."
+      });
+    }
+
+
+  
+
+    
+
+    /* ---------- Send OTP ---------- */
+    const otpResponse = await sendWhatsAppOtp(phone);
+
+    if (!otpResponse.success) {
+      // Log the error for monitoring
+      console.error(`Failed to send OTP to super admin ${phone}:`, otpResponse.error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send OTP. Please try again later.'
+      });
+    }
+
+    /* ---------- Update User with OTP Info ---------- */
+    await User.findByIdAndUpdate(
+      user._id,
+      {
+        whatsapp_uid: otpResponse.data,
+        lastOtpSentAt: new Date(),
+      }
+    );
+
+    /* ---------- Response ---------- */
+    return res.json({
+      success: true,
+      message: "OTP sent successfully",
+      userId: user._id,
+      phone: user.phone,
+      expiresIn: 300 // OTP valid for 5 minutes
+    });
+
+  } catch (err) {
+    console.error('Admin auth start error:', err);
+
+    res.status(500).json({
+      success: false,
+      message: "Authentication failed. Please try again later."
+    });
+  }
+};
+
+export const completeAdminOtp = async (req, res) => {
+  try {
+    const { userId, otp } = req.body;
+
+    /* ---------- Validation ---------- */
+    if (!userId || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID and OTP are required"
+      });
+    }
+
+    if (!otp.match(/^\d{6}$/)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP format. OTP must be 6 digits."
+      });
+    }
+
+    /* ---------- Find User ---------- */
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Verify this is a super admin account
+    if (user.type !== 'super_admin') {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Invalid account type."
+      });
+    }
+
+ 
+
+
+
+    /* ---------- Verify OTP ---------- */
+    const verifyResponse = await verifyWhatsAppOtp(user.whatsapp_uid, otp);
+
+    if (!verifyResponse.success) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid OTP. ${remainingAttempts} attempts remaining.`,
+        remainingAttempts: remainingAttempts
+      });
+    }
+
+    /* ---------- Generate JWT Token ---------- */
+    const token = generateToken(user._id, user.type);
+
+   
+ 
+
+    /* ---------- Response with Minimal User Info ---------- */
+    return res.json({
+      success: true,
+      message: "Login successful",
+      token,
+      user: {
+        id: user._id,
+        phone: user.phone,
+        type: user.type,
+      }
+    });
+
+  } catch (err) {
+    console.error('Admin OTP verification error:', err);
+
+    res.status(500).json({
+      success: false,
+      message: "OTP verification failed. Please try again."
+    });
+  }
+};
 
 export const completeProfile = async (req, res) => {
   try {

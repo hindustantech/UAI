@@ -30,7 +30,8 @@ import {
     restoreAccount,
     requestAccountDeletion,
     getDeletionStatus,
-    generateTheQRCode
+    generateTheQRCode,
+    startAdminAuth,completeAdminOtp
 } from '../controllers/authController.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import profileUploadMiddleware from '../middlewares/profileUploadMiddleware.js';
@@ -62,6 +63,8 @@ router.delete("/deleteUser", authMiddleware, deleteUser);
 
 router.post('/startAuth', startAuth);
 router.post('/completOtp', completOtp);
+router.post('/startAdminAuth', startAdminAuth);
+router.post('/completeAdminOtp', completeAdminOtp);
 router.post('/completeProfile',
     authMiddleware,
     upload.single('profileImage'),
