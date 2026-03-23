@@ -37,10 +37,10 @@ router.get("/statistics", getRequestStatistics);
 router.get("/:requestId", getAttendanceRequestById);
 
 // Cancel a pending request (only by the user who created it)
-router.put("/:requestId/cancel", cancelAttendanceRequest);
+router.put("/:requestId/cancel/:companyId", cancelAttendanceRequest);
 
 // Update a pending request
-router.put("/:requestId", updateAttendanceRequest);
+router.put("/:requestId/update/:companyId", updateAttendanceRequest);
 
 /*
 ====================================

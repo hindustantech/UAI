@@ -566,9 +566,9 @@ export const rejectAttendanceRequest = async (req, res) => {
 */
 export const cancelAttendanceRequest = async (req, res) => {
     try {
-        const { requestId } = req.params;
+        const { requestId,companyId } = req.params;
         const userId = req.user._id;
-        const companyId = req.user.companyId;
+  
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             return res.status(400).json({
@@ -640,9 +640,9 @@ export const cancelAttendanceRequest = async (req, res) => {
 */
 export const updateAttendanceRequest = async (req, res) => {
     try {
-        const { requestId } = req.params;
+        const { requestId ,companyId} = req.params;
         const userId = req.user._id;
-        const companyId = req.user.companyId;
+
         const updates = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
