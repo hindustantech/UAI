@@ -60,7 +60,7 @@ router.get(
     getAttendance
 );
 router.get(
-    "/getAttendanceSummary",
+    "/getAttendanceSummary/:companyId",
     authMiddleware,
     getAttendanceSummary
 );
