@@ -31,9 +31,7 @@ const attendanceRequestSchema = new Schema(
 
         reason: {
             type: String,
-            required: true,
-            trim: true,
-            maxlength: 500
+           
         },
 
         /*
