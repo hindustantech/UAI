@@ -20,8 +20,8 @@ export const createAttendanceRequest = async (req, res) => {
         const userId = req.user._id;
 
         // First get the employee record for this user
-        const employee = await Employee.findOne({ 
-            userId: userId 
+        const employee = await Employee.findOne({
+            userId: userId
         });
 
         if (!employee) {
@@ -109,7 +109,7 @@ export const createAttendanceRequest = async (req, res) => {
         }
 
         const request = await AttendanceRequest.create({
-            companyId:employee.companyId,
+            companyId: employee.companyId,
             employeeId: employee._id, // Use employee _id
             requestType,
             reason,
@@ -161,7 +161,7 @@ export const getAttendanceRequests = async (req, res) => {
 
         const userId = req.user._id;
         const userRole = req.user.role || req.user.type;
-      
+
 
         // Build query based on user role
         let query = { companyId };
@@ -393,12 +393,56 @@ export const approveAttendanceRequest = async (req, res) => {
             }).session(session);
 
             if (!attendance) {
+                // Get employee details for office location
+                const employee = await Employee.findById(request.employeeId).session(session);
+
+                // Try to find previous day's attendance to copy location
+                const previousDay = new Date(date);
+                previousDay.setDate(previousDay.getDate() - 1);
+                previousDay.setHours(0, 0, 0, 0);
+
+                const previousAttendance = await Attendance.findOne({
+                    companyId: request.companyId,
+                    employeeId: request.employeeId,
+                    date: {
+                        $gte: previousDay,
+                        $lt: new Date(previousDay.getTime() + 24 * 60 * 60 * 1000)
+                    }
+                }).session(session);
+
+                // Set default geoLocation
+                let geoLocation = {
+                    type: "Point",
+                    coordinates: [0, 0], // Default coordinates
+                    verified: false,
+                    source: "manual"
+                };
+
+                // Use previous attendance location if available
+                if (previousAttendance && previousAttendance.geoLocation && previousAttendance.geoLocation.coordinates) {
+                    geoLocation = {
+                        ...previousAttendance.geoLocation,
+                        verified: false,
+                        source: "manual"
+                    };
+                }
+                // Otherwise use employee's office location if available
+                else if (employee && employee.officeLocation && employee.officeLocation.coordinates) {
+                    geoLocation = {
+                        type: employee.officeLocation.type || "Point",
+                        coordinates: employee.officeLocation.coordinates,
+                        verified: false,
+                        source: "manual"
+                    };
+                }
+
                 attendance = new Attendance({
                     companyId: request.companyId,
                     employeeId: request.employeeId,
                     date: date,
                     status: "present",
-                    approvalStatus: "approved"
+                    approvalStatus: "approved",
+                    geoLocation: geoLocation
                 });
             }
 
@@ -451,6 +495,7 @@ export const approveAttendanceRequest = async (req, res) => {
 
     } catch (error) {
         await session.abortTransaction();
+        console.error("Error in approveAttendanceRequest:", error);
         return res.status(500).json({
             success: false,
             message: error.message
@@ -566,9 +611,9 @@ export const rejectAttendanceRequest = async (req, res) => {
 */
 export const cancelAttendanceRequest = async (req, res) => {
     try {
-        const { requestId,companyId } = req.params;
+        const { requestId, companyId } = req.params;
         const userId = req.user._id;
-  
+
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             return res.status(400).json({
@@ -640,7 +685,7 @@ export const cancelAttendanceRequest = async (req, res) => {
 */
 export const updateAttendanceRequest = async (req, res) => {
     try {
-        const { requestId ,companyId} = req.params;
+        const { requestId, companyId } = req.params;
         const userId = req.user._id;
 
         const updates = req.body;
@@ -801,8 +846,8 @@ export const bulkApproveRequests = async (req, res) => {
                                 date: d
                             },
                             {
-                                $set: { 
-                                    status: "leave", 
+                                $set: {
+                                    status: "leave",
                                     approvalStatus: "approved",
                                     remarks: `Leave approved via bulk action`
                                 }
