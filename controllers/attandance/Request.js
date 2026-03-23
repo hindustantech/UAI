@@ -160,13 +160,13 @@ export const getAttendanceRequests = async (req, res) => {
         } = req.query;
 
         const userId = req.user._id;
-        const userRole = req.user.role;
+        const userRole = req.user.role || req.user.type;
       
 
         // Build query based on user role
         let query = { companyId };
 
-        if (userRole === "admin" || userRole === "manager") {
+        if (userRole === "partner" || userRole === "manager") {
             // Admins can see all requests for their company
             // No need to filter by employee
         } else {
