@@ -34,7 +34,7 @@ export const getCompanyByUser = async (req, res) => {
 
             if (partnerProfile) {
                 companyDetails = {
-                    companyId: partnerProfile._id,
+                    companyId: partnerProfile.User_id,
                     companyName: partnerProfile.firm_name,
                     companyLogo: partnerProfile.logo,
                     email: partnerProfile.email,
