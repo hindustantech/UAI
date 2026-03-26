@@ -21,6 +21,7 @@ import payment from './routes/Attandance/Payment.js'
 import planRoutes from './routes/plan.js'
 import shift from './routes/Attandance/Shift.js'
 import './models/Attandance/Holiydaycron.js'
+import ExportRoutes from './routes/Attandance/Export/attendanceRoutes.js'
 dotenv.config();
 await connectDB();
 // START BACKGROUND WORKER HERE
@@ -54,6 +55,7 @@ app.use('/api/attendance', attandance);
 app.use('/api/employee', employee);
 app.use('/api/categoryAdvertisment', categoryAdvertisment);
 app.use('/api/advertisements', advertisment);
+app.use('/api/ExportRoutes', ExportRoutes);
 // API routes
 app.use('/api/plan', planRoutes);
 app.use('/api/appsetting', appsettingroutes);
