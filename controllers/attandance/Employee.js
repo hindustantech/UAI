@@ -233,6 +233,7 @@ export const createEmployee = async (req, res) => {
                     coordinates: officeLocation.coordinates,
                     radius: officeLocation.radius || 100,
                     manual: officeLocation.manual,
+                    locationtype: officeLocation.locationtype,
                     
                 }
                 : undefined,
