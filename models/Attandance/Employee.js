@@ -84,7 +84,7 @@ const employeeSchema = new mongoose.Schema({
         },
         locationtype: {
             type: String,
-            enum:['current','emp']
+            enum:['current','employee']
         },
         radius: {
             type: Number // meters
