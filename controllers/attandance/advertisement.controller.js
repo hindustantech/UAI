@@ -10,7 +10,7 @@ import path from 'path';
 // @access  Private/Admin
 export const createAdvertisement = async (req, res) => {
     try {
-        const { title, description, linkUrl, category, status } = req.body;
+        const { title, description, linkUrl, category, status, companyId } = req.body;
 
         // Validate required fields
         if (!title || !description || !linkUrl || !category) {
@@ -57,6 +57,7 @@ export const createAdvertisement = async (req, res) => {
         const advertisement = await Advertistment.create({
             title,
             description,
+            companyId,
             imageUrl,
             linkUrl,
             category,
@@ -89,7 +90,7 @@ export const createAdvertisement = async (req, res) => {
 export const updateAdvertisement = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, description, linkUrl, category, status } = req.body;
+        const { title, description, linkUrl, category, status, companyId } = req.body;
 
         // Validate ID
         if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -121,6 +122,7 @@ export const updateAdvertisement = async (req, res) => {
 
         // Prepare update data
         const updateData = {
+            companyId: companyId || advertisement.companyId,
             title: title || advertisement.title,
             description: description || advertisement.description,
             linkUrl: linkUrl || advertisement.linkUrl,
