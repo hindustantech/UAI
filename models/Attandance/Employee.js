@@ -90,7 +90,7 @@ const employeeSchema = new mongoose.Schema({
             type: Number // meters
         },
         manual: {
-            type: String,
+            type: String,  
         }
     },
     employmentStatus: {
