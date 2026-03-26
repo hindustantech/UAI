@@ -234,7 +234,7 @@ export const createEmployee = async (req, res) => {
                     radius: officeLocation.radius || 100,
                     manual: officeLocation.manual,
                     locationtype: officeLocation.locationtype,
-                    
+
                 }
                 : undefined,
 
@@ -468,8 +468,10 @@ export const updateEmployee = async (req, res) => {
 
             updatePayload.officeLocation = {
                 type: "Point",
-                coordinates: officeLocation.coordinates,
-                radius: officeLocation.radius || existingEmployee.officeLocation?.radius || 100
+                coordinates: officeLocation.coordinates||xistingEmployee.officeLocation?.coordinates,
+                radius: officeLocation.radius || existingEmployee.officeLocation?.radius || 100,
+                manual: officeLocation.manual || existingEmployee.officeLocation?.manual || 'IND',
+                locationtype: officeLocation.locationtype || existingEmployee.officeLocation?.locationtype || 'IND',
             };
         }
 
