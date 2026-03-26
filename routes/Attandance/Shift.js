@@ -30,7 +30,6 @@ const router = express.Router();
 router.post(
     "/",
     authMiddleware,
-    // checkPermission("shift.create"),
     createShift
 );
 

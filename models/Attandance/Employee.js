@@ -10,6 +10,7 @@ const employeeSchema = new mongoose.Schema({
         required: true,
         index: true
     },
+    
     shift: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Shift",
@@ -83,10 +84,11 @@ const employeeSchema = new mongoose.Schema({
         },
         radius: {
             type: Number // meters
+        },
+        manual:{
+            type:String,
         }
-    }
-
-    ,
+    },
     employmentStatus: {
         type: String,
         enum: ["active", "suspended", "terminated", "resigned"],

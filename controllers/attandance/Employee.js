@@ -191,9 +191,7 @@ export const createEmployee = async (req, res) => {
             });
         }
 
-        /* ---------------------------------------------
-           5. Generate Employee Code
-        ---------------------------------------------- */
+
 
         /* ---------------------------------------------
            6. Build Employee Object
@@ -234,6 +232,8 @@ export const createEmployee = async (req, res) => {
                     type: "Point",
                     coordinates: officeLocation.coordinates,
                     radius: officeLocation.radius || 100,
+                    manual: officeLocation.manual,
+                    
                 }
                 : undefined,
 

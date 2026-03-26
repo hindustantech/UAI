@@ -213,7 +213,7 @@ export const verifyPayment = async (req, res) => {
             },
             autoRenew: false,
             usage: {
-                employeesUsed: 0,
+                employeesUsed:  plan.empCount,
             },
             isActive: true,
         });
