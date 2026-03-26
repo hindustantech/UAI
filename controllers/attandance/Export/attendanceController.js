@@ -401,6 +401,221 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
     }
 };
 
+// controllers/attendanceController.js
+
+/**
+ * Generate attendance summary report with statistics
+ * @param {Object} req - Request object
+ * @param {Object} res - Response object
+ */
+export const generateAttendanceSummaryCSV = async (req, res) => {
+    try {
+        const {
+            startDate,
+            endDate,
+            department,
+            employeeCode
+        } = req.query;
+
+        const companyId=req.user._id
+        // Validate required fields
+        if (!companyId || !startDate || !endDate) {
+            return res.status(400).json({
+                success: false,
+                message: "companyId, startDate, and endDate are required"
+            });
+        }
+
+        // Parse dates
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+
+        // Build employee filter
+        const employeeFilter = { companyId, employmentStatus: "active" };
+        if (department) employeeFilter["jobInfo.department"] = department;
+        if (employeeCode) employeeFilter.empCode = employeeCode;
+
+        // Fetch employees with their shift and weekly off details
+        const employees = await Employee.find(employeeFilter)
+            .populate("shift")
+            .lean();
+
+        if (!employees.length) {
+            return res.status(404).json({
+                success: false,
+                message: "No employees found"
+            });
+        }
+
+        // Fetch attendance records for the date range
+        const attendanceRecords = await Attendance.find({
+            companyId,
+            employeeId: { $in: employees.map(emp => emp._id) },
+            date: { $gte: start, $lte: end }
+        }).lean();
+
+        // Create a map for quick attendance lookup
+        const attendanceMap = new Map();
+        attendanceRecords.forEach(record => {
+            const key = `${record.employeeId}_${record.date.toISOString().split('T')[0]}`;
+            attendanceMap.set(key, record);
+        });
+
+        // Get all dates in range
+        const dateRange = [];
+        let currentDate = new Date(start);
+        while (currentDate <= end) {
+            dateRange.push(new Date(currentDate));
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        const totalWorkingDays = dateRange.length;
+
+        // Prepare summary data
+        const summaryData = [];
+
+        for (const employee of employees) {
+            // Get employee's weekly off days
+            const weeklyOffDays = employee.weeklyOff || ["Sunday"];
+
+            let presentCount = 0;
+            let absentCount = 0;
+            let leaveCount = 0;
+            let weekOffCount = 0;
+            let halfDayCount = 0;
+            let holidayCount = 0;
+            let totalWorkingHours = 0;
+            let totalWorkingMinutes = 0;
+            let totalOvertimeMinutes = 0;
+            let totalLateMinutes = 0;
+
+            // Calculate statistics for each date
+            for (const date of dateRange) {
+                const dateKey = date.toISOString().split('T')[0];
+                const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'long' });
+                const attendanceKey = `${employee._id}_${dateKey}`;
+                const attendance = attendanceMap.get(attendanceKey);
+                const isWeeklyOff = weeklyOffDays.includes(dayOfWeek);
+
+                if (isWeeklyOff) {
+                    weekOffCount++;
+                }
+                else if (attendance) {
+                    switch (attendance.status) {
+                        case "leave":
+                            leaveCount++;
+                            break;
+                        case "half_day":
+                            halfDayCount++;
+                            presentCount++; // Count half day as present but with reduced hours
+                            if (attendance.workSummary?.totalMinutes) {
+                                totalWorkingMinutes += attendance.workSummary.totalMinutes;
+                                totalWorkingHours += attendance.workSummary.totalMinutes / 60;
+                            }
+                            if (attendance.workSummary?.overtimeMinutes) {
+                                totalOvertimeMinutes += attendance.workSummary.overtimeMinutes;
+                            }
+                            if (attendance.workSummary?.lateMinutes) {
+                                totalLateMinutes += attendance.workSummary.lateMinutes;
+                            }
+                            break;
+                        case "holiday":
+                            holidayCount++;
+                            break;
+                        default: // present
+                            presentCount++;
+                            if (attendance.workSummary?.totalMinutes) {
+                                totalWorkingMinutes += attendance.workSummary.totalMinutes;
+                                totalWorkingHours += attendance.workSummary.totalMinutes / 60;
+                            }
+                            if (attendance.workSummary?.overtimeMinutes) {
+                                totalOvertimeMinutes += attendance.workSummary.overtimeMinutes;
+                            }
+                            if (attendance.workSummary?.lateMinutes) {
+                                totalLateMinutes += attendance.workSummary.lateMinutes;
+                            }
+                            break;
+                    }
+                }
+                else {
+                    absentCount++;
+                }
+            }
+
+            // Calculate average working hours (only for days actually worked)
+            const actualWorkedDays = presentCount + halfDayCount;
+            const avgWorkingHours = actualWorkedDays > 0
+                ? (totalWorkingMinutes / actualWorkedDays / 60).toFixed(2)
+                : 0;
+
+            // Calculate attendance percentage
+            const totalPresentableDays = totalWorkingDays - weekOffCount - holidayCount;
+            const attendancePercentage = totalPresentableDays > 0
+                ? ((presentCount + halfDayCount) / totalPresentableDays * 100).toFixed(2)
+                : 0;
+
+            summaryData.push({
+                "Emp Code": employee.empCode,
+                "Emp Name": employee.user_name || employee.userId?.name || "N/A",
+                "Department": employee.jobInfo?.department || "N/A",
+                "Designation": employee.jobInfo?.designation || "N/A",
+                "Total Working Days": totalWorkingDays,
+                "Present": presentCount,
+                "Half Day": halfDayCount,
+                "Absent": absentCount,
+                "Leave": leaveCount,
+                "Week Off": weekOffCount,
+                "Holiday": holidayCount,
+                "Total Working Hours": totalWorkingHours.toFixed(2),
+                "Average Working Hours": avgWorkingHours,
+                "Total Overtime (Hours)": (totalOvertimeMinutes / 60).toFixed(2),
+                "Total Late (Minutes)": totalLateMinutes,
+                "Attendance Percentage": `${attendancePercentage}%`
+            });
+        }
+
+        // Define CSV fields in exact order
+        const fields = [
+            "Emp Code",
+            "Emp Name",
+            "Department",
+            "Designation",
+            "Total Working Days",
+            "Present",
+            "Half Day",
+            "Absent",
+            "Leave",
+            "Week Off",
+            "Holiday",
+            "Total Working Hours",
+            "Average Working Hours",
+            "Total Overtime (Hours)",
+            "Total Late (Minutes)",
+            "Attendance Percentage"
+        ];
+
+        // Create CSV parser
+        const json2csvParser = new Parser({ fields });
+        const csv = json2csvParser.parse(summaryData);
+
+        // Set response headers for CSV download
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=attendance_summary_${startDate}_to_${endDate}.csv`);
+
+        // Send CSV
+        return res.status(200).send(csv);
+
+    } catch (error) {
+        console.error("Error generating attendance summary CSV:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to generate attendance summary report",
+            error: error.message
+        });
+    }
+};
+
 // Helper function to format time from Date object
 function formatTime(date) {
     if (!date) return "N/A";
