@@ -10,7 +10,7 @@ const employeeSchema = new mongoose.Schema({
         required: true,
         index: true
     },
-    
+
     shift: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Shift",
@@ -82,11 +82,15 @@ const employeeSchema = new mongoose.Schema({
             type: [Number], // [longitude, latitude]
             required: true
         },
+        locationtype: {
+            type: String,
+            enum:['current','emp']
+        },
         radius: {
             type: Number // meters
         },
-        manual:{
-            type:String,
+        manual: {
+            type: String,
         }
     },
     employmentStatus: {
