@@ -468,7 +468,7 @@ export const updateEmployee = async (req, res) => {
 
             updatePayload.officeLocation = {
                 type: "Point",
-                coordinates: officeLocation.coordinates||xistingEmployee.officeLocation?.coordinates,
+                coordinates: officeLocation.coordinates||existingEmployee.officeLocation?.coordinates,
                 radius: officeLocation.radius || existingEmployee.officeLocation?.radius || 100,
                 manual: officeLocation.manual || existingEmployee.officeLocation?.manual || 'IND',
                 locationtype: officeLocation.locationtype || existingEmployee.officeLocation?.locationtype || 'IND',
