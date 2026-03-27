@@ -690,10 +690,11 @@ export const getAdvertisementById = async (req, res) => {
 export const getAdvertisementsByCategory = async (req, res) => {
     try {
         const { categoryId } = req.params;
-        // Get companyId from query params or from logged-in user
+
+        // Get companyId from query params or logged-in user
         const companyId = req.query.companyId || req.user?._id;
 
-        // Check if category exists
+        // Validate category
         const category = await AdvertisementCategory.findById(categoryId);
         if (!category) {
             return res.status(404).json({
@@ -707,27 +708,32 @@ export const getAdvertisementsByCategory = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        // Build filter based on companyId presence
-        let filter = { category: categoryId };
+        // Base filter
+        const filter = {
+            category: categoryId,
+            status: "active"   // Only return active ads by default
+        };
 
-        // Filter by status if specified
+        // Add status filter if provided in query
         if (req.query.status) {
             filter.status = req.query.status;
         }
 
-        // If companyId exists (either from query or user), get company-specific advertisements
-        // If companyId doesn't exist, get global advertisements (where companyId is null or doesn't exist)
+        // ==================== IMPORTANT LOGIC ====================
         if (companyId) {
-            // Get advertisements for this specific company
-            filter.companyId = companyId;
-        } else {
-            // Get global advertisements (where companyId is null, undefined, or doesn't exist)
-            filter.companyId = { $in: [null, undefined] };
+            // When companyId is provided: Return 
+            // → Company-specific ads + Global ads (companyId is null/undefined)
+            filter.$or = [
+                { companyId: companyId },                    // Company's own ads
+                { companyId: { $exists: false } },           // No companyId field
+                { companyId: null }                          // companyId explicitly null
+            ];
         }
+        // If no companyId → only show global ads (already handled by base filter)
 
         const advertisements = await Advertistment.find(filter)
             .populate('category', 'name slug')
-            .populate('companyId', 'name email')
+            .populate('companyId', 'name email')   // Safe even if null
             .sort('-createdAt')
             .skip(skip)
             .limit(limit);
@@ -742,7 +748,7 @@ export const getAdvertisementsByCategory = async (req, res) => {
                 slug: category.slug
             },
             data: advertisements,
-            type: companyId ? "company_specific" : "global",
+            type: companyId ? "company_and_global" : "global_only",
             requestedCompanyId: companyId || null,
             pagination: {
                 page,
@@ -752,6 +758,7 @@ export const getAdvertisementsByCategory = async (req, res) => {
             }
         });
     } catch (error) {
+        console.error("Error in getAdvertisementsByCategory:", error);
         res.status(500).json({
             success: false,
             message: "Error fetching advertisements by category",
@@ -759,7 +766,6 @@ export const getAdvertisementsByCategory = async (req, res) => {
         });
     }
 };
-
 
 // @desc    Bulk update advertisements status
 // @route   PATCH /api/advertisements/bulk-status
