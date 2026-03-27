@@ -758,14 +758,14 @@ export const getAdvertisementsByCategory = async (req, res) => {
         }
 
         // Query
-        const advertisements = await Advertisement.find(filter)   // ← Fixed spelling
+        const advertisements = await Advertistment.find(filter)   // ← Fixed spelling
             .populate('category', 'name slug')
             .populate('companyId', 'name email')
             .sort('-createdAt')
             .skip(skip)
             .limit(limit);
 
-        const total = await Advertisement.countDocuments(filter);   // ← Fixed spelling
+        const total = await Advertistment.countDocuments(filter);   // ← Fixed spelling
 
         res.status(200).json({
             success: true,
