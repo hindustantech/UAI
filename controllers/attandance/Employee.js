@@ -10,12 +10,108 @@ import Shift from "../../models/Attandance/Shift.js";
 
 // controllers/companyController.js
 
+// export const getCompanyByUser = async (req, res) => {
+//     try {
+//         const { userType } = req.params; // or from req.body
+//         const userId = req.user?._id || req.user?.id;
+
+//         // Validate input
+//         if (!userId || !userType) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'userId and userType are required'
+//             });
+//         }
+
+//         let companyDetails = null;
+
+//         // CASE 1: User is PARTNER - directly get their company profile
+//         if (userType === 'partner' || userType === 'admin' || userType === 'super_admin') {
+//             const partnerProfile = await PatnerProfile.findOne({ User_id: userId })
+//                 .select('firm_name logo email address isIndependent')
+//                 .populate('User_id', 'name email')
+//                 .lean();
+
+//             if (partnerProfile) {
+//                 companyDetails = {
+//                     companyId: partnerProfile.User_id,
+//                     companyName: partnerProfile.firm_name,
+//                     companyLogo: partnerProfile.logo,
+//                     email: partnerProfile.email,
+//                     address: partnerProfile.address || { city: '', state: '' },
+//                     isIndependent: partnerProfile.isIndependent,
+//                     adminName: partnerProfile.User_id?.name,
+//                     userType: 'partner'
+//                 };
+//             }
+//         }
+
+//         // CASE 2: User is EMPLOYEE - find company they're associated with
+//         else if (userType === 'user') {
+//             const employee = await Employee.findOne({ userId: userId })
+//                 .populate({
+//                     path: 'companyId',
+//                     select: 'name email' // Get admin user info
+//                 })
+//                 .lean();
+
+//             if (employee && employee.companyId) {
+//                 // Get company details from partner profile
+//                 const partnerProfile = await PatnerProfile.findOne({
+//                     User_id: employee.companyId._id
+//                 })
+//                     .select('firm_name logo email address isIndependent')
+//                     .lean();
+
+//                 if (partnerProfile) {
+//                     companyDetails = {
+//                         companyId: employee.companyId,
+//                         companyName: partnerProfile.firm_name,
+//                         companyLogo: partnerProfile.logo,
+//                         email: partnerProfile.email,
+//                         address: partnerProfile.address || { city: '', state: '' },
+//                         isIndependent: partnerProfile.isIndependent,
+//                         employeeInfo: {
+//                             empCode: employee.empCode,
+//                             designation: employee.jobInfo?.designation,
+//                             department: employee.jobInfo?.department
+//                         },
+//                         userType: 'employee'
+//                     };
+//                 }
+//             }
+//         }
+
+//         // If no company found
+//         if (!companyDetails) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: `No company found for this ${userType}`
+//             });
+//         }
+
+//         // Return success response
+//         return res.status(200).json({
+//             success: true,
+//             data: companyDetails
+//         });
+
+//     } catch (error) {
+//         console.error('Error in getCompanyByUser:', error);
+//         return res.status(500).json({
+//             success: false,
+//             message: 'Internal server error',
+//             error: error.message
+//         });
+//     }
+// };
+
+
 export const getCompanyByUser = async (req, res) => {
     try {
-        const { userType } = req.params; // or from req.body
+        const { userType } = req.params;
         const userId = req.user?._id || req.user?.id;
 
-        // Validate input
         if (!userId || !userType) {
             return res.status(400).json({
                 success: false,
@@ -23,12 +119,13 @@ export const getCompanyByUser = async (req, res) => {
             });
         }
 
+        const userObjectId = new mongoose.Types.ObjectId(userId);
         let companyDetails = null;
 
-        // CASE 1: User is PARTNER - directly get their company profile
-        if (userType === 'partner' || userType === 'admin' || userType === 'super_admin') {
-            const partnerProfile = await PatnerProfile.findOne({ User_id: userId })
-                .select('firm_name logo email address isIndependent')
+        // ================= PARTNER =================
+        if (['partner', 'admin', 'super_admin'].includes(userType)) {
+
+            const partnerProfile = await PatnerProfile.findOne({ User_id: userObjectId })
                 .populate('User_id', 'name email')
                 .lean();
 
@@ -46,43 +143,49 @@ export const getCompanyByUser = async (req, res) => {
             }
         }
 
-        // CASE 2: User is EMPLOYEE - find company they're associated with
+        // ================= EMPLOYEE =================
         else if (userType === 'user') {
-            const employee = await Employee.findOne({ userId: userId })
-                .populate({
-                    path: 'companyId',
-                    select: 'name email' // Get admin user info
-                })
+
+            const employee = await Employee.findOne({ userId: userObjectId })
+                .populate('companyId', 'name email')
                 .lean();
 
-            if (employee && employee.companyId) {
-                // Get company details from partner profile
-                const partnerProfile = await PatnerProfile.findOne({
-                    User_id: employee.companyId._id
-                })
-                    .select('firm_name logo email address isIndependent')
-                    .lean();
-
-                if (partnerProfile) {
-                    companyDetails = {
-                        companyId: employee.companyId,
-                        companyName: partnerProfile.firm_name,
-                        companyLogo: partnerProfile.logo,
-                        email: partnerProfile.email,
-                        address: partnerProfile.address || { city: '', state: '' },
-                        isIndependent: partnerProfile.isIndependent,
-                        employeeInfo: {
-                            empCode: employee.empCode,
-                            designation: employee.jobInfo?.designation,
-                            department: employee.jobInfo?.department
-                        },
-                        userType: 'employee'
-                    };
-                }
+            if (!employee) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Employee mapping not found'
+                });
             }
+
+            const companyUserId = employee.companyId?._id || employee.companyId;
+
+            const partnerProfile = await PatnerProfile.findOne({
+                User_id: companyUserId
+            }).lean();
+
+            if (!partnerProfile) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Company profile not found'
+                });
+            }
+
+            companyDetails = {
+                companyId: employee.companyId,
+                companyName: partnerProfile.firm_name,
+                companyLogo: partnerProfile.logo,
+                email: partnerProfile.email,
+                address: partnerProfile.address || { city: '', state: '' },
+                isIndependent: partnerProfile.isIndependent,
+                employeeInfo: {
+                    empCode: employee.empCode,
+                    designation: employee.jobInfo?.designation,
+                    department: employee.jobInfo?.department
+                },
+                userType: 'employee'
+            };
         }
 
-        // If no company found
         if (!companyDetails) {
             return res.status(404).json({
                 success: false,
@@ -90,7 +193,6 @@ export const getCompanyByUser = async (req, res) => {
             });
         }
 
-        // Return success response
         return res.status(200).json({
             success: true,
             data: companyDetails
@@ -105,7 +207,6 @@ export const getCompanyByUser = async (req, res) => {
         });
     }
 };
-
 
 // ?   CREATE EMPLOYEE (ENTERPRISE LEVEL)
 // ---------------------------------------------- */
@@ -468,7 +569,7 @@ export const updateEmployee = async (req, res) => {
 
             updatePayload.officeLocation = {
                 type: "Point",
-                coordinates: officeLocation.coordinates||existingEmployee.officeLocation?.coordinates,
+                coordinates: officeLocation.coordinates || existingEmployee.officeLocation?.coordinates,
                 radius: officeLocation.radius || existingEmployee.officeLocation?.radius || 100,
                 manual: officeLocation.manual || existingEmployee.officeLocation?.manual || 'IND',
                 locationtype: officeLocation.locationtype || existingEmployee.officeLocation?.locationtype || 'IND',
