@@ -606,7 +606,7 @@ export const getAllAdvertisements = async (req, res) => {
         // 4. QUERY EXECUTION (Optimized)
         // ==============================
         const [advertisements, total] = await Promise.all([
-            Advertisement.find(filter)
+            Advertistment.find(filter)
                 .populate("category", "name slug")
                 .populate("companyId", "name email")
                 .sort(sort)
@@ -614,7 +614,7 @@ export const getAllAdvertisements = async (req, res) => {
                 .limit(parsedLimit)
                 .lean(), // 🔥 performance boost
 
-            Advertisement.countDocuments(filter)
+            Advertistment.countDocuments(filter)
         ]);
 
         // ==============================
