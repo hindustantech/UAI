@@ -91,7 +91,7 @@ export const createAdvertisement = async (req, res) => {
     try {
         const { title, description, linkUrl, category, status } = req.body;
         // Validate required fields
-        const companyId = req.user?._id
+        const companyId = req.user?._id ||req.user?.id
 
         if (!title || !description || !linkUrl || !category) {
             return res.status(400).json({
