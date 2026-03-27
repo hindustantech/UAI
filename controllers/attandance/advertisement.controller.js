@@ -250,6 +250,7 @@ export const updateAdvertisementadmin = async (req, res) => {
         });
     }
 };
+
 export const updateAdvertisement = async (req, res) => {
     try {
         const { id } = req.params;
@@ -796,12 +797,24 @@ export const getAdvertisementsByCategory = async (req, res) => {
 
 
 
+
 export const getWithEmpAdvertisementsByCategory = async (req, res) => {
     try {
         const { categoryId } = req.params;
 
-        // Check if category exists
-        const category = await AdvertisementCategory.findById(categoryId);
+        // ================= VALIDATION =================
+        if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid categoryId"
+            });
+        }
+
+        // ================= CHECK CATEGORY =================
+        const category = await AdvertisementCategory.findById(categoryId)
+            .select("name slug")
+            .lean();
+
         if (!category) {
             return res.status(404).json({
                 success: false,
@@ -809,26 +822,35 @@ export const getWithEmpAdvertisementsByCategory = async (req, res) => {
             });
         }
 
-        // Pagination
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
+        // ================= PAGINATION =================
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 10, 50); // cap at 50
         const skip = (page - 1) * limit;
 
-        // Filter by status if specified, otherwise show all
-        const filter = { category: categoryId };
+        // ================= FILTER =================
+        const filter = {
+            category: new mongoose.Types.ObjectId(categoryId),
+            companyId: null   // ✅ only ads without company
+        };
+
         if (req.query.status) {
             filter.status = req.query.status;
         }
 
-        const advertisements = await Advertistment.find(filter)
-            .populate('category', 'name slug')
-            .sort('-createdAt')
-            .skip(skip)
-            .limit(limit);
+        // ================= QUERY (PARALLEL) =================
+        const [advertisements, total] = await Promise.all([
+            Advertistment.find(filter)
+                .populate("category", "name slug")
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
 
-        const total = await Advertistment.countDocuments(filter);
+            Advertistment.countDocuments(filter)
+        ]);
 
-        res.status(200).json({
+        // ================= RESPONSE =================
+        return res.status(200).json({
             success: true,
             category: {
                 id: category._id,
@@ -843,8 +865,11 @@ export const getWithEmpAdvertisementsByCategory = async (req, res) => {
                 pages: Math.ceil(total / limit)
             }
         });
+
     } catch (error) {
-        res.status(500).json({
+        console.error("getWithEmpAdvertisementsByCategory Error:", error);
+
+        return res.status(500).json({
             success: false,
             message: "Error fetching advertisements by category",
             error: error.message
