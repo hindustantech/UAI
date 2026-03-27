@@ -13,7 +13,8 @@ import {
     bulkDeleteAdvertisements,
     createAdvertisementAdmin,
     updateAdvertisementadmin,
-    getAllAdminAdvertisements
+    getAllAdminAdvertisements,
+    getWithEmpAdvertisementsByCategory
 } from "../../controllers/attandance/advertisement.controller.js";
 import authMiddleware from "../../middlewares/authMiddleware.js";
 const router = express.Router();
@@ -38,6 +39,7 @@ router.get("/", authMiddleware,getAllAdvertisements);
 router.get("/getAllAdminAdvertisements", getAllAdminAdvertisements);
 router.get("/active", getActiveAdvertisements);
 router.get("/category/:categoryId", getAdvertisementsByCategory);
+router.get("/getWithEmpAdvertisementsByCategory/:categoryId", getWithEmpAdvertisementsByCategory);
 router.get("/:id", getAdvertisementById);
 
 // Admin routes (protected)
