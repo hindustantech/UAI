@@ -684,28 +684,24 @@ export const getAdvertisementById = async (req, res) => {
     }
 };
 
-// @desc    Get advertisements by category
-// @route   GET /api/advertisements/category/:categoryId
-// @access  Public
 
 
 
 // @desc    Get advertisements by category
 // @route   GET /api/advertisements/category/:categoryId
 // @access  Public
+
 export const getAdvertisementsByCategory = async (req, res) => {
     try {
         const { categoryId } = req.params;
 
-        // ==================== SAFE companyId HANDLING ====================
         let companyId = req.query.companyId || req.user?._id;
 
-        // Clean companyId if frontend sends "null", "undefined", empty, etc.
-        if (!companyId || companyId === "null" || companyId === "undefined" || companyId === "") {
+        // Normalize companyId
+        if (!companyId || ["null", "undefined", ""].includes(companyId)) {
             companyId = null;
         }
 
-        // Convert to ObjectId if it's a valid string
         if (companyId && typeof companyId === "string") {
             if (!mongoose.Types.ObjectId.isValid(companyId)) {
                 return res.status(400).json({
@@ -726,48 +722,52 @@ export const getAdvertisementsByCategory = async (req, res) => {
         }
 
         // Pagination
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
+        const page = Number(req.query.page) || 1;
+        const limit = Number(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        // Base filter - Always active ads by default
-        const filter = {
-            category: new mongoose.Types.ObjectId(categoryId), // Better to cast here too
-            status: "active"
+        // ================= CORE FILTER =================
+        const baseFilter = {
+            category: new mongoose.Types.ObjectId(categoryId),
+            status: req.query.status || "active"
         };
 
-        // Add status filter if requested
-        if (req.query.status) {
-            filter.status = req.query.status;
-        }
+        let companyFilter;
 
-        // ==================== MAIN LOGIC ====================
         if (companyId) {
-            // ✅ When companyId is passed → Show THIS company’s ads + Global ads
-            filter.$or = [
-                { companyId: companyId },                    // Company specific ads
-                { companyId: null },                         // Global ads (explicit null)
-                { companyId: { $exists: false } }            // Global ads (field not present)
-            ];
+            // Company + Global
+            companyFilter = {
+                $or: [
+                    { companyId: companyId },
+                    { companyId: null }
+                ]
+            };
         } else {
-            // ✅ When NO companyId is passed → Show ONLY Global ads
-            filter.$or = [
-                { companyId: null },
-                { companyId: { $exists: false } }
-            ];
+            // Only Global
+            companyFilter = {
+                companyId: null
+            };
         }
 
-        // Query
-        const advertisements = await Advertistment.find(filter)   // ← Fixed spelling
-            .populate('category', 'name slug')
-            .populate('companyId', 'name email')
-            .sort('-createdAt')
-            .skip(skip)
-            .limit(limit);
+        const finalFilter = {
+            ...baseFilter,
+            ...companyFilter
+        };
 
-        const total = await Advertistment.countDocuments(filter);   // ← Fixed spelling
+        // ================= QUERY =================
+        const [advertisements, total] = await Promise.all([
+            Advertistment.find(finalFilter)
+                .populate('category', 'name slug')
+                .populate('companyId', 'name email')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
 
-        res.status(200).json({
+            Advertistment.countDocuments(finalFilter)
+        ]);
+
+        return res.status(200).json({
             success: true,
             category: {
                 id: category._id,
@@ -776,7 +776,6 @@ export const getAdvertisementsByCategory = async (req, res) => {
             },
             data: advertisements,
             type: companyId ? "company_and_global" : "global_only",
-            requestedCompanyId: companyId || null,
             pagination: {
                 page,
                 limit,
@@ -784,11 +783,12 @@ export const getAdvertisementsByCategory = async (req, res) => {
                 pages: Math.ceil(total / limit)
             }
         });
+
     } catch (error) {
         console.error("Error in getAdvertisementsByCategory:", error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
-            message: "Error fetching advertisements by category",
+            message: "Error fetching advertisements",
             error: error.message
         });
     }
