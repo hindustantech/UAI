@@ -1,14 +1,24 @@
 import Plan from "../../../models/Attandance/subscration/plan.js";
 import mongoose from "mongoose";
 
+
+
 /**
  * @desc Create Plan
  * @route POST /api/plan
  */
 export const createPlan = async (req, res) => {
     try {
-        const { name, price, discount = 0, validityDays, features = [], planType = "BASIC" } = req.body;
+        const {
+            name,
+            price,
+            discount = 0,
+            validityDays,
+            features = [],
+            planType = "BASIC"
+        } = req.body;
 
+        // Validation
         if (!name || !price || !validityDays) {
             return res.status(400).json({
                 success: false,
@@ -16,8 +26,18 @@ export const createPlan = async (req, res) => {
             });
         }
 
-        // Check duplicate (case insensitive)
-        const existing = await Plan.findOne({ name: { $regex: new RegExp(`^${name}$`, "i") } });
+        if (!Array.isArray(features)) {
+            return res.status(400).json({
+                success: false,
+                message: "Features must be an array"
+            });
+        }
+
+        // Check duplicate plan name (case insensitive)
+        const existing = await Plan.findOne({
+            name: { $regex: new RegExp(`^${name}$`, "i") }
+        });
+
         if (existing) {
             return res.status(400).json({
                 success: false,
@@ -25,12 +45,24 @@ export const createPlan = async (req, res) => {
             });
         }
 
-        // Convert simple string features to schema format
-        const formattedFeatures = features.map((feature, index) => ({
-            key: `FEATURE_${index + 1}`,
-            value: feature,
-            description: feature
-        }));
+        // Format features properly - Accept key + value from frontend
+        const formattedFeatures = features.map((feature) => {
+            // If user sends full object {key, value, description}
+            if (typeof feature === 'object' && feature !== null && feature.key && feature.value !== undefined) {
+                return {
+                    key: feature.key.toString().trim().toUpperCase().replace(/\s+/g, '_'),
+                    value: feature.value,
+                    description: feature.description || feature.value.toString()
+                };
+            }
+
+            // Fallback: if somehow string is sent
+            return {
+                key: `FEATURE_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                value: feature,
+                description: feature.toString()
+            };
+        });
 
         const plan = await Plan.create({
             name: name.trim(),
@@ -49,9 +81,19 @@ export const createPlan = async (req, res) => {
 
     } catch (error) {
         console.error("Create Plan Error:", error);
+
+        // Handle duplicate key error from MongoDB
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: "Plan name already exists"
+            });
+        }
+
         return res.status(500).json({
             success: false,
-            message: "Internal Server Error"
+            message: "Internal Server Error",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -109,13 +151,28 @@ export const updatePlan = async (req, res) => {
             });
         }
 
-        const { features = [], planType, ...rest } = req.body;
+        const {
+            features = [],
+            planType,
+            ...rest
+        } = req.body;
 
-        const formattedFeatures = features.map((feature, index) => ({
-            key: `FEATURE_${index + 1}`,
-            value: feature,
-            description: feature
-        }));
+        // Format features from frontend (key + value)
+        const formattedFeatures = features.map((feature) => {
+            if (typeof feature === 'object' && feature !== null && feature.key && feature.value !== undefined) {
+                return {
+                    key: feature.key.toString().trim().toUpperCase().replace(/\s+/g, '_'),
+                    value: feature.value,
+                    description: feature.description || feature.value.toString()
+                };
+            }
+            // Fallback
+            return {
+                key: `FEATURE_${Date.now()}`,
+                value: feature,
+                description: feature?.toString() || ''
+            };
+        });
 
         const updatedPlan = await Plan.findByIdAndUpdate(
             id,
@@ -124,7 +181,10 @@ export const updatePlan = async (req, res) => {
                 features: formattedFeatures,
                 planType: planType ? planType.toUpperCase() : undefined,
             },
-            { new: true, runValidators: true }
+            {
+                new: true,
+                runValidators: true
+            }
         );
 
         if (!updatedPlan) {
@@ -142,6 +202,14 @@ export const updatePlan = async (req, res) => {
 
     } catch (error) {
         console.error("Update Plan Error:", error);
+
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: "Plan name already exists"
+            });
+        }
+
         return res.status(500).json({
             success: false,
             message: "Internal Server Error"
