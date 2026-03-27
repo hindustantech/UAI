@@ -521,8 +521,7 @@ export const getAllAdminAdvertisements = async (req, res) => {
     }
 };
 
-import Advertisement from "../../../models/Advertisement/Advertisement.js";
-import mongoose from "mongoose";
+
 
 export const getAllAdvertisements = async (req, res) => {
     try {
