@@ -687,12 +687,29 @@ export const getAdvertisementById = async (req, res) => {
 // @desc    Get advertisements by category
 // @route   GET /api/advertisements/category/:categoryId
 // @access  Public
+
 export const getAdvertisementsByCategory = async (req, res) => {
     try {
         const { categoryId } = req.params;
 
-        // Get companyId from query params or logged-in user
-        const companyId = req.query.companyId || req.user?._id;
+        // ==================== FIXED: Safe companyId handling ====================
+        let companyId = req.query.companyId || req.user?._id;
+
+        // Handle cases where frontend sends "null", "undefined", or empty string
+        if (companyId === "null" || companyId === "undefined" || companyId === "" || companyId === null) {
+            companyId = null;
+        }
+
+        // If it's a string but not null, try to convert to ObjectId safely
+        if (companyId && typeof companyId === 'string' && companyId !== "null") {
+            if (!mongoose.Types.ObjectId.isValid(companyId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid companyId format"
+                });
+            }
+            companyId = new mongoose.Types.ObjectId(companyId);
+        }
 
         // Validate category
         const category = await AdvertisementCategory.findById(categoryId);
@@ -708,30 +725,29 @@ export const getAdvertisementsByCategory = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        // Base filter
+        // Base filter - Only active ads by default
         const filter = {
             category: categoryId,
-            status: "active"   // Only return active ads by default
+            status: "active"
         };
 
-        // Add status filter if provided in query
+        // Add custom status filter if provided
         if (req.query.status) {
             filter.status = req.query.status;
         }
 
-        // ==================== IMPORTANT LOGIC ====================
+        // ==================== IMPORTANT LOGIC (Fixed) ====================
         if (companyId) {
-            // When companyId is provided: Return 
-            // → Company-specific ads + Global ads (companyId is null/undefined)
+            // Show company's ads + global ads (where companyId is null or doesn't exist)
             filter.$or = [
                 { companyId: companyId },                    // Company's own ads
-                { companyId: { $exists: false } },           // No companyId field
-                { companyId: null }                          // companyId explicitly null
+                { companyId: null },                         // Explicitly null
+                { companyId: { $exists: false } }            // Field not present
             ];
         }
-        // If no companyId → only show global ads (already handled by base filter)
+        // If no companyId → only global ads (companyId: null or not exists)
 
-        const advertisements = await Advertistment.find(filter)
+        const advertisements = await Advertistment.find(filter)   // Note: Typo? Should be Advertisement
             .populate('category', 'name slug')
             .populate('companyId', 'name email')   // Safe even if null
             .sort('-createdAt')

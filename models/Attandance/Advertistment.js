@@ -33,6 +33,7 @@ const advertisementSchema = new mongoose.Schema(
             ref: "User",
             required: false,
             index: true,
+            default: null
         },
         status: {
             type: String,
