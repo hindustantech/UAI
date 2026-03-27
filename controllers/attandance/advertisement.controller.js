@@ -695,6 +695,111 @@ export const getAdvertisementsByCategory = async (req, res) => {
     try {
         const { categoryId } = req.params;
 
+        let companyId = req.query.companyId || req.user?._id;
+
+        // Normalize companyId
+        if (!companyId || ["null", "undefined", ""].includes(companyId)) {
+            companyId = null;
+        }
+
+        if (companyId && typeof companyId === "string") {
+            if (!mongoose.Types.ObjectId.isValid(companyId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid companyId format"
+                });
+            }
+            companyId = new mongoose.Types.ObjectId(companyId);
+        }
+
+        // Validate category
+        const category = await AdvertisementCategory.findById(categoryId);
+        if (!category) {
+            return res.status(404).json({
+                success: false,
+                message: "Category not found"
+            });
+        }
+
+        // Pagination
+        const page = Number(req.query.page) || 1;
+        const limit = Number(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // ================= CORE FILTER =================
+        const baseFilter = {
+            category: new mongoose.Types.ObjectId(categoryId),
+            status: req.query.status || "active"
+        };
+
+        let companyFilter;
+
+        if (companyId) {
+            // Company + Global
+            companyFilter = {
+                $or: [
+                    { companyId: companyId },
+                    { companyId: null }
+                ]
+            };
+        } else {
+            // Only Global
+            companyFilter = {
+                companyId: null
+            };
+        }
+
+        const finalFilter = {
+            ...baseFilter,
+            ...companyFilter
+        };
+
+        // ================= QUERY =================
+        const [advertisements, total] = await Promise.all([
+            Advertistment.find(finalFilter)
+                .populate('category', 'name slug')
+                .populate('companyId', 'name email')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+
+            Advertistment.countDocuments(finalFilter)
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            category: {
+                id: category._id,
+                name: category.name,
+                slug: category.slug
+            },
+            data: advertisements,
+            type: companyId ? "company_and_global" : "global_only",
+            pagination: {
+                page,
+                limit,
+                total,
+                pages: Math.ceil(total / limit)
+            }
+        });
+
+    } catch (error) {
+        console.error("Error in getAdvertisementsByCategory:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching advertisements",
+            error: error.message
+        });
+    }
+};
+
+
+
+export const getWithEmpAdvertisementsByCategory = async (req, res) => {
+    try {
+        const { categoryId } = req.params;
+
         // Check if category exists
         const category = await AdvertisementCategory.findById(categoryId);
         if (!category) {
@@ -746,7 +851,6 @@ export const getAdvertisementsByCategory = async (req, res) => {
         });
     }
 };
-
 // @desc    Bulk update advertisements status
 // @route   PATCH /api/advertisements/bulk-status
 // @access  Private/Admin
