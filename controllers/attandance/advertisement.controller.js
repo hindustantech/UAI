@@ -443,7 +443,7 @@ export const getActiveAdvertisements = async (req, res) => {
 // @desc    Get all advertisements (with filters and pagination)
 // @route   GET /api/advertisements
 // @access  Public/Admin
-export const getAllAdvertisements = async (req, res) => {
+export const getAllAdminAdvertisements = async (req, res) => {
     try {
         // Pagination
         const page = parseInt(req.query.page) || 1;
@@ -517,6 +517,95 @@ export const getAllAdvertisements = async (req, res) => {
         });
     }
 };
+export const getAllAdvertisements = async (req, res) => {
+    try {
+        // Get companyId from query params or from logged-in user
+        const companyId = req.query.companyId || req.user?._id;
+
+        // Pagination
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // Build filter
+        const filter = {};
+
+        // Filter by companyId
+        if (companyId) {
+            filter.companyId = companyId;
+        } else {
+            // If no companyId provided, get global advertisements (without company)
+            filter.companyId = { $in: [null, undefined] };
+        }
+
+        // Filter by status
+        if (req.query.status) {
+            filter.status = req.query.status;
+        }
+
+        // Filter by category
+        if (req.query.category) {
+            filter.category = req.query.category;
+        }
+
+        // Search by title or description
+        if (req.query.search) {
+            filter.$or = [
+                { title: { $regex: req.query.search, $options: 'i' } },
+                { description: { $regex: req.query.search, $options: 'i' } }
+            ];
+        }
+
+        // Date range filter
+        if (req.query.startDate || req.query.endDate) {
+            filter.createdAt = {};
+            if (req.query.startDate) {
+                filter.createdAt.$gte = new Date(req.query.startDate);
+            }
+            if (req.query.endDate) {
+                filter.createdAt.$lte = new Date(req.query.endDate);
+            }
+        }
+
+        // Sorting
+        const sort = {};
+        if (req.query.sortBy) {
+            const parts = req.query.sortBy.split(':');
+            sort[parts[0]] = parts[1] === 'desc' ? -1 : 1;
+        } else {
+            sort.createdAt = -1; // Default sort by newest
+        }
+
+        const advertisements = await Advertistment.find(filter)
+            .populate('category', 'name slug description status')
+            .populate('companyId', 'name email') // Populate company details
+            .sort(sort)
+            .skip(skip)
+            .limit(limit);
+
+        const total = await Advertistment.countDocuments(filter);
+
+        res.status(200).json({
+            success: true,
+            data: advertisements,
+            type: companyId ? "company_specific" : "global",
+            companyId: companyId || null,
+            pagination: {
+                page,
+                limit,
+                total,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Error fetching advertisements",
+            error: error.message
+        });
+    }
+};
+
 
 // @desc    Get single advertisement by ID
 // @route   GET /api/advertisements/:id
@@ -562,6 +651,8 @@ export const getAdvertisementById = async (req, res) => {
 export const getAdvertisementsByCategory = async (req, res) => {
     try {
         const { categoryId } = req.params;
+        // Get companyId from query params or from logged-in user
+        const companyId = req.query.companyId || req.user?._id;
 
         // Check if category exists
         const category = await AdvertisementCategory.findById(categoryId);
@@ -577,14 +668,27 @@ export const getAdvertisementsByCategory = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        // Filter by status if specified, otherwise show all
-        const filter = { category: categoryId };
+        // Build filter based on companyId presence
+        let filter = { category: categoryId };
+
+        // Filter by status if specified
         if (req.query.status) {
             filter.status = req.query.status;
         }
 
+        // If companyId exists (either from query or user), get company-specific advertisements
+        // If companyId doesn't exist, get global advertisements (where companyId is null or doesn't exist)
+        if (companyId) {
+            // Get advertisements for this specific company
+            filter.companyId = companyId;
+        } else {
+            // Get global advertisements (where companyId is null, undefined, or doesn't exist)
+            filter.companyId = { $in: [null, undefined] };
+        }
+
         const advertisements = await Advertistment.find(filter)
             .populate('category', 'name slug')
+            .populate('companyId', 'name email')
             .sort('-createdAt')
             .skip(skip)
             .limit(limit);
@@ -599,6 +703,8 @@ export const getAdvertisementsByCategory = async (req, res) => {
                 slug: category.slug
             },
             data: advertisements,
+            type: companyId ? "company_specific" : "global",
+            requestedCompanyId: companyId || null,
             pagination: {
                 page,
                 limit,
@@ -614,6 +720,7 @@ export const getAdvertisementsByCategory = async (req, res) => {
         });
     }
 };
+
 
 // @desc    Bulk update advertisements status
 // @route   PATCH /api/advertisements/bulk-status
