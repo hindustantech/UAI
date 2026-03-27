@@ -10,7 +10,10 @@ import {
     getAdvertisementById,
     getAdvertisementsByCategory,
     bulkUpdateStatus,
-    bulkDeleteAdvertisements
+    bulkDeleteAdvertisements,
+    createAdvertisementAdmin,
+    updateAdvertisementadmin,
+    getAllAdminAdvertisements
 } from "../../controllers/attandance/advertisement.controller.js";
 import authMiddleware from "../../middlewares/authMiddleware.js";
 const router = express.Router();
@@ -31,14 +34,19 @@ const upload = multer({
     }
 });
 // Public routes
-router.get("/", getAllAdvertisements);
+router.get("/", authMiddleware,getAllAdvertisements);
+router.get("/getAllAdminAdvertisements", getAllAdminAdvertisements);
 router.get("/active", getActiveAdvertisements);
 router.get("/category/:categoryId", getAdvertisementsByCategory);
 router.get("/:id", getAdvertisementById);
 
 // Admin routes (protected)
-router.post("/", authMiddleware,upload.single('image'), createAdvertisement);
+router.post("/", authMiddleware, upload.single('image'), createAdvertisementAdmin);
+router.put("/:id", authMiddleware, upload.single('image'), updateAdvertisementadmin);
+
+router.post("/", authMiddleware, upload.single('image'), createAdvertisement);
 router.put("/:id", authMiddleware, upload.single('image'), updateAdvertisement);
+
 router.delete("/:id", authMiddleware, deleteAdvertisement);
 router.patch("/:id/toggle-status", authMiddleware, toggleAdvertisementStatus);
 

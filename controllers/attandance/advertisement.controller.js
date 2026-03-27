@@ -5,6 +5,9 @@ import { uploadToCloudinary } from "../../utils/Cloudinary.js";
 import fs from 'fs';
 import path from 'path';
 
+
+
+
 // @desc    Create a new advertisement with image upload
 // @route   POST /api/advertisements
 // @access  Private/Admin
