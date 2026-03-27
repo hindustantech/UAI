@@ -383,7 +383,7 @@ export const toggleAdvertisementStatus = async (req, res) => {
         advertisement.status = advertisement.status === "active" ? "inactive" : "active";
         await advertisement.save();
 
-        const updatedAd = await Advertisement.findById(id)
+        const updatedAd = await Advertistment.findById(id)
             .populate('category', 'name slug');
 
         res.status(200).json({
