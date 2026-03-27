@@ -91,7 +91,7 @@ export const createAdvertisement = async (req, res) => {
     try {
         const { title, description, linkUrl, category, status } = req.body;
         // Validate required fields
-        const companyId = req.user?._id ||req.user?.id
+        const companyId = req.user?._id || req.user?.id
 
         if (!title || !description || !linkUrl || !category) {
             return res.status(400).json({
@@ -253,7 +253,7 @@ export const updateAdvertisementadmin = async (req, res) => {
 export const updateAdvertisement = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user.id
+        const companyId = req.user?._id || req.user?.id
         const { title, description, linkUrl, category, status } = req.body;
 
         // Validate ID
@@ -540,7 +540,7 @@ export const getAllAdvertisements = async (req, res) => {
             limit = 10
         } = req.query;
 
-        const userCompanyId = req.user?._id;
+        const userCompanyId = req.user?._id || req.user?.id;
 
         const parsedPage = Math.max(parseInt(page), 1);
         const parsedLimit = Math.min(parseInt(limit), 100);
