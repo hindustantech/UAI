@@ -520,90 +520,127 @@ export const getAllAdminAdvertisements = async (req, res) => {
         });
     }
 };
+
+import Advertisement from "../../../models/Advertisement/Advertisement.js";
+import mongoose from "mongoose";
+
 export const getAllAdvertisements = async (req, res) => {
     try {
-        // Get companyId from query params or from logged-in user
-        const companyId = req.query.companyId || req.user?._id;
+        // ==============================
+        // 1. INPUT EXTRACTION
+        // ==============================
+        const {
+            companyId: queryCompanyId,
+            status,
+            category,
+            search,
+            startDate,
+            endDate,
+            sortBy,
+            page = 1,
+            limit = 10
+        } = req.query;
 
-        // Pagination
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const skip = (page - 1) * limit;
+        const userCompanyId = req.user?._id;
 
-        // Build filter
+        const parsedPage = Math.max(parseInt(page), 1);
+        const parsedLimit = Math.min(parseInt(limit), 100);
+        const skip = (parsedPage - 1) * parsedLimit;
+
+        // ==============================
+        // 2. FILTER BUILDER (Clean)
+        // ==============================
         const filter = {};
 
-        // Filter by companyId
-        if (companyId) {
-            filter.companyId = companyId;
+        // 🔥 Company Logic (Corrected)
+        if (queryCompanyId) {
+            filter.companyId = new mongoose.Types.ObjectId(queryCompanyId);
+        } else if (userCompanyId) {
+            filter.companyId = new mongoose.Types.ObjectId(userCompanyId);
         } else {
-            // If no companyId provided, get global advertisements (without company)
-            filter.companyId = { $in: [null, undefined] };
+            // Only global ads
+            filter.companyId = null;
         }
 
-        // Filter by status
-        if (req.query.status) {
-            filter.status = req.query.status;
+        // Status filter
+        if (status) {
+            filter.status = status;
         }
 
-        // Filter by category
-        if (req.query.category) {
-            filter.category = req.query.category;
+        // Category filter
+        if (category) {
+            filter.category = new mongoose.Types.ObjectId(category);
         }
 
-        // Search by title or description
-        if (req.query.search) {
+        // Search (indexed + safe)
+        if (search) {
             filter.$or = [
-                { title: { $regex: req.query.search, $options: 'i' } },
-                { description: { $regex: req.query.search, $options: 'i' } }
+                { title: { $regex: search, $options: "i" } },
+                { description: { $regex: search, $options: "i" } }
             ];
         }
 
-        // Date range filter
-        if (req.query.startDate || req.query.endDate) {
+        // Date filter (normalized)
+        if (startDate || endDate) {
             filter.createdAt = {};
-            if (req.query.startDate) {
-                filter.createdAt.$gte = new Date(req.query.startDate);
+
+            if (startDate) {
+                filter.createdAt.$gte = new Date(startDate + "T00:00:00.000Z");
             }
-            if (req.query.endDate) {
-                filter.createdAt.$lte = new Date(req.query.endDate);
+
+            if (endDate) {
+                filter.createdAt.$lte = new Date(endDate + "T23:59:59.999Z");
             }
         }
 
-        // Sorting
-        const sort = {};
-        if (req.query.sortBy) {
-            const parts = req.query.sortBy.split(':');
-            sort[parts[0]] = parts[1] === 'desc' ? -1 : 1;
-        } else {
-            sort.createdAt = -1; // Default sort by newest
+        // ==============================
+        // 3. SORTING
+        // ==============================
+        let sort = { createdAt: -1 };
+
+        if (sortBy) {
+            const [field, order] = sortBy.split(":");
+            sort = { [field]: order === "desc" ? -1 : 1 };
         }
 
-        const advertisements = await Advertistment.find(filter)
-            .populate('category', 'name slug description status')
-            .populate('companyId', 'name email') // Populate company details
-            .sort(sort)
-            .skip(skip)
-            .limit(limit);
+        // ==============================
+        // 4. QUERY EXECUTION (Optimized)
+        // ==============================
+        const [advertisements, total] = await Promise.all([
+            Advertisement.find(filter)
+                .populate("category", "name slug")
+                .populate("companyId", "name email")
+                .sort(sort)
+                .skip(skip)
+                .limit(parsedLimit)
+                .lean(), // 🔥 performance boost
 
-        const total = await Advertistment.countDocuments(filter);
+            Advertisement.countDocuments(filter)
+        ]);
 
-        res.status(200).json({
+        // ==============================
+        // 5. RESPONSE
+        // ==============================
+        return res.status(200).json({
             success: true,
             data: advertisements,
-            type: companyId ? "company_specific" : "global",
-            companyId: companyId || null,
-            pagination: {
-                page,
-                limit,
-                total,
-                pages: Math.ceil(total / limit)
+            meta: {
+                type: queryCompanyId || userCompanyId ? "company_specific" : "global",
+                pagination: {
+                    page: parsedPage,
+                    limit: parsedLimit,
+                    total,
+                    pages: Math.ceil(total / parsedLimit)
+                }
             }
         });
+
     } catch (error) {
-        res.status(500).json({
+        console.error("Advertisement Fetch Error:", error);
+
+        return res.status(500).json({
             success: false,
-            message: "Error fetching advertisements",
+            message: "Failed to fetch advertisements",
             error: error.message
         });
     }
