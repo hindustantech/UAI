@@ -697,7 +697,7 @@ export const getAdvertisementsByCategory = async (req, res) => {
 
         let companyId = req.query.companyId || req.user?._id;
 
-        // Normalize companyId
+        // Normalize
         if (!companyId || ["null", "undefined", ""].includes(companyId)) {
             companyId = null;
         }
@@ -706,7 +706,7 @@ export const getAdvertisementsByCategory = async (req, res) => {
             if (!mongoose.Types.ObjectId.isValid(companyId)) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid companyId format"
+                    message: "Invalid companyId"
                 });
             }
             companyId = new mongoose.Types.ObjectId(companyId);
@@ -726,13 +726,14 @@ export const getAdvertisementsByCategory = async (req, res) => {
         const limit = Number(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        // ================= CORE FILTER =================
+        // Base filter
         const baseFilter = {
             category: new mongoose.Types.ObjectId(categoryId),
             status: req.query.status || "active"
         };
 
-        let companyFilter;
+        // ================= CORE CHANGE =================
+        let companyFilter = {};
 
         if (companyId) {
             // Company + Global
@@ -742,19 +743,15 @@ export const getAdvertisementsByCategory = async (req, res) => {
                     { companyId: null }
                 ]
             };
-        } else {
-            // Only Global
-            companyFilter = {
-                companyId: null
-            };
         }
+        // ❗ ELSE → DO NOTHING → fetch all ads
 
         const finalFilter = {
             ...baseFilter,
             ...companyFilter
         };
 
-        // ================= QUERY =================
+        // Query
         const [advertisements, total] = await Promise.all([
             Advertistment.find(finalFilter)
                 .populate('category', 'name slug')
@@ -775,7 +772,7 @@ export const getAdvertisementsByCategory = async (req, res) => {
                 slug: category.slug
             },
             data: advertisements,
-            type: companyId ? "company_and_global" : "global_only",
+            type: companyId ? "company_and_global" : "all_ads",
             pagination: {
                 page,
                 limit,
@@ -785,10 +782,10 @@ export const getAdvertisementsByCategory = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error in getAdvertisementsByCategory:", error);
+        console.error("Error:", error);
         return res.status(500).json({
             success: false,
-            message: "Error fetching advertisements",
+            message: "Error fetching ads",
             error: error.message
         });
     }
