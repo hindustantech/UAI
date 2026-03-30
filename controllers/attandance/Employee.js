@@ -210,148 +210,277 @@ export const getCompanyByUser = async (req, res) => {
 
 // ?   CREATE EMPLOYEE (ENTERPRISE LEVEL)
 // ---------------------------------------------- */
+// export const createEmployee = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     session.startTransaction();
+
+//     try {
+//         /* ---------------------------------------------
+//            1. Authorization
+//         ---------------------------------------------- */
+//         const companyId = req.user?._id || req.user?.id;
+//         const userRole = req.user?.role || req.user?.type;
+
+//         if (!companyId) {
+//             return res.status(401).json({
+//                 success: false,
+//                 message: "Unauthorized",
+//             });
+//         }
+
+//         if (!['partner', 'admin', 'super_admin'].includes(userRole)) {
+//             return res.status(403).json({
+//                 success: false,
+//                 message: "Access denied",
+//             });
+//         }
+
+//         /* ---------------------------------------------
+//            2. Validation
+//         ---------------------------------------------- */
+//         const {
+//             userId,
+//             role,
+//             empCode,
+//             user_name,
+//             jobInfo,
+//             shift,
+//             weeklyOff,
+//             salaryStructure,
+//             bankDetails,
+//             officeLocation,
+//         } = req.body;
+
+//         if (!userId) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "userId is required",
+//             });
+//         }
+
+//         /* ---------------------------------------------
+//            3. Check User Exists
+//         ---------------------------------------------- */
+//         const user = await User.findById(userId).session(session);
+
+//         if (!user) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "User not found",
+//             });
+//         }
+
+//         const sh = await Shift.findById(shift)
+//         if (!sh) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "User not found",
+//             });
+//         }
+//         /* ---------------------------------------------
+//            4. Prevent Duplicate Employee
+//         ---------------------------------------------- */
+//         const alreadyExists = await Employee.findOne({
+//             companyId,
+//             userId,
+//         }).session(session);
+
+//         if (alreadyExists) {
+//             return res.status(409).json({
+//                 success: false,
+//                 message: "Employee already exists",
+//             });
+//         }
+
+
+
+//         /* ---------------------------------------------
+//            6. Build Employee Object
+//         ---------------------------------------------- */
+//         const employeePayload = {
+//             companyId,
+//             userId,
+//             weeklyOff,
+//             empCode,
+//             user_name,
+//             role: role || "employee",
+//             shift,
+//             jobInfo: {
+//                 designation: jobInfo?.designation,
+//                 department: jobInfo?.department,
+//                 joiningDate: jobInfo?.joiningDate || new Date(),
+//                 reportingManager: jobInfo?.reportingManager,
+//             },
+
+//             salaryStructure: {
+//                 basic: salaryStructure?.basic || 0,
+//                 hra: salaryStructure?.hra || 0,
+//                 da: salaryStructure?.da || 0,
+//                 bonus: salaryStructure?.bonus || 0,
+//                 perDay: salaryStructure?.perDay || 0,
+//                 perHour: salaryStructure?.perHour || 0,
+//                 overtimeRate: salaryStructure?.overtimeRate || 0,
+//             },
+
+//             bankDetails: {
+//                 accountNo: bankDetails?.accountNo,
+//                 ifsc: bankDetails?.ifsc,
+//                 bankName: bankDetails?.bankName,
+//             },
+
+//             officeLocation: officeLocation
+//                 ? {
+//                     type: "Point",
+//                     coordinates: officeLocation.coordinates,
+//                     radius: officeLocation.radius || 100,
+//                     manual: officeLocation.manual,
+//                     locationtype: officeLocation.locationtype,
+
+//                 }
+//                 : undefined,
+
+//             employmentStatus: "active",
+//         };
+
+//         /* ---------------------------------------------
+//            7. Save Employee
+//         ---------------------------------------------- */
+//         const employee = await Employee.create(
+//             [employeePayload],
+//             { session }
+//         );
+
+//         /* ---------------------------------------------
+//            8. Commit Transaction
+//         ---------------------------------------------- */
+//         await session.commitTransaction();
+//         session.endSession();
+
+//         return res.status(201).json({
+//             success: true,
+//             message: "Employee created successfully",
+//             data: employee[0],
+//         });
+//     } catch (error) {
+//         /* ---------------------------------------------
+//            Rollback
+//         ---------------------------------------------- */
+//         await session.abortTransaction();
+//         session.endSession();
+
+//         console.error("CreateEmployee Error:", error);
+
+//         /* ---------------------------------------------
+//            Duplicate Key Handling
+//         ---------------------------------------------- */
+//         if (error.code === 11000) {
+//             return res.status(409).json({
+//                 success: false,
+//                 message: "Duplicate employee detected",
+//             });
+//         }
+
+//         return res.status(500).json({
+//             success: false,
+//             message: "Internal server error",
+//             error: error.message,
+//         });
+//     }
+// };
+
+
+// controllers/employee.controller.js
+
 export const createEmployee = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
         /* ---------------------------------------------
-           1. Authorization
+           1. Auth & Role
         ---------------------------------------------- */
         const companyId = req.user?._id || req.user?.id;
-        const userRole = req.user?.role || req.user?.type;
+        const role = req.user?.role || req.user?.type;
 
-        if (!companyId) {
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized",
-            });
-        }
-
-        if (!['partner', 'admin', 'super_admin'].includes(userRole)) {
-            return res.status(403).json({
-                success: false,
-                message: "Access denied",
-            });
+        if (!companyId) throw new Error("Unauthorized");
+        if (!["partner", "admin", "super_admin"].includes(role)) {
+            throw new Error("Access denied");
         }
 
         /* ---------------------------------------------
-           2. Validation
+           2. Input
         ---------------------------------------------- */
-        const {
-            userId,
-            role,
-            empCode,
-            user_name,
-            jobInfo,
-            shift,
-            weeklyOff,
-            salaryStructure,
-            bankDetails,
-            officeLocation,
-        } = req.body;
-
-        if (!userId) {
-            return res.status(400).json({
-                success: false,
-                message: "userId is required",
-            });
-        }
+        const { userId, shift } = req.body;
+        if (!userId) throw new Error("userId is required");
 
         /* ---------------------------------------------
-           3. Check User Exists
+           3. Validate Dependencies
         ---------------------------------------------- */
         const user = await User.findById(userId).session(session);
+        if (!user) throw new Error("User not found");
 
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found",
-            });
-        }
+        const sh = await Shift.findById(shift).session(session);
+        // if (!sh) throw new Error("Shift not found");
 
-        const sh = await Shift.findById(shift)
-        if (!sh) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found",
-            });
-        }
         /* ---------------------------------------------
-           4. Prevent Duplicate Employee
+           4. Duplicate Check
         ---------------------------------------------- */
-        const alreadyExists = await Employee.findOne({
+        const exists = await Employee.findOne({
             companyId,
-            userId,
+            userId
         }).session(session);
 
-        if (alreadyExists) {
-            return res.status(409).json({
-                success: false,
-                message: "Employee already exists",
-            });
+        if (exists) throw new Error("Employee already exists");
+
+        /* ---------------------------------------------
+           5. Subscription Enforcement 🔥
+        ---------------------------------------------- */
+        const subscription = await getActiveSubscription(companyId, session);
+        if (!subscription) throw new Error("No active subscription");
+
+        const limitFeature = getFeature(subscription, "EMPLOYEE_LIMIT");
+
+        if (!limitFeature) {
+            throw new Error("Employee feature not available in plan");
         }
 
+        const limit = limitFeature.value;
 
-
-        /* ---------------------------------------------
-           6. Build Employee Object
-        ---------------------------------------------- */
-        const employeePayload = {
-            companyId,
-            userId,
-            weeklyOff,
-            empCode,
-            user_name,
-            role: role || "employee",
-            shift,
-            jobInfo: {
-                designation: jobInfo?.designation,
-                department: jobInfo?.department,
-                joiningDate: jobInfo?.joiningDate || new Date(),
-                reportingManager: jobInfo?.reportingManager,
-            },
-
-            salaryStructure: {
-                basic: salaryStructure?.basic || 0,
-                hra: salaryStructure?.hra || 0,
-                da: salaryStructure?.da || 0,
-                bonus: salaryStructure?.bonus || 0,
-                perDay: salaryStructure?.perDay || 0,
-                perHour: salaryStructure?.perHour || 0,
-                overtimeRate: salaryStructure?.overtimeRate || 0,
-            },
-
-            bankDetails: {
-                accountNo: bankDetails?.accountNo,
-                ifsc: bankDetails?.ifsc,
-                bankName: bankDetails?.bankName,
-            },
-
-            officeLocation: officeLocation
-                ? {
-                    type: "Point",
-                    coordinates: officeLocation.coordinates,
-                    radius: officeLocation.radius || 100,
-                    manual: officeLocation.manual,
-                    locationtype: officeLocation.locationtype,
-
+        // Unlimited plan support (-1)
+        if (limit !== -1) {
+            const updated = await Subscription.findOneAndUpdate(
+                {
+                    _id: subscription._id,
+                    "usage.employeesUsed": { $lt: limit }
+                },
+                {
+                    $inc: { "usage.employeesUsed": 1 }
+                },
+                {
+                    new: true,
+                    session
                 }
-                : undefined,
+            );
 
-            employmentStatus: "active",
-        };
+            if (!updated) {
+                throw new Error("Employee limit reached. Upgrade your plan.");
+            }
+        }
 
         /* ---------------------------------------------
-           7. Save Employee
+           6. Create Employee
         ---------------------------------------------- */
         const employee = await Employee.create(
-            [employeePayload],
+            [{
+                ...req.body,
+                companyId,
+                employmentStatus: "active"
+            }],
             { session }
         );
 
         /* ---------------------------------------------
-           8. Commit Transaction
+           7. Commit
         ---------------------------------------------- */
         await session.commitTransaction();
         session.endSession();
@@ -359,35 +488,19 @@ export const createEmployee = async (req, res) => {
         return res.status(201).json({
             success: true,
             message: "Employee created successfully",
-            data: employee[0],
+            data: employee[0]
         });
+
     } catch (error) {
-        /* ---------------------------------------------
-           Rollback
-        ---------------------------------------------- */
         await session.abortTransaction();
         session.endSession();
 
-        console.error("CreateEmployee Error:", error);
-
-        /* ---------------------------------------------
-           Duplicate Key Handling
-        ---------------------------------------------- */
-        if (error.code === 11000) {
-            return res.status(409).json({
-                success: false,
-                message: "Duplicate employee detected",
-            });
-        }
-
-        return res.status(500).json({
+        return res.status(400).json({
             success: false,
-            message: "Internal server error",
-            error: error.message,
+            message: error.message
         });
     }
 };
-
 
 /* ---------------------------------------------
    Update EMPLOYEE (ENTERPRISE LEVEL)

@@ -21,7 +21,8 @@ import {
    Middlewares
 ================================ */
 import authMiddleware from "../../middlewares/authMiddleware.js";
-
+import { checkFeature } from "../../middlewares/checkFeature.js";
+import { checkSubscription } from "../../middlewares/checkSubscription.js";
 /* ===============================
    Router Init
 ================================ */
@@ -40,6 +41,8 @@ const router = express.Router();
 router.post(
     "/",
     authMiddleware,
+    checkSubscription,                // 🔐 must have active plan
+    checkFeature("EMPLOYEE_CREATE"),  // 🔐 feature-level access
     createEmployee
 );
 
