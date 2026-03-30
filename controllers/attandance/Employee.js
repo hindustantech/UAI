@@ -392,78 +392,92 @@ export const getCompanyByUser = async (req, res) => {
 
 // controllers/employee.controller.js
 
+import mongoose from "mongoose";
+import Employee from "../models/Employee.js";
+import User from "../models/User.js";
+import Shift from "../models/Shift.js";
+import Subscription from "../models/Subscription.js";
+import { getActiveSubscription, hasFeatureAccess } from "../services/subscription.service.js";
+
 export const createEmployee = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
         /* ---------------------------------------------
-           1. Auth & Role
+           1. Auth & Role Validation
         ---------------------------------------------- */
         const companyId = req.user?._id || req.user?.id;
         const role = req.user?.role || req.user?.type;
 
         if (!companyId) throw new Error("Unauthorized");
-        if (!["partner", "admin", "super_admin"].includes(role)) {
+
+        const allowedRoles = ["partner", "admin", "super_admin"];
+        if (!allowedRoles.includes(role)) {
             throw new Error("Access denied");
         }
 
         /* ---------------------------------------------
-           2. Input
+           2. Input Validation
         ---------------------------------------------- */
-        const { userId, shift } = req.body;
+        const {
+            userId,
+            shift,
+            empCode,
+            user_name,
+            jobInfo,
+            weeklyOff,
+            salaryStructure,
+            bankDetails,
+            officeLocation
+        } = req.body;
+
         if (!userId) throw new Error("userId is required");
 
         /* ---------------------------------------------
-           3. Validate Dependencies
+           3. Dependency Validation
         ---------------------------------------------- */
         const user = await User.findById(userId).session(session);
         if (!user) throw new Error("User not found");
 
-        const sh = await Shift.findById(shift).session(session);
-        // if (!sh) throw new Error("Shift not found");
+        if (shift) {
+            const shiftExists = await Shift.findById(shift).session(session);
+            if (!shiftExists) throw new Error("Shift not found");
+        }
 
         /* ---------------------------------------------
-           4. Duplicate Check
+           4. Duplicate Employee Check
         ---------------------------------------------- */
-        const exists = await Employee.findOne({
+        const existingEmployee = await Employee.findOne({
             companyId,
             userId
         }).session(session);
 
-        if (exists) throw new Error("Employee already exists");
+        if (existingEmployee) {
+            throw new Error("Employee already exists");
+        }
 
         /* ---------------------------------------------
-           5. Subscription Enforcement 🔥
+           5. Subscription Validation (SOURCE OF TRUTH)
         ---------------------------------------------- */
         const subscription = await getActiveSubscription(companyId, session);
         if (!subscription) throw new Error("No active subscription");
 
         const limitFeature = hasFeatureAccess(subscription, "MAXEMPLOYEES");
-
         if (!limitFeature) {
-            throw new Error("Employee feature not available in plan");
+            throw new Error("Employee feature not available in your plan");
         }
 
         const limit = limitFeature.value;
 
-        // Unlimited plan support (-1)
+        // ✅ REAL COUNT CHECK (CRITICAL FIX)
         if (limit !== -1) {
-            const updated = await Subscription.findOneAndUpdate(
-                {
-                    _id: subscription._id,
-                    "usage.employeesUsed": { $lt: limit }
-                },
-                {
-                    $inc: { "usage.employeesUsed": 1 }
-                },
-                {
-                    new: true,
-                    session
-                }
-            );
+            const employeeCount = await Employee.countDocuments({
+                companyId,
+                employmentStatus: "active"
+            }).session(session);
 
-            if (!updated) {
+            if (employeeCount >= limit) {
                 throw new Error("Employee limit reached. Upgrade your plan.");
             }
         }
@@ -471,17 +485,33 @@ export const createEmployee = async (req, res) => {
         /* ---------------------------------------------
            6. Create Employee
         ---------------------------------------------- */
-        const employee = await Employee.create(
-            [{
-                ...req.body,
-                companyId,
-                employmentStatus: "active"
-            }],
+        const employeeData = {
+            userId,
+            companyId,
+            empCode,
+            user_name,
+            jobInfo,
+            shift,
+            weeklyOff,
+            salaryStructure,
+            bankDetails,
+            officeLocation,
+            employmentStatus: "active"
+        };
+
+        const [employee] = await Employee.create([employeeData], { session });
+
+        /* ---------------------------------------------
+           7. Usage Tracking (Optional - Analytics Only)
+        ---------------------------------------------- */
+        await Subscription.updateOne(
+            { _id: subscription._id },
+            { $inc: { "usage.employeesUsed": 1 } },
             { session }
         );
 
         /* ---------------------------------------------
-           7. Commit
+           8. Commit Transaction
         ---------------------------------------------- */
         await session.commitTransaction();
         session.endSession();
@@ -489,7 +519,7 @@ export const createEmployee = async (req, res) => {
         return res.status(201).json({
             success: true,
             message: "Employee created successfully",
-            data: employee[0]
+            data: employee
         });
 
     } catch (error) {
