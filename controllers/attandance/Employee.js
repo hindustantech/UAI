@@ -8,6 +8,7 @@ import PatnerProfile from "../../models/PatnerProfile.js";
 import Shift from "../../models/Attandance/Shift.js";
 import { getActiveSubscription } from "../../services/subscription.service.js";
 import { hasFeatureAccess } from "../../services/featureAccess.service.js";
+import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
 // controllers/companyController.js
 
 // export const getCompanyByUser = async (req, res) => {
