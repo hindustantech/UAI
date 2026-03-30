@@ -24,7 +24,6 @@ import {
     getTodayPunchStatus,
     getAttendanceSummary
 } from "../../controllers/attandance/Attandance.js";
-import { checkEmployeeLimit } from "../../middlewares/subscriptionMiddleware.js";
 /* ===============================
    Middlewares
 ================================ */
