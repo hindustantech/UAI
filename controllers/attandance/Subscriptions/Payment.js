@@ -12,6 +12,7 @@ const razorpay = new Razorpay({
     key_secret: process.env.RAZORPAY_API_SECRET,
 });
 
+
 // @desc    Create Razorpay order
 // @route   POST /api/payment/create-order
 // @access  Private
@@ -68,6 +69,14 @@ export const createOrder = async (req, res) => {
             },
         });
 
+        console.log("Created Razorpay order:", {
+            companyId,
+            planId,
+            orderId: order.id,
+            amount: order.amount,
+            currency: order.currency,
+        });
+        
         // Return order details to frontend
         res.status(200).json({
             success: true,
@@ -105,7 +114,14 @@ export const verifyPayment = async (req, res) => {
             planId,
         } = req.body;
 
-        const companyId = req.user._id;
+        const companyId = req.user._id||req.user.id; // Assuming user is attached to req by auth middleware
+        console.log("Verifying payment for company:", {
+            companyId,
+            razorpay_order_id,
+            razorpay_payment_id,
+            razorpay_signature,
+            planId,
+        });
 
         // Generate signature for verification
         const body = razorpay_order_id + "|" + razorpay_payment_id;
