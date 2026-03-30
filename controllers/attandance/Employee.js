@@ -6,8 +6,8 @@ import Payroll from "../../models/Attandance/Payroll.js";
 import mongoose from "mongoose";
 import PatnerProfile from "../../models/PatnerProfile.js";
 import Shift from "../../models/Attandance/Shift.js";
-
-
+import { getActiveSubscription } from "../../services/subscription.service.js";
+import { hasFeatureAccess } from "../../services/featureAccess.service.js";
 // controllers/companyController.js
 
 // export const getCompanyByUser = async (req, res) => {
@@ -438,7 +438,7 @@ export const createEmployee = async (req, res) => {
         const subscription = await getActiveSubscription(companyId, session);
         if (!subscription) throw new Error("No active subscription");
 
-        const limitFeature = getFeature(subscription, "EMPLOYEE_LIMIT");
+        const limitFeature = hasFeatureAccess(subscription, "MAXEMPLOYEES");
 
         if (!limitFeature) {
             throw new Error("Employee feature not available in plan");
