@@ -392,12 +392,6 @@ export const getCompanyByUser = async (req, res) => {
 
 // controllers/employee.controller.js
 
-import mongoose from "mongoose";
-import Employee from "../models/Employee.js";
-import User from "../models/User.js";
-import Shift from "../models/Shift.js";
-import Subscription from "../models/Subscription.js";
-import { getActiveSubscription, hasFeatureAccess } from "../services/subscription.service.js";
 
 export const createEmployee = async (req, res) => {
     const session = await mongoose.startSession();
