@@ -14,7 +14,8 @@ import {
     findbyReferralCode,
     checkEmpButton,
     delteEmployee,
-    updateEmployee
+    updateEmployee,
+    getLatestSubscription
 } from "../../controllers/attandance/Employee.js";
 
 /* ===============================
@@ -44,6 +45,11 @@ router.post(
     checkSubscription,                // 🔐 must have active plan
     checkFeature("EMPLOYEE_CREATE"),  // 🔐 feature-level access
     createEmployee
+);
+router.get(
+    "/latest-subscription",
+    authMiddleware,
+    getLatestSubscription
 );
 
 /**

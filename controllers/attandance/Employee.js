@@ -11,101 +11,145 @@ import { hasFeatureAccess } from "../../services/featureAccess.service.js";
 import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
 // controllers/companyController.js
 
-// export const getCompanyByUser = async (req, res) => {
-//     try {
-//         const { userType } = req.params; // or from req.body
-//         const userId = req.user?._id || req.user?.id;
 
-//         // Validate input
-//         if (!userId || !userType) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: 'userId and userType are required'
-//             });
-//         }
 
-//         let companyDetails = null;
+// controllers/subscription.controller.js
 
-//         // CASE 1: User is PARTNER - directly get their company profile
-//         if (userType === 'partner' || userType === 'admin' || userType === 'super_admin') {
-//             const partnerProfile = await PatnerProfile.findOne({ User_id: userId })
-//                 .select('firm_name logo email address isIndependent')
-//                 .populate('User_id', 'name email')
-//                 .lean();
 
-//             if (partnerProfile) {
-//                 companyDetails = {
-//                     companyId: partnerProfile.User_id,
-//                     companyName: partnerProfile.firm_name,
-//                     companyLogo: partnerProfile.logo,
-//                     email: partnerProfile.email,
-//                     address: partnerProfile.address || { city: '', state: '' },
-//                     isIndependent: partnerProfile.isIndependent,
-//                     adminName: partnerProfile.User_id?.name,
-//                     userType: 'partner'
-//                 };
-//             }
-//         }
+export const getLatestSubscription = async (req, res) => {
+    try {
+        /* -----------------------------------------
+           1. Resolve Company ID (multi-source safe)
+        ------------------------------------------ */
+        let companyId =
+            req.params.companyId ||
+            req.query.companyId ||
+            req.user?._id ||
+            req.user?.id;
 
-//         // CASE 2: User is EMPLOYEE - find company they're associated with
-//         else if (userType === 'user') {
-//             const employee = await Employee.findOne({ userId: userId })
-//                 .populate({
-//                     path: 'companyId',
-//                     select: 'name email' // Get admin user info
-//                 })
-//                 .lean();
+        if (!companyId || !mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or missing companyId",
+            });
+        }
 
-//             if (employee && employee.companyId) {
-//                 // Get company details from partner profile
-//                 const partnerProfile = await PatnerProfile.findOne({
-//                     User_id: employee.companyId._id
-//                 })
-//                     .select('firm_name logo email address isIndependent')
-//                     .lean();
+        const now = new Date();
 
-//                 if (partnerProfile) {
-//                     companyDetails = {
-//                         companyId: employee.companyId,
-//                         companyName: partnerProfile.firm_name,
-//                         companyLogo: partnerProfile.logo,
-//                         email: partnerProfile.email,
-//                         address: partnerProfile.address || { city: '', state: '' },
-//                         isIndependent: partnerProfile.isIndependent,
-//                         employeeInfo: {
-//                             empCode: employee.empCode,
-//                             designation: employee.jobInfo?.designation,
-//                             department: employee.jobInfo?.department
-//                         },
-//                         userType: 'employee'
-//                     };
-//                 }
-//             }
-//         }
+        /* -----------------------------------------
+           2. Try ACTIVE subscription (strict)
+           - status ACTIVE
+           - endDate in future
+        ------------------------------------------ */
+        let subscription = await Subscription.findOne({
+            company: companyId,
+            status: "ACTIVE",
+            endDate: { $gt: now },
+            isActive: true,
+        })
+            .sort({ endDate: -1 }) // latest valid
+            .lean();
 
-//         // If no company found
-//         if (!companyDetails) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: `No company found for this ${userType}`
-//             });
-//         }
+        /* -----------------------------------------
+           3. Fallback: Latest ANY subscription
+        ------------------------------------------ */
+        if (!subscription) {
+            subscription = await Subscription.findOne({
+                company: companyId,
+                isActive: true,
+            })
+                .sort({ endDate: -1 }) // most recent
+                .lean();
+        }
 
-//         // Return success response
-//         return res.status(200).json({
-//             success: true,
-//             data: companyDetails
-//         });
+        /* -----------------------------------------
+           4. No subscription case
+        ------------------------------------------ */
+        if (!subscription) {
+            return res.status(404).json({
+                success: false,
+                message: "No subscription found",
+            });
+        }
 
-//     } catch (error) {
-//         console.error('Error in getCompanyByUser:', error);
-//         return res.status(500).json({
-//             success: false,
-//             message: 'Internal server error',
-//             error: error.message
-//         });
-//     }
-// };
+        /* -----------------------------------------
+           5. Normalize Status (REAL-TIME)
+           Avoid relying only on DB stored value
+        ------------------------------------------ */
+        let computedStatus = subscription.status;
+
+        if (subscription.endDate < now) {
+            computedStatus = "EXPIRED";
+        } else if (subscription.status === "ACTIVE") {
+            computedStatus = "ACTIVE";
+        } else if (subscription.status === "PENDING") {
+            computedStatus = "PENDING";
+        }
+
+        /* -----------------------------------------
+           6. Extract Feature Map (FAST ACCESS)
+        ------------------------------------------ */
+        const featureMap = {};
+        if (subscription.planSnapshot?.features) {
+            for (const f of subscription.planSnapshot.features) {
+                featureMap[f.key] = f.value;
+            }
+        }
+
+        /* -----------------------------------------
+           7. Response (Clean + Structured)
+        ------------------------------------------ */
+        return res.status(200).json({
+            success: true,
+            message: "Subscription fetched successfully",
+            data: {
+                _id: subscription._id,
+                company: subscription.company,
+
+                plan: {
+                    id: subscription.plan,
+                    name: subscription.planSnapshot?.name,
+                    price: subscription.planSnapshot?.price,
+                    finalPrice: subscription.planSnapshot?.finalPrice,
+                    validityDays: subscription.planSnapshot?.validityDays,
+                },
+
+                status: computedStatus,
+                isActive: subscription.isActive,
+
+                timeline: {
+                    startDate: subscription.startDate,
+                    endDate: subscription.endDate,
+                    isExpired: subscription.endDate < now,
+                    daysLeft: Math.max(
+                        0,
+                        Math.ceil(
+                            (new Date(subscription.endDate) - now) /
+                                (1000 * 60 * 60 * 24)
+                        )
+                    ),
+                },
+
+                payment: subscription.payment,
+
+                usage: subscription.usage,
+
+                features: featureMap,
+
+                autoRenew: subscription.autoRenew,
+                renewalHistory: subscription.renewalHistory,
+            },
+        });
+    } catch (error) {
+        console.error("GET SUBSCRIPTION ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+        });
+    }
+};
+
 
 
 export const getCompanyByUser = async (req, res) => {
