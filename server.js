@@ -22,6 +22,7 @@ import planRoutes from './routes/plan.js'
 import shift from './routes/Attandance/Shift.js'
 import './models/Attandance/Holiydaycron.js'
 import ExportRoutes from './routes/Attandance/Export/attendanceRoutes.js'
+import subscriptionsdata from './routes/Attandance/subscription.routes.js';
 dotenv.config();
 await connectDB();
 // START BACKGROUND WORKER HERE
@@ -65,6 +66,7 @@ app.use('/api/payment', payment);
 
 app.use("/api/attendance/requests", attendanceRequestRoutes);
 app.use('/api/patnerProfile', patnerProfile);
+app.use('/api/subscriptionsdata', subscriptionsdata);
 
 
 
