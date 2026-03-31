@@ -8,7 +8,7 @@ import PatnerProfile from "../../models/PatnerProfile.js";
 import Shift from "../../models/Attandance/Shift.js";
 import { getActiveSubscription } from "../../services/subscription.service.js";
 import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
-import { validateSubscription,canCreateEmployee,getEmployeeLimit ,isNearingEmployeeLimit} from "../../services/featureAccess.service.js";
+import { validateSubscription, canCreateEmployee, getEmployeeLimit, isNearingEmployeeLimit } from "../../services/featureAccess.service.js";
 // controllers/companyController.js
 
 
@@ -125,7 +125,7 @@ export const getLatestSubscription = async (req, res) => {
                         0,
                         Math.ceil(
                             (new Date(subscription.endDate) - now) /
-                                (1000 * 60 * 60 * 24)
+                            (1000 * 60 * 60 * 24)
                         )
                     ),
                 },
@@ -496,7 +496,7 @@ export const createEmployee = async (req, res) => {
            5. Subscription Validation (USING FEATURE SERVICE)
         ---------------------------------------------- */
         const subscription = await getActiveSubscription(companyId, session);
-        
+
         // Use the feature service to validate subscription
         const subscriptionStatus = validateSubscription(subscription);
         if (!subscriptionStatus.valid) {
@@ -513,15 +513,15 @@ export const createEmployee = async (req, res) => {
             throw new Error("Cannot create employee due to subscription restrictions");
         }
 
-      
+
         // Get real-time employee count (additional safety check)
         const currentCount = await Employee.countDocuments({
             companyId,
             employmentStatus: "active"
         }).session(session);
-        
+
         const employeeLimit = getEmployeeLimit(subscription);
-        
+
         if (currentCount >= employeeLimit) {
             throw new Error(`Employee limit of ${employeeLimit} reached. Please upgrade your plan.`);
         }
@@ -553,12 +553,22 @@ export const createEmployee = async (req, res) => {
         const [employee] = await Employee.create([employeeData], { session });
 
         /* ---------------------------------------------
-           7. Update Usage Tracking (Using increment function)
-        ---------------------------------------------- */
-        // Use the incrementEmployeeCount function from the service
-        subscription.usage.employeesUsed = (subscription.usage?.employeesUsed || 0) + 1;
-        await subscription.save({ session });
+     7. Update Usage Tracking (Without using save())
+    ---------------------------------------------- */
+        // In your createEmployee function, replace section 7 with:
 
+        /* ---------------------------------------------
+           7. Update Usage Tracking
+        ---------------------------------------------- */
+        // Use direct update instead of subscription.save()
+        await Subscription.updateOne(
+            { _id: subscription._id },
+            { $inc: { 'usage.employeesUsed': 1 } },
+            { session }
+        );
+
+        // Update local subscription object for response
+        subscription.usage.employeesUsed = (subscription.usage?.employeesUsed || 0) + 1;
         /* ---------------------------------------------
            8. Commit Transaction
         ---------------------------------------------- */
