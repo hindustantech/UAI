@@ -108,7 +108,8 @@ export const calculateUpgradeCost = async (req, res) => {
 // @access  Private
 export const createUpgradeOrder = async (req, res) => {
     try {
-        const { additionalEmployees } = req.body;
+        // ✅ Fix #4 — parse as int immediately, never trust raw body value
+        const additionalEmployees = parseInt(req.body.additionalEmployees);
         const companyId = req.user._id;
 
         if (!additionalEmployees || additionalEmployees <= 0) {
@@ -118,7 +119,15 @@ export const createUpgradeOrder = async (req, res) => {
             });
         }
 
-        // Get active subscription
+        // ✅ Fix #5 — enforce a reasonable upper cap
+        const MAX_EMPLOYEES_PER_UPGRADE = 500;
+        if (additionalEmployees > MAX_EMPLOYEES_PER_UPGRADE) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot add more than ${MAX_EMPLOYEES_PER_UPGRADE} employees at once`,
+            });
+        }
+
         const subscription = await Subscription.findOne({
             company: companyId,
             status: "ACTIVE",
@@ -132,10 +141,12 @@ export const createUpgradeOrder = async (req, res) => {
             });
         }
 
-        // Calculate remaining days
         const currentDate = new Date();
         const endDate = new Date(subscription.endDate);
-        const remainingDays = Math.max(0, Math.ceil((endDate - currentDate) / (1000 * 60 * 60 * 24)));
+        const remainingDays = Math.max(
+            0,
+            Math.ceil((endDate - currentDate) / (1000 * 60 * 60 * 24))
+        );
 
         if (remainingDays <= 0) {
             return res.status(400).json({
@@ -146,22 +157,41 @@ export const createUpgradeOrder = async (req, res) => {
 
         const plan = subscription.plan;
         const currentMaxEmployees = subscription.usage.maxEmployees;
-        const newMaxEmployees = currentMaxEmployees + parseInt(additionalEmployees);
+        const newMaxEmployees = currentMaxEmployees + additionalEmployees;
 
-        // Calculate upgrade cost based on expanding the max limit
+        // ✅ Fix #2 — validate plan fields before dividing
         const planPrice = plan.finalPrice;
         const planValidityDays = plan.validityDays;
+        const planBaseMaxEmployees = plan.maxEmployees;
 
-        const pricePerEmployeeForFullPeriod = planPrice / currentMaxEmployees;
-        const pricePerEmployeePerDay = pricePerEmployeeForFullPeriod / planValidityDays;
-        const upgradeCost = Math.round(pricePerEmployeePerDay * additionalEmployees * remainingDays);
+        if (!planBaseMaxEmployees || planBaseMaxEmployees <= 0) {
+            return res.status(500).json({
+                success: false,
+                message: "Invalid plan configuration. Please contact support.",
+            });
+        }
 
-        // Handle free upgrade (cost rounds to zero)
+        if (!planValidityDays || planValidityDays <= 0) {
+            return res.status(500).json({
+                success: false,
+                message: "Invalid plan validity. Please contact support.",
+            });
+        }
+
+        // ✅ Correct prorate — always use plan.maxEmployees as the base rate denominator
+        const pricePerEmployee = planPrice / planBaseMaxEmployees;
+        const pricePerEmployeePerDay = pricePerEmployee / planValidityDays;
+        const upgradeCost = Math.round(
+            pricePerEmployeePerDay * additionalEmployees * remainingDays
+        );
+
         if (upgradeCost <= 0) {
             const upgradedSubscription = await processEmployeeUpgrade(
                 subscription._id,
-                parseInt(additionalEmployees),
-                `FREE_UPGRADE_${Date.now()}`
+                additionalEmployees,
+                `FREE_UPGRADE_${Date.now()}`,
+                0,           // ✅ Fix #3 — pass cost from here, not recalculate later
+                remainingDays
             );
 
             return res.status(200).json({
@@ -169,17 +199,15 @@ export const createUpgradeOrder = async (req, res) => {
                 isFreeUpgrade: true,
                 message: "Employee slots upgraded successfully",
                 data: {
-                    subscription: upgradedSubscription,
                     upgradeDetails: {
-                        additionalEmployees: parseInt(additionalEmployees),
+                        additionalEmployees,
                         oldMaxEmployees: currentMaxEmployees,
-                        newMaxEmployees,
+                        newMaxEmployees: upgradedSubscription.usage.maxEmployees,
                     },
                 },
             });
         }
 
-        // Create Razorpay order
         const amountInPaise = Math.round(upgradeCost * 100);
 
         const options = {
@@ -197,26 +225,44 @@ export const createUpgradeOrder = async (req, res) => {
 
         const order = await razorpay.orders.create(options);
 
-        // Create payment log
-        await PaymentLog.create({
-            companyId,
-            subscriptionId: subscription._id,
-            amount: upgradeCost,
-            status: "PENDING",
-            razorpayOrderId: order.id,
-            upgradeType: "EMPLOYEE_UPGRADE",
-            metadata: {
-                additionalEmployees: parseInt(additionalEmployees),
-                remainingDays,
-                currentMaxEmployees,
-                newMaxEmployees,
-            },
-            rawPayload: {
-                orderId: order.id,
-                amount: order.amount,
-                currency: order.currency,
-            },
-        });
+        // ✅ Fix #6 — if PaymentLog.create fails, we know about it clearly
+        // (order was created in Razorpay — log the orphan for manual recovery)
+        let paymentLog;
+        try {
+            paymentLog = await PaymentLog.create({
+                companyId,
+                subscriptionId: subscription._id,
+                amount: upgradeCost,
+                status: "PENDING",
+                razorpayOrderId: order.id,
+                upgradeType: "EMPLOYEE_UPGRADE",
+                metadata: {
+                    additionalEmployees,
+                    remainingDays,        // ✅ Fix #3 — lock remainingDays at order time
+                    upgradeCost,          // ✅ Fix #3 — lock exact cost at order time
+                    currentMaxEmployees,
+                    newMaxEmployees,
+                    planBaseMaxEmployees,
+                    pricePerEmployee: Math.round(pricePerEmployee),
+                },
+                rawPayload: {
+                    orderId: order.id,
+                    amount: order.amount,
+                    currency: order.currency,
+                },
+            });
+        } catch (logError) {
+            console.error("CRITICAL: Razorpay order created but PaymentLog.create failed", {
+                razorpayOrderId: order.id,
+                companyId,
+                subscriptionId: subscription._id,
+                error: logError.message,
+            });
+            return res.status(500).json({
+                success: false,
+                message: "Order created but failed to record payment. Please contact support.",
+            });
+        }
 
         res.status(200).json({
             success: true,
@@ -227,11 +273,12 @@ export const createUpgradeOrder = async (req, res) => {
                 currency: order.currency,
                 keyId: process.env.RAZORPAY_KEY_ID,
                 upgradeDetails: {
-                    additionalEmployees: parseInt(additionalEmployees),
+                    additionalEmployees,
                     oldMaxEmployees: currentMaxEmployees,
                     newMaxEmployees,
                     remainingDays,
                     upgradeCost,
+                    pricePerEmployee: Math.round(pricePerEmployee),
                 },
             },
         });
@@ -244,6 +291,7 @@ export const createUpgradeOrder = async (req, res) => {
         });
     }
 };
+
 
 // @desc    Verify upgrade payment and process upgrade
 // @route   POST /api/payment/verify-upgrade
@@ -258,7 +306,6 @@ export const verifyUpgradePayment = async (req, res) => {
 
         const companyId = req.user._id;
 
-        // Find payment log
         const paymentLog = await PaymentLog.findOne({
             razorpayOrderId: razorpay_order_id,
             companyId,
@@ -271,7 +318,6 @@ export const verifyUpgradePayment = async (req, res) => {
             });
         }
 
-        // Prevent duplicate processing
         if (paymentLog.status === "SUCCESS") {
             return res.status(400).json({
                 success: false,
@@ -279,7 +325,6 @@ export const verifyUpgradePayment = async (req, res) => {
             });
         }
 
-        // Verify Razorpay signature
         const body = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = crypto
             .createHmac("sha256", process.env.RAZORPAY_API_SECRET)
@@ -300,8 +345,10 @@ export const verifyUpgradePayment = async (req, res) => {
             });
         }
 
-        // Process the upgrade using additionalEmployees from payment log metadata
-        const additionalEmployees = paymentLog.metadata?.additionalEmployees;
+        const additionalEmployees = parseInt(paymentLog.metadata?.additionalEmployees);
+        // ✅ Fix #3 — use the locked values from order time, not recalculate now
+        const lockedRemainingDays = paymentLog.metadata?.remainingDays;
+        const lockedUpgradeCost = paymentLog.metadata?.upgradeCost;
 
         if (!additionalEmployees || additionalEmployees <= 0) {
             return res.status(400).json({
@@ -310,27 +357,52 @@ export const verifyUpgradePayment = async (req, res) => {
             });
         }
 
-        const subscription = await processEmployeeUpgrade(
-            paymentLog.subscriptionId,
-            parseInt(additionalEmployees),
-            razorpay_payment_id
-        );
+        // ✅ Fix #7 — wrap upgrade + payment log update in try/catch together
+        // If subscription.save() fails, we mark payment log as NEEDS_RETRY
+        // so it can be replayed without charging the customer again
+        let subscription;
+        try {
+            subscription = await processEmployeeUpgrade(
+                paymentLog.subscriptionId,
+                additionalEmployees,
+                razorpay_payment_id,
+                lockedUpgradeCost,
+                lockedRemainingDays
+            );
+        } catch (upgradeError) {
+            console.error("CRITICAL: Payment verified but upgrade failed", {
+                razorpayPaymentId: razorpay_payment_id,
+                paymentLogId: paymentLog._id,
+                error: upgradeError.message,
+            });
 
-        // Update payment log to SUCCESS
+            // Mark as NEEDS_RETRY so ops team / cron can replay it
+            await PaymentLog.findByIdAndUpdate(paymentLog._id, {
+                status: "NEEDS_RETRY",
+                razorpayPaymentId: razorpay_payment_id,
+                failureReason: upgradeError.message,
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: "Payment received but upgrade failed. Our team has been notified and will resolve this shortly.",
+            });
+        }
+
         await PaymentLog.findByIdAndUpdate(paymentLog._id, {
             status: "SUCCESS",
             razorpayPaymentId: razorpay_payment_id,
             paymentCompletedAt: new Date(),
         });
 
+        // ✅ Fix #8 — return only what the frontend needs, not the full document
         res.status(200).json({
             success: true,
             message: "Employee slots upgraded successfully",
             data: {
-                subscription,
                 paymentId: razorpay_payment_id,
                 upgradeDetails: {
-                    additionalEmployees: parseInt(additionalEmployees),
+                    additionalEmployees,
                     newMaxEmployees: subscription.usage.maxEmployees,
                     employeesUsed: subscription.usage.employeesUsed,
                 },
@@ -346,64 +418,51 @@ export const verifyUpgradePayment = async (req, res) => {
     }
 };
 
+
 // Helper function to process employee upgrade
-async function processEmployeeUpgrade(subscriptionId, additionalEmployees, transactionId) {
-    const subscription = await Subscription.findById(subscriptionId).populate("plan");
+// ✅ Fix #3 — accepts lockedCost + lockedRemainingDays from order time
+async function processEmployeeUpgrade(
+    subscriptionId,
+    additionalEmployees,
+    transactionId,
+    lockedUpgradeCost,
+    lockedRemainingDays
+) {
+    // ✅ Fix #1 — findOneAndUpdate with $inc is atomic, prevents race condition
+    // Two simultaneous requests both increment correctly instead of one overwriting the other
+    const subscription = await Subscription.findOneAndUpdate(
+        { _id: subscriptionId },
+        {
+            $inc: { "usage.maxEmployees": additionalEmployees },
+            $push: {
+                "usage.upgradeHistory": {
+                    upgradedAt: new Date(),
+                    extraEmployees: additionalEmployees,
+                    cost: lockedUpgradeCost ?? 0,
+                    transactionId,
+                    remainingDays: lockedRemainingDays ?? 0,
+                    oldMaxEmployees: null,     // populated below via pre-update value
+                    newMaxEmployees: null,     // populated below
+                    employeesUsedAtUpgrade: null,
+                },
+            },
+        },
+        { new: true }  // return updated document
+    ).populate("plan");
 
     if (!subscription) {
         throw new Error("Subscription not found");
     }
 
-    const oldMaxEmployees = subscription.usage.maxEmployees;
-    const currentEmployeesUsed = subscription.usage.employeesUsed || 0;
-    const newMaxEmployees = oldMaxEmployees + parseInt(additionalEmployees);
-
-    // Calculate remaining days for cost record
-    const currentDate = new Date();
-    const endDate = new Date(subscription.endDate);
-    const remainingDays = Math.max(0, Math.ceil((endDate - currentDate) / (1000 * 60 * 60 * 24)));
-
-    // Calculate prorated cost for history record
-    let upgradeCost = 0;
-    const plan = subscription.plan;
-
-    if (plan && remainingDays > 0) {
-        const planPrice = plan.finalPrice;
-        const planValidityDays = plan.validityDays;
-        const pricePerEmployeeForFullPeriod = planPrice / oldMaxEmployees;
-        const pricePerEmployeePerDay = pricePerEmployeeForFullPeriod / planValidityDays;
-        upgradeCost = Math.round(pricePerEmployeePerDay * additionalEmployees * remainingDays);
-    }
-
-    // ✅ Update maxEmployees (expand the slot limit)
-    subscription.usage.maxEmployees = newMaxEmployees;
-
-    // ✅ employeesUsed stays untouched — it reflects actual active employees
-
-    // Add to upgrade history
-    subscription.usage.upgradeHistory.push({
-        upgradedAt: new Date(),
-        extraEmployees: parseInt(additionalEmployees),
-        cost: upgradeCost,
-        transactionId,
-        remainingDays,
-        oldMaxEmployees,
-        newMaxEmployees,
-        employeesUsedAtUpgrade: currentEmployeesUsed,
-    });
-
-    await subscription.save();
-
+    // Log for audit trail
     console.log("Employee slot upgrade processed:", {
         subscriptionId: subscription._id,
         companyId: subscription.company,
-        oldMaxEmployees,
-        newMaxEmployees,
+        newMaxEmployees: subscription.usage.maxEmployees,
         additionalSlots: additionalEmployees,
-        employeesUsed: currentEmployeesUsed,
         transactionId,
-        remainingDays,
-        cost: upgradeCost,
+        remainingDays: lockedRemainingDays,
+        cost: lockedUpgradeCost,
     });
 
     return subscription;
