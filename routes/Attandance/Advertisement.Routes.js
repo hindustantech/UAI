@@ -43,8 +43,8 @@ router.get("/getWithEmpAdvertisementsByCategory/:categoryId", getWithEmpAdvertis
 router.get("/:id", getAdvertisementById);
 
 // Admin routes (protected)
-router.post("/", authMiddleware, upload.single('image'), createAdvertisementAdmin);
-router.put("/:id", authMiddleware, upload.single('image'), updateAdvertisementadmin);
+router.post("/createAdvertisementAdmin", authMiddleware, upload.single('image'), createAdvertisementAdmin);
+router.put("/updateAdvertisementadmin/:id", authMiddleware, upload.single('image'), updateAdvertisementadmin);
 
 router.post("/", authMiddleware, upload.single('image'), createAdvertisement);
 router.put("/:id", authMiddleware, upload.single('image'), updateAdvertisement);
