@@ -310,6 +310,7 @@ export const approveAttendanceRequest = async (req, res) => {
         const { requestId } = req.params;
         const adminId = req.user._id;
 
+        // ─── Validate Request ID ───────────────────────────────────────────
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             return res.status(400).json({
                 success: false,
@@ -317,6 +318,7 @@ export const approveAttendanceRequest = async (req, res) => {
             });
         }
 
+        // ─── Fetch Request ─────────────────────────────────────────────────
         const request = await AttendanceRequest.findById(requestId).session(session);
 
         if (!request) {
@@ -333,101 +335,164 @@ export const approveAttendanceRequest = async (req, res) => {
             });
         }
 
-        /* =============================
+        /* =====================================================================
            LEAVE APPROVAL
-        ============================== */
+           Loop through each day in the range and upsert attendance as "leave"
+        ====================================================================== */
         if (request.requestType === "leave") {
             const start = new Date(request.leaveDetails.startDate);
             const end = new Date(request.leaveDetails.endDate);
 
-            // Set time to start of day for consistent date handling
             start.setHours(0, 0, 0, 0);
             end.setHours(23, 59, 59, 999);
 
-            for (
-                let d = new Date(start);
-                d <= end;
-                d.setDate(d.getDate() + 1)
-            ) {
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
                 const currentDate = new Date(d);
                 currentDate.setHours(0, 0, 0, 0);
+                const nextDate = new Date(currentDate.getTime() + 24 * 60 * 60 * 1000);
 
+                // Check if attendance record already exists
+                const existingLeave = await Attendance.findOne({
+                    companyId: request.companyId,
+                    employeeId: request.employeeId,
+                    date: { $gte: currentDate, $lt: nextDate }
+                }).session(session);
+
+                if (existingLeave) {
+                    // Update existing record
+                    await Attendance.findOneAndUpdate(
+                        {
+                            companyId: request.companyId,
+                            employeeId: request.employeeId,
+                            date: { $gte: currentDate, $lt: nextDate }
+                        },
+                        {
+                            $set: {
+                                status: "leave",
+                                approvalStatus: "approved",
+                                remarks: `Leave approved via request ${requestId}`
+                            }
+                        },
+                        { session }
+                    );
+                } else {
+                    // Create new attendance record for this leave day
+                    const newLeaveAttendance = new Attendance({
+                        companyId: request.companyId,
+                        employeeId: request.employeeId,
+                        date: currentDate,
+                        status: "leave",
+                        approvalStatus: "approved",
+                        remarks: `Leave approved via request ${requestId}`,
+                        geoLocation: {
+                            type: "Point",
+                            coordinates: [0, 0],
+                            verified: false,
+                            source: "manual"
+                        }
+                    });
+                    await newLeaveAttendance.save({ session });
+                }
+            }
+        }
+
+        /* =====================================================================
+           PUNCH CORRECTION
+           Handles: punch_in_out | punch_in_and_out | punch_in
+           Uses findOneAndUpdate to avoid unique-index conflicts on .save()
+        ====================================================================== */
+        if (
+            request.requestType === "punch_in_out" ||
+            request.requestType === "punch_in_and_out" ||
+            request.requestType === "punch_in"
+        ) {
+            const date = new Date(request.punchDetails.date);
+            date.setHours(0, 0, 0, 0);
+            const nextDay = new Date(date.getTime() + 24 * 60 * 60 * 1000);
+
+            // ── Build $set payload dynamically ──────────────────────────────
+            const updateFields = {
+                status: "present",
+                approvalStatus: "approved",
+                remarks: `Punch corrected via request ${requestId}`
+            };
+
+            if (request.punchDetails.punchInTime) {
+                updateFields.punchIn = new Date(request.punchDetails.punchInTime);
+            }
+
+            if (request.punchDetails.punchOutTime) {
+                updateFields.punchOut = new Date(request.punchDetails.punchOutTime);
+            }
+
+            // ── Check for existing attendance record ────────────────────────
+            const existingAttendance = await Attendance.findOne({
+                companyId: request.companyId,
+                employeeId: request.employeeId,
+                date: { $gte: date, $lt: nextDay }
+            }).session(session);
+
+            if (existingAttendance) {
+                // ── Build edit log with old values ──────────────────────────
+                const editLog = {
+                    editedBy: adminId,
+                    reason: request.reason,
+                    oldValue: {
+                        punchIn: existingAttendance.punchIn || null,
+                        punchOut: existingAttendance.punchOut || null
+                    },
+                    newValue: {
+                        punchIn: updateFields.punchIn || existingAttendance.punchIn || null,
+                        punchOut: updateFields.punchOut || existingAttendance.punchOut || null
+                    },
+                    editedAt: new Date()
+                };
+
+                // ── Atomic update — no .save() risk ────────────────────────
                 await Attendance.findOneAndUpdate(
                     {
                         companyId: request.companyId,
                         employeeId: request.employeeId,
-                        date: {
-                            $gte: currentDate,
-                            $lt: new Date(currentDate.getTime() + 24 * 60 * 60 * 1000)
-                        }
+                        date: { $gte: date, $lt: nextDay }
                     },
                     {
-                        $set: {
-                            status: "leave",
-                            approvalStatus: "approved",
-                            remarks: `Leave approved via request ${requestId}`
-                        }
+                        $set: updateFields,
+                        $push: { editLogs: editLog }
                     },
-                    {
-                        upsert: true,
-                        session
-                    }
+                    { session, new: true }
                 );
-            }
-        }
 
-        /* =============================
-           PUNCH CORRECTION
-        ============================== */
-        if (request.requestType === "punch_in_out" || request.requestType === "punch_in_and_out") {
-            const date = new Date(request.punchDetails.date);
-            date.setHours(0, 0, 0, 0);
-
-            let attendance = await Attendance.findOne({
-                companyId: request.companyId,
-                employeeId: request.employeeId,
-                date: {
-                    $gte: date,
-                    $lt: new Date(date.getTime() + 24 * 60 * 60 * 1000)
-                }
-            }).session(session);
-
-            if (!attendance) {
-                // Get employee details for office location
+            } else {
+                // ── No record found — create fresh attendance ───────────────
                 const employee = await Employee.findById(request.employeeId).session(session);
 
-                // Try to find previous day's attendance to copy location
-                const previousDay = new Date(date);
-                previousDay.setDate(previousDay.getDate() - 1);
-                previousDay.setHours(0, 0, 0, 0);
-
-                const previousAttendance = await Attendance.findOne({
-                    companyId: request.companyId,
-                    employeeId: request.employeeId,
-                    date: {
-                        $gte: previousDay,
-                        $lt: new Date(previousDay.getTime() + 24 * 60 * 60 * 1000)
-                    }
-                }).session(session);
-
-                // Set default geoLocation
+                // Resolve best available geoLocation
                 let geoLocation = {
                     type: "Point",
-                    coordinates: [0, 0], // Default coordinates
+                    coordinates: [0, 0],
                     verified: false,
                     source: "manual"
                 };
 
-                // Use previous attendance location if available
-                if (previousAttendance && previousAttendance.geoLocation && previousAttendance.geoLocation.coordinates) {
+                // Prefer previous day's location
+                const previousDay = new Date(date);
+                previousDay.setDate(previousDay.getDate() - 1);
+                previousDay.setHours(0, 0, 0, 0);
+                const previousDayEnd = new Date(previousDay.getTime() + 24 * 60 * 60 * 1000);
+
+                const previousAttendance = await Attendance.findOne({
+                    companyId: request.companyId,
+                    employeeId: request.employeeId,
+                    date: { $gte: previousDay, $lt: previousDayEnd }
+                }).session(session);
+
+                if (previousAttendance?.geoLocation?.coordinates?.length) {
                     geoLocation = {
-                        ...previousAttendance.geoLocation,
+                        ...previousAttendance.geoLocation.toObject?.() ?? previousAttendance.geoLocation,
                         verified: false,
                         source: "manual"
                     };
-                }
-                // Otherwise use employee's office location if available
-                else if (employee && employee.officeLocation && employee.officeLocation.coordinates) {
+                } else if (employee?.officeLocation?.coordinates?.length) {
                     geoLocation = {
                         type: employee.officeLocation.type || "Point",
                         coordinates: employee.officeLocation.coordinates,
@@ -436,50 +501,33 @@ export const approveAttendanceRequest = async (req, res) => {
                     };
                 }
 
-                attendance = new Attendance({
+                const editLog = {
+                    editedBy: adminId,
+                    reason: request.reason,
+                    oldValue: { punchIn: null, punchOut: null },
+                    newValue: {
+                        punchIn: updateFields.punchIn || null,
+                        punchOut: updateFields.punchOut || null
+                    },
+                    editedAt: new Date()
+                };
+
+                const newAttendance = new Attendance({
                     companyId: request.companyId,
                     employeeId: request.employeeId,
-                    date: date,
-                    status: "present",
-                    approvalStatus: "approved",
-                    geoLocation: geoLocation
+                    date,
+                    geoLocation,
+                    editLogs: [editLog],
+                    ...updateFields
                 });
+
+                await newAttendance.save({ session });
             }
-
-            // Add to edit logs
-            const editLog = {
-                editedBy: adminId,
-                reason: request.reason,
-                oldValue: {
-                    punchIn: attendance.punchIn,
-                    punchOut: attendance.punchOut
-                },
-                newValue: {
-                    punchIn: request.punchDetails.punchInTime || attendance.punchIn,
-                    punchOut: request.punchDetails.punchOutTime || attendance.punchOut
-                },
-                editedAt: new Date()
-            };
-
-            attendance.editLogs = attendance.editLogs || [];
-            attendance.editLogs.push(editLog);
-
-            if (request.punchDetails.punchInTime) {
-                attendance.punchIn = request.punchDetails.punchInTime;
-            }
-
-            if (request.punchDetails.punchOutTime) {
-                attendance.punchOut = request.punchDetails.punchOutTime;
-            }
-
-            attendance.status = "present";
-            attendance.approvalStatus = "approved";
-            attendance.remarks = `Punch corrected via request ${requestId}`;
-
-            await attendance.save({ session });
         }
 
-        // Update request status
+        /* =====================================================================
+           FINALIZE — Mark request as approved
+        ====================================================================== */
         request.status = "approved";
         request.approvedBy = adminId;
         request.approvedAt = new Date();
@@ -487,7 +535,7 @@ export const approveAttendanceRequest = async (req, res) => {
 
         await session.commitTransaction();
 
-        return res.json({
+        return res.status(200).json({
             success: true,
             message: "Request approved successfully",
             data: request
