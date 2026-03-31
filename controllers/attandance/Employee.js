@@ -433,7 +433,6 @@ export const getCompanyByUser = async (req, res) => {
 //     }
 // };
 
-
 export const createEmployee = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -513,7 +512,6 @@ export const createEmployee = async (req, res) => {
             throw new Error("Cannot create employee due to subscription restrictions");
         }
 
-
         // Get real-time employee count (additional safety check)
         const currentCount = await Employee.countDocuments({
             companyId,
@@ -553,11 +551,6 @@ export const createEmployee = async (req, res) => {
         const [employee] = await Employee.create([employeeData], { session });
 
         /* ---------------------------------------------
-     7. Update Usage Tracking (Without using save())
-    ---------------------------------------------- */
-        // In your createEmployee function, replace section 7 with:
-
-        /* ---------------------------------------------
            7. Update Usage Tracking
         ---------------------------------------------- */
         // Use direct update instead of subscription.save()
@@ -569,11 +562,11 @@ export const createEmployee = async (req, res) => {
 
         // Update local subscription object for response
         subscription.usage.employeesUsed = (subscription.usage?.employeesUsed || 0) + 1;
+
         /* ---------------------------------------------
            8. Commit Transaction
         ---------------------------------------------- */
         await session.commitTransaction();
-        session.endSession();
 
         // Prepare response with subscription info
         const response = {
@@ -596,8 +589,10 @@ export const createEmployee = async (req, res) => {
         return res.status(201).json(response);
 
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
+        // Only abort transaction if session is still active and transaction is in progress
+        if (session && session.inTransaction()) {
+            await session.abortTransaction();
+        }
 
         // Handle specific error cases
         let statusCode = 400;
@@ -615,9 +610,17 @@ export const createEmployee = async (req, res) => {
         } else if (error.message.includes("Unauthorized") || error.message.includes("Access denied")) {
             statusCode = 401;
             errorResponse.code = "UNAUTHORIZED";
+        } else if (error.message.includes("not found")) {
+            statusCode = 404;
+            errorResponse.code = "NOT_FOUND";
         }
 
         return res.status(statusCode).json(errorResponse);
+    } finally {
+        // Always end the session
+        if (session) {
+            session.endSession();
+        }
     }
 };
 
