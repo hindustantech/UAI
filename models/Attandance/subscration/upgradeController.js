@@ -121,7 +121,7 @@ export const createUpgradeOrder = async (req, res) => {
         const options = {
             amount: amountInPaise,
             currency: "INR",
-            receipt: `upgrade_${subscription._id}_${Date.now()}`,
+            receipt: `upg_${subscription._id.toString().slice(-8)}_${Date.now().toString().slice(-8)}`,
             notes: {
                 subscriptionId: subscription._id.toString(),
                 companyId: companyId.toString(),
