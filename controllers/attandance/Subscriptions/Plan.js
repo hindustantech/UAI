@@ -2,7 +2,6 @@ import Plan from "../../../models/Attandance/subscration/plan.js";
 import mongoose from "mongoose";
 
 
-
 /**
  * @desc Create Plan
  * @route POST /api/plan
@@ -15,7 +14,10 @@ export const createPlan = async (req, res) => {
             discount = 0,
             validityDays,
             features = [],
-            planType = "BASIC"
+            planType = "BASIC",
+            data_export = false,
+            data_see = false,
+            Max_Employees = 0,
         } = req.body;
 
         // Validation
@@ -33,7 +35,7 @@ export const createPlan = async (req, res) => {
             });
         }
 
-        // Check duplicate plan name (case insensitive)
+        // Check duplicate plan name
         const existing = await Plan.findOne({
             name: { $regex: new RegExp(`^${name}$`, "i") }
         });
@@ -45,9 +47,8 @@ export const createPlan = async (req, res) => {
             });
         }
 
-        // Format features properly - Accept key + value from frontend
+        // Format features properly
         const formattedFeatures = features.map((feature) => {
-            // If user sends full object {key, value, description}
             if (typeof feature === 'object' && feature !== null && feature.key && feature.value !== undefined) {
                 return {
                     key: feature.key.toString().trim().toUpperCase().replace(/\s+/g, '_'),
@@ -55,8 +56,6 @@ export const createPlan = async (req, res) => {
                     description: feature.description || feature.value.toString()
                 };
             }
-
-            // Fallback: if somehow string is sent
             return {
                 key: `FEATURE_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
                 value: feature,
@@ -71,6 +70,9 @@ export const createPlan = async (req, res) => {
             validityDays: Number(validityDays),
             features: formattedFeatures,
             planType: planType.toUpperCase(),
+            data_export: Boolean(data_export),
+            data_see: Boolean(data_see),
+            Max_Employees: Number(Max_Employees),
         });
 
         return res.status(201).json({
@@ -82,7 +84,6 @@ export const createPlan = async (req, res) => {
     } catch (error) {
         console.error("Create Plan Error:", error);
 
-        // Handle duplicate key error from MongoDB
         if (error.code === 11000) {
             return res.status(400).json({
                 success: false,
@@ -97,6 +98,7 @@ export const createPlan = async (req, res) => {
         });
     }
 };
+
 
 
 /**
@@ -154,10 +156,13 @@ export const updatePlan = async (req, res) => {
         const {
             features = [],
             planType,
+            data_export,
+            data_see,
+            Max_Employees,
             ...rest
         } = req.body;
 
-        // Format features from frontend (key + value)
+        // Format features from frontend
         const formattedFeatures = features.map((feature) => {
             if (typeof feature === 'object' && feature !== null && feature.key && feature.value !== undefined) {
                 return {
@@ -166,7 +171,6 @@ export const updatePlan = async (req, res) => {
                     description: feature.description || feature.value.toString()
                 };
             }
-            // Fallback
             return {
                 key: `FEATURE_${Date.now()}`,
                 value: feature,
@@ -174,13 +178,19 @@ export const updatePlan = async (req, res) => {
             };
         });
 
+        const updateData = {
+            ...rest,
+            features: formattedFeatures,
+        };
+
+        if (planType) updateData.planType = planType.toUpperCase();
+        if (data_export !== undefined) updateData.data_export = Boolean(data_export);
+        if (data_see !== undefined) updateData.data_see = Boolean(data_see);
+        if (Max_Employees !== undefined) updateData.Max_Employees = Number(Max_Employees);
+
         const updatedPlan = await Plan.findByIdAndUpdate(
             id,
-            {
-                ...rest,
-                features: formattedFeatures,
-                planType: planType ? planType.toUpperCase() : undefined,
-            },
+            updateData,
             {
                 new: true,
                 runValidators: true
@@ -216,6 +226,7 @@ export const updatePlan = async (req, res) => {
         });
     }
 };
+
 
 /**
  * @desc Delete Plan

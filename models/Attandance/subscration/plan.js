@@ -39,7 +39,24 @@ const planSchema = new mongoose.Schema({
         type: Number,
         required: true,
     },
-    features: [featureSchema],   // Array of objects
+    data_export: {
+        type: Boolean,
+        default: false,
+    },
+    data_see: {
+        type: Boolean,
+        default: false,
+    },
+    Max_Employees: {
+        type: Number,
+        default: 0,
+    },
+    isfree: {
+        type: Boolean,
+        default: false,
+    },
+    
+    features: [featureSchema],
     isActive: {
         type: Boolean,
         default: true,

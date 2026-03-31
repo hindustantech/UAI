@@ -7,8 +7,8 @@ import mongoose from "mongoose";
 import PatnerProfile from "../../models/PatnerProfile.js";
 import Shift from "../../models/Attandance/Shift.js";
 import { getActiveSubscription } from "../../services/subscription.service.js";
-import { hasFeatureAccess } from "../../services/featureAccess.service.js";
 import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
+import { validateSubscription,canCreateEmployee,getEmployeeLimit ,isNearingEmployeeLimit} from "../../services/featureAccess.service.js";
 // controllers/companyController.js
 
 
@@ -434,9 +434,6 @@ export const getCompanyByUser = async (req, res) => {
 // };
 
 
-// controllers/employee.controller.js
-
-
 export const createEmployee = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -496,28 +493,44 @@ export const createEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           5. Subscription Validation (SOURCE OF TRUTH)
+           5. Subscription Validation (USING FEATURE SERVICE)
         ---------------------------------------------- */
         const subscription = await getActiveSubscription(companyId, session);
-        if (!subscription) throw new Error("No active subscription");
-
-        const limitFeature = hasFeatureAccess(subscription, "MAXEMPLOYEES");
-        if (!limitFeature) {
-            throw new Error("Employee feature not available in your plan");
+        
+        // Use the feature service to validate subscription
+        const subscriptionStatus = validateSubscription(subscription);
+        if (!subscriptionStatus.valid) {
+            throw new Error(subscriptionStatus.message);
         }
 
-        const limit = limitFeature.value;
-
-        // ✅ REAL COUNT CHECK (CRITICAL FIX)
-        if (limit !== -1) {
-            const employeeCount = await Employee.countDocuments({
-                companyId,
-                employmentStatus: "active"
-            }).session(session);
-
-            if (employeeCount >= limit) {
-                throw new Error("Employee limit reached. Upgrade your plan.");
+        // Check if can create employee using the service
+        const canCreate = canCreateEmployee(subscription);
+        if (!canCreate) {
+            const remaining = getRemainingEmployeeSlots(subscription);
+            if (remaining === 0) {
+                throw new Error("Employee limit reached. Please upgrade your plan to add more employees.");
             }
+            throw new Error("Cannot create employee due to subscription restrictions");
+        }
+
+      
+        // Get real-time employee count (additional safety check)
+        const currentCount = await Employee.countDocuments({
+            companyId,
+            employmentStatus: "active"
+        }).session(session);
+        
+        const employeeLimit = getEmployeeLimit(subscription);
+        
+        if (currentCount >= employeeLimit) {
+            throw new Error(`Employee limit of ${employeeLimit} reached. Please upgrade your plan.`);
+        }
+
+        // Check if nearing limit for warning (optional)
+        const nearingLimit = isNearingEmployeeLimit(subscription, 80);
+        if (nearingLimit) {
+            // You can add a warning header or log this
+            console.warn(`Company ${companyId} is nearing employee limit: ${currentCount}/${employeeLimit}`);
         }
 
         /* ---------------------------------------------
@@ -540,13 +553,11 @@ export const createEmployee = async (req, res) => {
         const [employee] = await Employee.create([employeeData], { session });
 
         /* ---------------------------------------------
-           7. Usage Tracking (Optional - Analytics Only)
+           7. Update Usage Tracking (Using increment function)
         ---------------------------------------------- */
-        await Subscription.updateOne(
-            { _id: subscription._id },
-            { $inc: { "usage.employeesUsed": 1 } },
-            { session }
-        );
+        // Use the incrementEmployeeCount function from the service
+        subscription.usage.employeesUsed = (subscription.usage?.employeesUsed || 0) + 1;
+        await subscription.save({ session });
 
         /* ---------------------------------------------
            8. Commit Transaction
@@ -554,22 +565,52 @@ export const createEmployee = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        return res.status(201).json({
+        // Prepare response with subscription info
+        const response = {
             success: true,
             message: "Employee created successfully",
-            data: employee
-        });
+            data: employee,
+            subscription: {
+                employeesUsed: subscription.usage?.employeesUsed || 0,
+                employeeLimit: getEmployeeLimit(subscription),
+                remainingSlots: getRemainingEmployeeSlots(subscription),
+                nearingLimit: isNearingEmployeeLimit(subscription, 80)
+            }
+        };
+
+        // Add warning if nearing limit
+        if (isNearingEmployeeLimit(subscription, 80)) {
+            response.warning = `You have used ${subscription.usage?.employeesUsed || 0} out of ${getEmployeeLimit(subscription)} employee slots. Consider upgrading your plan.`;
+        }
+
+        return res.status(201).json(response);
 
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
 
-        return res.status(400).json({
+        // Handle specific error cases
+        let statusCode = 400;
+        let errorResponse = {
             success: false,
             message: error.message
-        });
+        };
+
+        if (error.message.includes("limit reached")) {
+            statusCode = 403;
+            errorResponse.code = "EMPLOYEE_LIMIT_REACHED";
+        } else if (error.message.includes("subscription")) {
+            statusCode = 403;
+            errorResponse.code = "SUBSCRIPTION_ERROR";
+        } else if (error.message.includes("Unauthorized") || error.message.includes("Access denied")) {
+            statusCode = 401;
+            errorResponse.code = "UNAUTHORIZED";
+        }
+
+        return res.status(statusCode).json(errorResponse);
     }
 };
+
 
 /* ---------------------------------------------
    Update EMPLOYEE (ENTERPRISE LEVEL)

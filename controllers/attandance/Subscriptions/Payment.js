@@ -13,13 +13,13 @@ const razorpay = new Razorpay({
 });
 
 
-// @desc    Create Razorpay order
+// @desc    Create Razorpay order (or handle free plan)
 // @route   POST /api/payment/create-order
 // @access  Private
 export const createOrder = async (req, res) => {
     try {
         const { planId } = req.body;
-        const companyId = req.user._id; // Assuming user is attached to req by auth middleware
+        const companyId = req.user._id;
 
         // Validate plan
         const plan = await Plan.findById(planId);
@@ -37,6 +37,29 @@ export const createOrder = async (req, res) => {
             });
         }
 
+        // Handle FREE plan - no payment required
+        if (plan.isfree === true || plan.finalPrice === 0) {
+            // Directly activate free subscription
+            const subscription = await activateFreeSubscription(companyId, plan);
+
+            return res.status(200).json({
+                success: true,
+                isFreePlan: true,
+                message: "Free plan activated successfully",
+                data: {
+                    subscription,
+                    planDetails: {
+                        name: plan.name,
+                        validityDays: plan.validityDays,
+                        maxEmployees: plan.Max_Employees,
+                        dataSee: plan.data_see,
+                        dataExport: plan.data_export,
+                    },
+                },
+            });
+        }
+
+        // For paid plans - continue with Razorpay order creation
         // Calculate amount (convert to smallest currency unit - paise for INR)
         const amountInPaise = Math.round(plan.finalPrice * 100);
 
@@ -49,6 +72,9 @@ export const createOrder = async (req, res) => {
                 planId: plan._id.toString(),
                 planName: plan.name,
                 companyId: companyId.toString(),
+                maxEmployees: plan.Max_Employees.toString(),
+                dataSee: plan.data_see.toString(),
+                dataExport: plan.data_export.toString(),
             },
         };
 
@@ -76,10 +102,10 @@ export const createOrder = async (req, res) => {
             amount: order.amount,
             currency: order.currency,
         });
-        
-        // Return order details to frontend
+
         res.status(200).json({
             success: true,
+            isFreePlan: false,
             data: {
                 orderId: order.id,
                 amount: order.amount,
@@ -89,6 +115,9 @@ export const createOrder = async (req, res) => {
                     name: plan.name,
                     finalPrice: plan.finalPrice,
                     validityDays: plan.validityDays,
+                    maxEmployees: plan.Max_Employees,
+                    dataSee: plan.data_see,
+                    dataExport: plan.data_export,
                 },
             },
         });
@@ -102,6 +131,80 @@ export const createOrder = async (req, res) => {
     }
 };
 
+// Helper function to activate free subscription
+async function activateFreeSubscription(companyId, plan) {
+    // Calculate subscription dates
+    const startDate = new Date();
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + plan.validityDays);
+
+    // Check for existing active subscription
+    const existingSubscription = await Subscription.findOne({
+        company: companyId,
+        status: "ACTIVE",
+    });
+
+    // If there's an existing active subscription, update it
+    if (existingSubscription) {
+        const oldEndDate = existingSubscription.endDate;
+        existingSubscription.endDate = endDate;
+        existingSubscription.status = "ACTIVE";
+        existingSubscription.renewalHistory.push({
+            renewedAt: new Date(),
+            oldEndDate: oldEndDate,
+            newEndDate: endDate,
+            transactionId: `FREE_${Date.now()}`,
+        });
+
+        // Update usage limits based on new plan
+        existingSubscription.usage.maxEmployees = plan.Max_Employees;
+        existingSubscription.usage.DATA_SEE = plan.data_see;
+        existingSubscription.usage.DATA_EXPORT = plan.data_export;
+
+        await existingSubscription.save();
+        return existingSubscription;
+    }
+
+    // Create new free subscription
+    const subscription = await Subscription.create({
+        company: companyId,
+        plan: plan._id,
+        planSnapshot: {
+            name: plan.name,
+            price: plan.price,
+            discount: plan.discount,
+            finalPrice: plan.finalPrice,
+            validityDays: plan.validityDays,
+            features: plan.features.map((feature) => ({
+                key: feature.key,
+                value: feature.value,
+            })),
+        },
+        startDate,
+        endDate,
+        status: "ACTIVE",
+        payment: {
+            transactionId: `FREE_${Date.now()}`,
+            paymentGateway: "FREE_PLAN",
+            paymentStatus: "SUCCESS",
+            amountPaid: 0,
+            currency: "INR",
+            paidAt: new Date(),
+        },
+        autoRenew: false,
+        usage: {
+            employeesUsed: 0,
+            maxEmployees: plan.Max_Employees,
+            DATA_SEE: plan.data_see,
+            DATA_EXPORT: plan.data_export,
+            upgradeHistory: [],
+        },
+        isActive: true,
+    });
+
+    return subscription;
+}
+
 // @desc    Verify payment and activate subscription
 // @route   POST /api/payment/verify
 // @access  Private
@@ -114,7 +217,32 @@ export const verifyPayment = async (req, res) => {
             planId,
         } = req.body;
 
-        const companyId = req.user._id||req.user.id; // Assuming user is attached to req by auth middleware
+        const companyId = req.user._id || req.user.id;
+
+        // Get plan details first
+        const plan = await Plan.findById(planId);
+        if (!plan) {
+            return res.status(404).json({
+                success: false,
+                message: "Plan not found",
+            });
+        }
+
+        // If it's a free plan, don't verify payment
+        if (plan.isfree === true || plan.finalPrice === 0) {
+            const subscription = await activateFreeSubscription(companyId, plan);
+
+            return res.status(200).json({
+                success: true,
+                message: "Free plan activated successfully",
+                data: {
+                    subscription,
+                    isFreePlan: true,
+                },
+            });
+        }
+
+        // For paid plans - verify signature
         console.log("Verifying payment for company:", {
             companyId,
             razorpay_order_id,
@@ -134,7 +262,6 @@ export const verifyPayment = async (req, res) => {
         const isAuthentic = expectedSignature === razorpay_signature;
 
         if (!isAuthentic) {
-            // Update payment log with failed status
             await PaymentLog.findOneAndUpdate(
                 { razorpayOrderId: razorpay_order_id },
                 {
@@ -149,15 +276,6 @@ export const verifyPayment = async (req, res) => {
             });
         }
 
-        // Get plan details
-        const plan = await Plan.findById(planId);
-        if (!plan) {
-            return res.status(404).json({
-                success: false,
-                message: "Plan not found",
-            });
-        }
-
         // Calculate subscription dates
         const startDate = new Date();
         const endDate = new Date();
@@ -169,18 +287,25 @@ export const verifyPayment = async (req, res) => {
             status: "ACTIVE",
         });
 
-        // If there's an existing active subscription, update its end date
+        // If there's an existing active subscription, update it
         if (existingSubscription) {
+            const oldEndDate = existingSubscription.endDate;
             existingSubscription.endDate = endDate;
+            existingSubscription.status = "ACTIVE";
             existingSubscription.renewalHistory.push({
                 renewedAt: new Date(),
-                oldEndDate: existingSubscription.endDate,
+                oldEndDate: oldEndDate,
                 newEndDate: endDate,
                 transactionId: razorpay_payment_id,
             });
+
+            // Update usage limits based on new plan
+            existingSubscription.usage.maxEmployees = plan.Max_Employees;
+            existingSubscription.usage.DATA_SEE = plan.data_see;
+            existingSubscription.usage.DATA_EXPORT = plan.data_export;
+
             await existingSubscription.save();
 
-            // Update payment log
             await PaymentLog.findOneAndUpdate(
                 { razorpayOrderId: razorpay_order_id },
                 {
@@ -229,7 +354,11 @@ export const verifyPayment = async (req, res) => {
             },
             autoRenew: false,
             usage: {
-                employeesUsed:  plan.empCount,
+                employeesUsed: 0,
+                maxEmployees: plan.Max_Employees,
+                DATA_SEE: plan.data_see,
+                DATA_EXPORT: plan.data_export,
+                upgradeHistory: [],
             },
             isActive: true,
         });
@@ -257,6 +386,59 @@ export const verifyPayment = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Failed to verify payment",
+            error: error.message,
+        });
+    }
+};
+
+
+
+
+// @desc    Initialize free plan for new company
+// @route   POST /api/payment/init-free-plan
+// @access  Private
+export const initializeFreePlan = async (req, res) => {
+    try {
+        const companyId = req.user._id;
+
+        // Find the FREE plan
+        const freePlan = await Plan.findOne({ isfree: true, isActive: true });
+
+        if (!freePlan) {
+            return res.status(404).json({
+                success: false,
+                message: "Free plan not configured",
+            });
+        }
+
+        // Check if company already has a subscription
+        const existingSubscription = await Subscription.findOne({
+            company: companyId,
+        });
+
+        if (existingSubscription) {
+            return res.status(400).json({
+                success: false,
+                message: "Company already has a subscription",
+            });
+        }
+
+        // Activate free subscription
+        const subscription = await activateFreeSubscription(companyId, freePlan);
+
+        res.status(200).json({
+            success: true,
+            message: "Free plan activated successfully",
+            data: {
+                subscription,
+                plan: freePlan,
+            },
+        });
+    } catch (error) {
+        console.error("Free plan initialization error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to initialize free plan",
             error: error.message,
         });
     }

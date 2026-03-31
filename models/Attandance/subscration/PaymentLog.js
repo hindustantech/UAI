@@ -16,7 +16,19 @@ const paymentLogSchema = new mongoose.Schema({
 
     razorpayOrderId: String,
 
-    rawPayload: Object
+    rawPayload: Object,
+    upgradeType: {
+        type: String,
+        enum: ["EMPLOYEE_UPGRADE", "PLAN_UPGRADE", null],
+        default: null,
+    },
+    metadata: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {},
+    },
+    paymentCompletedAt: {
+        type: Date,
+    },
 
 }, { timestamps: true });
 

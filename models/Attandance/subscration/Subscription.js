@@ -1,4 +1,3 @@
-// models/Subscription.js
 import mongoose from "mongoose";
 
 const featureSnapshotSchema = new mongoose.Schema({
@@ -7,21 +6,17 @@ const featureSnapshotSchema = new mongoose.Schema({
 }, { _id: false });
 
 const subscriptionSchema = new mongoose.Schema({
-
     company: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
         required: true,
         index: true,
     },
-
     plan: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Plan",
         required: true,
     },
-
-    // Immutable snapshot (VERY IMPORTANT)
     planSnapshot: {
         name: String,
         price: Number,
@@ -30,26 +25,22 @@ const subscriptionSchema = new mongoose.Schema({
         validityDays: Number,
         features: [featureSnapshotSchema],
     },
-
     startDate: {
         type: Date,
         default: Date.now,
         index: true,
     },
-
     endDate: {
         type: Date,
         required: true,
         index: true,
     },
-
     status: {
         type: String,
         enum: ["PENDING", "ACTIVE", "EXPIRED", "CANCELLED", "PAST_DUE"],
         default: "PENDING",
         index: true,
     },
-
     payment: {
         transactionId: String,
         orderId: String,
@@ -69,12 +60,10 @@ const subscriptionSchema = new mongoose.Schema({
         },
         paidAt: Date,
     },
-
     autoRenew: {
         type: Boolean,
         default: false,
     },
-
     renewalHistory: [
         {
             renewedAt: Date,
@@ -83,25 +72,44 @@ const subscriptionSchema = new mongoose.Schema({
             transactionId: String,
         }
     ],
-
     usage: {
         employeesUsed: {
             type: Number,
             default: 0,
-        }
+        },
+        maxEmployees: {
+            type: Number,
+            default: 0,
+        },
+        DATA_SEE: {
+            type: Boolean,
+            default: false,
+        },
+        DATA_EXPORT: {
+            type: Boolean,
+            default: false,
+        },
+        upgradeHistory: [
+            {
+                upgradedAt: Date,
+                extraEmployees: Number,
+                cost: Number,
+                transactionId: String,
+                remainingDays: Number,
+                oldEmployeeCount: Number,
+                newEmployeeCount: Number
+            }
+        ]
     },
-
     isActive: {
         type: Boolean,
         default: true,
     }
-
 }, { timestamps: true });
 
-
-// 🔥 Middleware: Auto-expire
+// Middleware: Auto-expire
 subscriptionSchema.pre("save", function (next) {
-    if (this.endDate < new Date()) {
+    if (this.endDate < new Date() && this.status === "ACTIVE") {
         this.status = "EXPIRED";
     }
     next();
