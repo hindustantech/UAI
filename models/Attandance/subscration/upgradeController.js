@@ -92,6 +92,18 @@ export const createUpgradeOrder = async (req, res) => {
             pricePerEmployeePerDay * additionalEmployees * remainingDays
         );
 
+        console.log("Upgrade cost calculated:", {
+            companyId,
+            subscriptionId: subscription._id,
+            planId: plan._id,
+            additionalEmployees,
+            currentMaxEmployees,
+            newMaxEmployees,
+            remainingDays,
+            pricePerEmployee: Math.round(pricePerEmployee),
+            upgradeCost,
+        });
+    
         // Free upgrade (cost rounds to zero)
         if (upgradeCost <= 0) {
             const upgradedSubscription = await processEmployeeUpgrade(
