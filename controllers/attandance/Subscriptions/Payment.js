@@ -133,6 +133,19 @@ export const createOrder = async (req, res) => {
 
 // Helper function to activate free subscription
 async function activateFreeSubscription(companyId, plan) {
+
+    const alreadyUsedFreePlan = await Subscription.findOne({
+        company: companyId,
+        "payment.paymentGateway": "FREE_PLAN",
+    });
+
+    if (alreadyUsedFreePlan) {
+        const error = new Error(
+            "Free plan can only be used once. Please upgrade to a paid plan."
+        );
+        error.statusCode = 403;
+        throw error;
+    }
     // Calculate subscription dates
     const startDate = new Date();
     const endDate = new Date();

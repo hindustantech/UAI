@@ -142,11 +142,43 @@ export const createAttendanceRequest = async (req, res) => {
     }
 };
 
-/*
-====================================
-2. GET ALL REQUESTS (with filters)
-====================================
-*/
+
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // UTC+5:30
+
+const toIST = (date) => {
+    if (!date) return null;
+    const istDate = new Date(date.getTime() + IST_OFFSET_MS);
+    return istDate.toISOString().replace("Z", "+05:30");
+};
+
+const formatRequestDates = (doc) => {
+    const r = doc.toObject({ populate: true });
+
+    r.createdAt = toIST(doc.createdAt);
+    r.updatedAt = toIST(doc.updatedAt);
+    r.approvedAt = toIST(doc.approvedAt);
+
+    if (doc.punchDetails) {
+        r.punchDetails = {
+            ...r.punchDetails,
+            date: toIST(doc.punchDetails.date),
+            punchInTime: toIST(doc.punchDetails.punchInTime),
+            punchOutTime: toIST(doc.punchDetails.punchOutTime),
+        };
+    }
+
+    if (doc.leaveDetails) {
+        r.leaveDetails = {
+            ...r.leaveDetails,
+            startDate: toIST(doc.leaveDetails.startDate),
+            endDate: toIST(doc.leaveDetails.endDate),
+        };
+    }
+
+    return r;
+};
+
 export const getAttendanceRequests = async (req, res) => {
     try {
         const {
@@ -162,80 +194,71 @@ export const getAttendanceRequests = async (req, res) => {
         const userId = req.user._id;
         const userRole = req.user.role || req.user.type;
 
-
-        // Build query based on user role
+        // ── Build base query ──────────────────────────────────────────────────
         let query = { companyId };
 
         if (userRole === "partner" || userRole === "manager") {
-            // Admins can see all requests for their company
-            // No need to filter by employee
+            // Admins see all requests for their company — no employee filter
         } else {
-            // Regular users - get their employee record first
             const employee = await Employee.findOne({ companyId, userId });
             if (!employee) {
                 return res.status(404).json({
                     success: false,
-                    message: "Employee record not found"
+                    message: "Employee record not found",
                 });
             }
             query.employeeId = employee._id;
         }
 
-        // Apply filters
-        if (status) {
-            query.status = status;
-        }
-
-        if (requestType) {
-            query.requestType = requestType;
-        }
+        // ── Optional filters ──────────────────────────────────────────────────
+        if (status) query.status = status;
+        if (requestType) query.requestType = requestType;
 
         if (startDate || endDate) {
             query.createdAt = {};
-            if (startDate) {
-                query.createdAt.$gte = new Date(startDate);
-            }
-            if (endDate) {
-                query.createdAt.$lte = new Date(endDate);
-            }
+            if (startDate) query.createdAt.$gte = new Date(startDate);
+            if (endDate) query.createdAt.$lte = new Date(endDate);
         }
 
-        // Pagination
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        // ── Pagination ────────────────────────────────────────────────────────
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const skip = (pageNum - 1) * limitNum;
 
-        const requests = await AttendanceRequest.find(query)
-            .populate({
-                path: "employeeId",
-                populate: {
-                    path: "userId",
-                    select: "name email profileImage"
-                }
-            })
-            .populate("approvedBy", "name email")
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
+        // ── Fetch ─────────────────────────────────────────────────────────────
+        const [requests, total] = await Promise.all([
+            AttendanceRequest.find(query)
+                .populate({
+                    path: "employeeId",
+                    populate: { path: "userId", select: "name email profileImage" },
+                })
+                .populate("approvedBy", "name email")
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limitNum),
+            AttendanceRequest.countDocuments(query),
+        ]);
 
-        const total = await AttendanceRequest.countDocuments(query);
+        // ── Convert all dates to IST ──────────────────────────────────────────
+        const formattedRequests = requests.map(formatRequestDates);
 
         return res.json({
             success: true,
-            data: requests,
+            data: formattedRequests,
             pagination: {
                 total,
-                page: parseInt(page),
-                pages: Math.ceil(total / parseInt(limit))
-            }
+                page: pageNum,
+                pages: Math.ceil(total / limitNum),
+            },
         });
 
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message
+            message: error.message,
         });
     }
 };
-
 /*
 ====================================
 3. GET SINGLE REQUEST
