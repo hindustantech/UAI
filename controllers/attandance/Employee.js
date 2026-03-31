@@ -8,7 +8,7 @@ import PatnerProfile from "../../models/PatnerProfile.js";
 import Shift from "../../models/Attandance/Shift.js";
 import { getActiveSubscription } from "../../services/subscription.service.js";
 import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
-import { validateSubscription, canCreateEmployee, getEmployeeLimit, isNearingEmployeeLimit } from "../../services/featureAccess.service.js";
+import { validateSubscription, canCreateEmployee, getEmployeeLimit, isNearingEmployeeLimit ,getRemainingEmployeeSlots} from "../../services/featureAccess.service.js";
 // controllers/companyController.js
 
 
