@@ -46,7 +46,7 @@ const subscriptionSchema = new mongoose.Schema({
         orderId: String,
         paymentGateway: {
             type: String,
-            enum: ["RAZORPAY", "STRIPE", "MANUAL"],
+            enum: ["RAZORPAY", "STRIPE", "MANUAL", "OTHER","FREE_PLAN"],
         },
         paymentStatus: {
             type: String,
