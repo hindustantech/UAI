@@ -17,6 +17,7 @@ export const createPlan = async (req, res) => {
             planType = "BASIC",
             data_export = false,
             data_see = false,
+            isfree = false,
             Max_Employees = 0,
         } = req.body;
 
@@ -72,6 +73,7 @@ export const createPlan = async (req, res) => {
             planType: planType.toUpperCase(),
             data_export: Boolean(data_export),
             data_see: Boolean(data_see),
+            isfree: Boolean(isfree),
             Max_Employees: Number(Max_Employees),
         });
 
@@ -158,6 +160,7 @@ export const updatePlan = async (req, res) => {
             planType,
             data_export,
             data_see,
+            isfree,
             Max_Employees,
             ...rest
         } = req.body;
@@ -187,7 +190,7 @@ export const updatePlan = async (req, res) => {
         if (data_export !== undefined) updateData.data_export = Boolean(data_export);
         if (data_see !== undefined) updateData.data_see = Boolean(data_see);
         if (Max_Employees !== undefined) updateData.Max_Employees = Number(Max_Employees);
-
+        if (isfree !== undefined) updateData.isfree = Boolean(isfree);
         const updatedPlan = await Plan.findByIdAndUpdate(
             id,
             updateData,
