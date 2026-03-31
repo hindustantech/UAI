@@ -142,44 +142,36 @@ export const createAttendanceRequest = async (req, res) => {
     }
 };
 
-
-
-const formatTime = (date) => {
+export const toISTTime = (date) => {
     if (!date) return "-";
-
-    try {
-        return new Date(date).toLocaleTimeString("en-IN", {
-            timeZone: "Asia/Kolkata",   // Force IST
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: true
-        });
-    } catch (err) {
-        console.error("formatTime error:", err);
-        return "-";
-    }
+    return new Date(date).toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+    });
 };
 const formatRequestDates = (doc) => {
     const r = doc.toObject({ populate: true });
 
-    r.createdAt = formatTime(doc.createdAt);
-    r.updatedAt = formatTime(doc.updatedAt);
-    r.approvedAt = formatTime(doc.approvedAt);
+    r.createdAt = toISTTime(doc.createdAt);
+    r.updatedAt = toISTTime(doc.updatedAt);
+    r.approvedAt = toISTTime(doc.approvedAt);
 
     if (doc.punchDetails) {
         r.punchDetails = {
             ...r.punchDetails,
-            date: formatTime(doc.punchDetails.date),
-            punchInTime: formatTime(doc.punchDetails.punchInTime),
-            punchOutTime: formatTime(doc.punchDetails.punchOutTime),
+            date: toISTTime(doc.punchDetails.date),
+            punchInTime: toISTTime(doc.punchDetails.punchInTime),
+            punchOutTime: toISTTime(doc.punchDetails.punchOutTime),
         };
     }
 
     if (doc.leaveDetails) {
         r.leaveDetails = {
             ...r.leaveDetails,
-            startDate: formatTime(doc.leaveDetails.startDate),
-            endDate: formatTime(doc.leaveDetails.endDate),
+            startDate: toISTTime(doc.leaveDetails.startDate),
+            endDate: toISTTime(doc.leaveDetails.endDate),
         };
     }
 
