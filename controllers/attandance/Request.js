@@ -302,28 +302,7 @@ export const getAttendanceRequestById = async (req, res) => {
 4. APPROVE REQUEST
 ====================================
 */
-export const parseValidDate = (value, fieldName = "date") => {
-    if (!value) {
-        throw new Error(`${fieldName} is required`);
-    }
 
-    const parsed = new Date(value);
-
-    if (isNaN(parsed.getTime())) {
-        throw new Error(`Invalid ${fieldName}: ${value}`);
-    }
-
-    return parsed;
-};
-
-export const getDayBounds = (date) => {
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date(start.getTime() + 86400000);
-
-    return { start, end };
-};
 
 export const approveAttendanceRequest = async (req, res) => {
     const session = await mongoose.startSession();
@@ -333,9 +312,7 @@ export const approveAttendanceRequest = async (req, res) => {
         const { requestId } = req.params;
         const adminId = req.user._id;
 
-        // ─────────────────────────────────────────────
-        // VALIDATION
-        // ─────────────────────────────────────────────
+        // ───────────────────────── VALIDATION ─────────────────────────
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             throw new Error("Invalid request ID");
         }
@@ -347,20 +324,16 @@ export const approveAttendanceRequest = async (req, res) => {
             throw new Error(`Request already ${request.status}`);
         }
 
-        // ─────────────────────────────────────────────
-        // LEAVE FLOW
-        // ─────────────────────────────────────────────
+        // ============================================================
+        // 🔹 LEAVE FLOW
+        // ============================================================
         if (request.requestType === "leave") {
+            const startDate = parseValidDate(request?.leaveDetails?.startDate);
+            const endDate = parseValidDate(request?.leaveDetails?.endDate);
 
-            const startDate = parseValidDate(
-                request?.leaveDetails?.startDate,
-                "leave.startDate"
-            );
-
-            const endDate = parseValidDate(
-                request?.leaveDetails?.endDate,
-                "leave.endDate"
-            );
+            if (!startDate || !endDate) {
+                throw new Error("Invalid leave dates");
+            }
 
             for (
                 let d = new Date(startDate.getTime());
@@ -389,27 +362,30 @@ export const approveAttendanceRequest = async (req, res) => {
                             }
                         }
                     },
-                    {
-                        upsert: true,
-                        new: true,
-                        session
-                    }
+                    { upsert: true, new: true, session }
                 );
             }
         }
 
-        // ─────────────────────────────────────────────
-        // PUNCH FLOW
-        // ─────────────────────────────────────────────
+        // ============================================================
+        // 🔹 PUNCH FLOW (FIXED CORE ISSUE)
+        // ============================================================
         if (
             ["punch_in_out", "punch_in_and_out", "punch_in"].includes(
                 request.requestType
             )
         ) {
-            const baseDate = parseValidDate(
-                request?.punchDetails?.date,
-                "punchDetails.date"
-            );
+            // ✅ SAFE DATE RESOLUTION (NO CRASH)
+            const baseDate = resolvePunchBaseDate(request?.punchDetails);
+
+            if (!baseDate) {
+                await session.abortTransaction();
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid punch request: date, punchInTime, or punchOutTime required"
+                });
+            }
 
             const { start, end } = getDayBounds(baseDate);
 
@@ -419,20 +395,12 @@ export const approveAttendanceRequest = async (req, res) => {
                 remarks: `Punch corrected via request ${requestId}`
             };
 
-            // Safe parsing
-            if (request?.punchDetails?.punchInTime) {
-                updateFields.punchIn = parseValidDate(
-                    request.punchDetails.punchInTime,
-                    "punchInTime"
-                );
-            }
+            // Safe time parsing
+            const punchIn = parseValidDate(request?.punchDetails?.punchInTime);
+            const punchOut = parseValidDate(request?.punchDetails?.punchOutTime);
 
-            if (request?.punchDetails?.punchOutTime) {
-                updateFields.punchOut = parseValidDate(
-                    request.punchDetails.punchOutTime,
-                    "punchOutTime"
-                );
-            }
+            if (punchIn) updateFields.punchIn = punchIn;
+            if (punchOut) updateFields.punchOut = punchOut;
 
             const existingAttendance = await Attendance.findOne({
                 companyId: request.companyId,
@@ -440,6 +408,7 @@ export const approveAttendanceRequest = async (req, res) => {
                 date: { $gte: start, $lt: end }
             }).session(session);
 
+            // ───────── GEO RESOLUTION ─────────
             let geoLocation = {
                 type: "Point",
                 coordinates: [0, 0],
@@ -452,13 +421,13 @@ export const approveAttendanceRequest = async (req, res) => {
                     request.employeeId
                 ).session(session);
 
-                const prevDayStart = new Date(start.getTime() - 86400000);
-                const prevDayEnd = new Date(start.getTime());
+                const prevStart = new Date(start.getTime() - 86400000);
+                const prevEnd = start;
 
                 const prev = await Attendance.findOne({
                     companyId: request.companyId,
                     employeeId: request.employeeId,
-                    date: { $gte: prevDayStart, $lt: prevDayEnd }
+                    date: { $gte: prevStart, $lt: prevEnd }
                 }).session(session);
 
                 if (prev?.geoLocation?.coordinates?.length) {
@@ -477,6 +446,7 @@ export const approveAttendanceRequest = async (req, res) => {
                 }
             }
 
+            // ───────── AUDIT LOG ─────────
             const editLog = {
                 editedBy: adminId,
                 reason: request.reason,
@@ -497,6 +467,7 @@ export const approveAttendanceRequest = async (req, res) => {
                 editedAt: new Date()
             };
 
+            // ───────── UPSERT ─────────
             await Attendance.findOneAndUpdate(
                 {
                     companyId: request.companyId,
@@ -506,21 +477,19 @@ export const approveAttendanceRequest = async (req, res) => {
                 {
                     $set: {
                         ...updateFields,
-                        ...(existingAttendance ? {} : { geoLocation, date: start })
+                        ...(existingAttendance
+                            ? {}
+                            : { geoLocation, date: start })
                     },
                     $push: { editLogs: editLog }
                 },
-                {
-                    upsert: true,
-                    new: true,
-                    session
-                }
+                { upsert: true, new: true, session }
             );
         }
 
-        // ─────────────────────────────────────────────
-        // FINALIZE
-        // ─────────────────────────────────────────────
+        // ============================================================
+        // 🔹 FINALIZE
+        // ============================================================
         request.status = "approved";
         request.approvedBy = adminId;
         request.approvedAt = new Date();
@@ -552,6 +521,37 @@ export const approveAttendanceRequest = async (req, res) => {
     }
 };
 
+
+export const parseValidDate = (value, fieldName = "date") => {
+    if (!value) return null;
+
+    const parsed = new Date(value);
+
+    if (isNaN(parsed.getTime())) {
+        return null;
+    }
+
+    return parsed;
+};
+
+export const resolvePunchBaseDate = (punchDetails = {}) => {
+    // Priority order
+    let baseDate =
+        parseValidDate(punchDetails.date) ||
+        parseValidDate(punchDetails.punchInTime) ||
+        parseValidDate(punchDetails.punchOutTime);
+
+    return baseDate;
+};
+
+export const getDayBounds = (date) => {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(start.getTime() + 86400000);
+
+    return { start, end };
+};
 /*
 ====================================
 5. REJECT REQUEST
