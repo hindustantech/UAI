@@ -64,7 +64,7 @@ export const hasFeatureAccess = (subscription, featureKey) => {
             return subscription.usage?.DATA_SEE === true;
         case 'DATA_EXPORT':
             return subscription.usage?.DATA_EXPORT === true;
-        case 'MAX_EMPLOYEES':
+        case 'maxEmployees':
             // This is handled by canCreateEmployee separately
             return true;
         default:

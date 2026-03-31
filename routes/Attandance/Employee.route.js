@@ -43,7 +43,7 @@ router.post(
     "/",
     authMiddleware,
     checkSubscription,                // 🔐 must have active plan
-    checkFeature("EMPLOYEE_CREATE"),  // 🔐 feature-level access
+    checkFeature("maxEmployees"),  // 🔐 feature-level access
     createEmployee
 );
 router.get(

@@ -7,7 +7,7 @@ import User from "../models/userModel.js";
 
 export const checkPermission = (permissionKey) => {
     return async (req, res, next) => {
-        try {
+        try {   
             const userId = req.user.id || req.user._id; // JWT sets req.user
 
             if (!userId) return res.status(401).json({ message: 'Unauthorized' });
