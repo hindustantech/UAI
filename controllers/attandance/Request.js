@@ -7,9 +7,6 @@ import Employee from "../../models/Attandance/Employee.js";
 ====================================
 1. CREATE ATTENDANCE REQUEST
 ====================================
-*/
-import AttendanceRequest from "../../models/AttendanceRequest.js";
-import Employee from "../../models/Employee.js";
 
 /*
     UTIL: Normalize date (remove time part)
