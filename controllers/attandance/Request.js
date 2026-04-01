@@ -8,6 +8,52 @@ import Employee from "../../models/Attandance/Employee.js";
 1. CREATE ATTENDANCE REQUEST
 ====================================
 */
+import AttendanceRequest from "../../models/AttendanceRequest.js";
+import Employee from "../../models/Employee.js";
+
+/*
+    UTIL: Normalize date (remove time part)
+*/
+const normalizeDate = (date) => {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d;
+};
+
+/*
+    UTIL: Validate punch payload based on type
+*/
+const validatePunchByType = (type, punchDetails) => {
+    if (!punchDetails?.date) {
+        throw new Error("punchDetails.date is required");
+    }
+
+    if (type === "punch_in") {
+        if (!punchDetails.punchInTime) {
+            throw new Error("punchInTime is required for punch_in");
+        }
+    }
+
+    if (type === "punch_in_out") {
+        if (!punchDetails.punchOutTime) {
+            throw new Error("punchOutTime is required for punch_out");
+        }
+    }
+
+    if (type === "punch_in_and_out") {
+        if (!punchDetails.punchInTime || !punchDetails.punchOutTime) {
+            throw new Error("Both punchInTime and punchOutTime are required");
+        }
+
+        if (new Date(punchDetails.punchInTime) > new Date(punchDetails.punchOutTime)) {
+            throw new Error("punchInTime cannot be after punchOutTime");
+        }
+    }
+};
+
+/*
+    MAIN CONTROLLER
+*/
 export const createAttendanceRequest = async (req, res) => {
     try {
         const {
@@ -19,41 +65,56 @@ export const createAttendanceRequest = async (req, res) => {
 
         const userId = req.user._id;
 
-        // =========================
-        // 1. Fetch Employee
-        // =========================
+        /*
+            STEP 1: GET EMPLOYEE
+        */
         const employee = await Employee.findOne({ userId });
 
         if (!employee) {
             return res.status(404).json({
                 success: false,
-                message: "Employee record not found"
+                message: "Employee not found"
             });
         }
 
-        // =========================
-        // 2. HANDLE LEAVE REQUEST
-        // =========================
+        /*
+            STEP 2: COMMON VALIDATION
+        */
+        if (!requestType) {
+            return res.status(400).json({
+                success: false,
+                message: "requestType is required"
+            });
+        }
+
+        /*
+            ===============================
+            LEAVE FLOW
+            ===============================
+        */
         if (requestType === "leave") {
+
             if (!leaveDetails?.startDate || !leaveDetails?.endDate) {
                 return res.status(400).json({
                     success: false,
-                    message: "startDate & endDate required"
+                    message: "startDate and endDate are required"
                 });
             }
 
-            const startDate = new Date(leaveDetails.startDate);
-            const endDate = new Date(leaveDetails.endDate);
+            const startDate = normalizeDate(leaveDetails.startDate);
+            const endDate = normalizeDate(leaveDetails.endDate);
 
             if (startDate > endDate) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid date range"
+                    message: "Start date cannot be after end date"
                 });
             }
 
-            // Overlap check
-            const overlappingRequest = await AttendanceRequest.findOne({
+            /*
+                OVERLAP CHECK (CRITICAL)
+            */
+            const overlapping = await AttendanceRequest.findOne({
                 employeeId: employee._id,
                 requestType: "leave",
                 status: { $in: ["pending", "approved"] },
@@ -65,39 +126,34 @@ export const createAttendanceRequest = async (req, res) => {
                 ]
             });
 
-            if (overlappingRequest) {
+            if (overlapping) {
                 return res.status(400).json({
                     success: false,
-                    message: "Leave already exists for this period"
+                    message: "Leave request overlaps existing request"
                 });
             }
         }
 
-        // =========================
-        // 3. HANDLE PUNCH REQUEST
-        // =========================
-        const punchTypes = [
-            "punch_in",
-            "punch_out",
-            "punch_in_out",
-            "punch_in_and_out"
-        ];
-
-        if (punchTypes.includes(requestType)) {
-
-            if (!punchDetails?.date) {
+        /*
+            ===============================
+            PUNCH FLOW
+            ===============================
+        */
+        if (
+            ["punch_in", "punch_in_out", "punch_in_and_out"]
+                .includes(requestType)
+        ) {
+            try {
+                validatePunchByType(requestType, punchDetails);
+            } catch (err) {
                 return res.status(400).json({
                     success: false,
-                    message: "Punch date is required"
+                    message: err.message
                 });
             }
 
-            // Normalize date (VERY IMPORTANT)
-            const requestDate = new Date(punchDetails.date);
-            requestDate.setHours(0, 0, 0, 0);
-
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
+            const requestDate = normalizeDate(punchDetails.date);
+            const today = normalizeDate(new Date());
 
             if (requestDate > today) {
                 return res.status(400).json({
@@ -106,79 +162,76 @@ export const createAttendanceRequest = async (req, res) => {
                 });
             }
 
-            // Validate based on type
-            if (requestType === "punch_in" && !punchDetails?.punchIn) {
-                return res.status(400).json({
-                    success: false,
-                    message: "punchIn time required"
-                });
-            }
-
-            if (requestType === "punch_out" && !punchDetails?.punchOut) {
-                return res.status(400).json({
-                    success: false,
-                    message: "punchOut time required"
-                });
-            }
-
-            if (
-                (requestType === "punch_in_out" ||
-                 requestType === "punch_in_and_out") &&
-                (!punchDetails?.punchIn || !punchDetails?.punchOut)
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Both punchIn & punchOut required"
-                });
-            }
-
-            // Prevent duplicate request (same day, same type)
-            const existingRequest = await AttendanceRequest.findOne({
+            /*
+                DUPLICATE CHECK
+                (Same date + same type pending)
+            */
+            const existing = await AttendanceRequest.findOne({
                 employeeId: employee._id,
                 requestType,
                 "punchDetails.date": requestDate,
                 status: "pending"
             });
 
-            if (existingRequest) {
+            if (existing) {
                 return res.status(400).json({
                     success: false,
                     message: "Request already exists for this date"
                 });
             }
-
-            // Replace normalized date
-            punchDetails.date = requestDate;
         }
 
-        // =========================
-        // 4. CREATE REQUEST
-        // =========================
-        const request = await AttendanceRequest.create({
+        /*
+            STEP 3: CLEAN PAYLOAD (IMPORTANT)
+            Avoid storing unnecessary fields
+        */
+        let payload = {
             companyId: employee.companyId,
             employeeId: employee._id,
             requestType,
-            reason,
-            leaveDetails: requestType === "leave" ? leaveDetails : undefined,
-            punchDetails: punchTypes.includes(requestType) ? punchDetails : undefined
+            reason: reason || ""
+        };
+
+        if (requestType === "leave") {
+            payload.leaveDetails = {
+                startDate: normalizeDate(leaveDetails.startDate),
+                endDate: normalizeDate(leaveDetails.endDate)
+            };
+        }
+
+        if (
+            ["punch_in", "punch_in_out", "punch_in_and_out"]
+                .includes(requestType)
+        ) {
+            payload.punchDetails = {
+                date: normalizeDate(punchDetails.date),
+                punchInTime: punchDetails.punchInTime || null,
+                punchOutTime: punchDetails.punchOutTime || null
+            };
+        }
+
+        /*
+            STEP 4: CREATE
+        */
+        const request = await AttendanceRequest.create(payload);
+
+        /*
+            STEP 5: POPULATE (FOR UI)
+        */
+        await request.populate({
+            path: "employeeId",
+            populate: {
+                path: "userId",
+                select: "name email profileImage"
+            }
         });
 
-        // =========================
-        // 5. POPULATE RESPONSE
-        // =========================
-        await request.populate([
-            {
-                path: "employeeId",
-                populate: {
-                    path: "userId",
-                    select: "name email profileImage"
-                }
-            }
-        ]);
-
+        /*
+            STEP 6: RESPONSE
+        */
         return res.status(201).json({
             success: true,
-            message: "Request submitted successfully",
+            message: "Request created successfully",
             data: request
         });
 
@@ -187,12 +240,10 @@ export const createAttendanceRequest = async (req, res) => {
 
         return res.status(500).json({
             success: false,
-            message: "Internal server error",
-            error: error.message
+            message: error.message || "Internal server error"
         });
     }
 };
-
 /*
 ====================================
 2. GET ALL REQUESTS (with filters)
