@@ -118,3 +118,97 @@ export const getAllSubscriptions = async (req, res) => {
         });
     }
 };
+
+
+
+export const getCurrentActiveSubscription = async (req, res) => {
+    try {
+        const companyId = req.user.id; // logged-in company
+
+        // =========================
+        // VALIDATION
+        // =========================
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid company ID"
+            });
+        }
+
+        const now = new Date();
+
+        // =========================
+        // QUERY (CRITICAL)
+        // =========================
+        const subscription = await Subscription.findOne({
+            company: companyId,
+            status: "ACTIVE",
+            isActive: true,
+            "payment.paymentStatus": "SUCCESS",
+            endDate: { $gte: now }
+        })
+            .populate("plan", "name price validityDays")
+            .sort({ endDate: -1 }) // latest valid subscription
+            .lean();
+
+        // =========================
+        // RESPONSE
+        // =========================
+        if (!subscription) {
+            return res.status(404).json({
+                success: false,
+                message: "No active subscription found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Active subscription fetched",
+            data: subscription
+        });
+
+    } catch (error) {
+        console.error("GET CURRENT SUBSCRIPTION ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch active subscription",
+            error: error.message
+        });
+    }
+};
+
+
+export const getSubscriptionHistory = async (req, res) => {
+    try {
+        const companyId = req.user.id; // logged-in company
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid company ID"
+            });
+        }
+
+        const subscriptions = await Subscription.find({
+            company: companyId,
+            "payment.paymentStatus": "SUCCESS"
+        })
+            .populate("plan", "name price validityDays")
+            .sort({ startDate: -1 })
+            .lean();
+        return res.status(200).json({
+            success: true,
+            message: "Subscription history fetched",
+            data: subscriptions
+        });
+    } catch (error) {
+        console.error("GET SUBSCRIPTION HISTORY ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch subscription history",
+            error: error.message
+        });
+    }
+};
+
+
