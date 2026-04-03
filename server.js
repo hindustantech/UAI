@@ -23,6 +23,7 @@ import shift from './routes/Attandance/Shift.js'
 import './models/Attandance/Holiydaycron.js'
 import ExportRoutes from './routes/Attandance/Export/attendanceRoutes.js'
 import subscriptionsdata from './routes/Attandance/subscription.routes.js';
+import './cron/subscription.js'; // Import the subscription cron job
 dotenv.config();
 await connectDB();
 // START BACKGROUND WORKER HERE

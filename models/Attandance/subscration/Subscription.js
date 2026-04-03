@@ -46,7 +46,7 @@ const subscriptionSchema = new mongoose.Schema({
         orderId: String,
         paymentGateway: {
             type: String,
-            enum: ["RAZORPAY", "STRIPE", "MANUAL", "OTHER","FREE_PLAN"],
+            enum: ["RAZORPAY", "STRIPE", "MANUAL", "OTHER", "FREE_PLAN"],
         },
         paymentStatus: {
             type: String,
@@ -115,4 +115,9 @@ subscriptionSchema.pre("save", function (next) {
     next();
 });
 
+subscriptionSchema.index({
+    status: 1,
+    isActive: 1,
+    endDate: 1
+});
 export const Subscription = mongoose.model("Subscription", subscriptionSchema);
