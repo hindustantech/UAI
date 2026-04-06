@@ -22,6 +22,7 @@ import planRoutes from './routes/plan.js'
 import shift from './routes/Attandance/Shift.js'
 import './models/Attandance/Holiydaycron.js'
 import ExportRoutes from './routes/Attandance/Export/attendanceRoutes.js'
+import permissionRoutes from './routes/permissionRoutes.js';
 import subscriptionsdata from './routes/Attandance/subscription.routes.js';
 import './cron/subscription.js'; // Import the subscription cron job
 dotenv.config();
@@ -51,6 +52,7 @@ app.use(
 
 
 app.use('/api/usermanagement', usermanagement);
+app.use('/api/permissionRoutes', permissionRoutes);
 
 app.use('/api/holiday', holiday);
 app.use('/api/attendance', attandance);
