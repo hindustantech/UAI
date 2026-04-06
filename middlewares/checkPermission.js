@@ -14,9 +14,6 @@ export const checkPermission = (permissionKey) => {
                 return res.status(401).json({ message: 'Unauthorized' });
             }
 
-            if (!companyId) {
-                return res.status(400).json({ message: 'CompanyId required' });
-            }
 
             const user = await User.findById(userId)
                 .select('type permissions');
@@ -28,6 +25,10 @@ export const checkPermission = (permissionKey) => {
             // 🔹 Global bypass
             if (['super_admin', 'partner'].includes(user.type)) {
                 return next();
+            }
+
+            if (!companyId) {
+                return res.status(400).json({ message: 'CompanyId required' });
             }
 
             // 🔹 Tenant check
