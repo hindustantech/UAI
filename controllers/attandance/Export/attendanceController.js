@@ -17,7 +17,14 @@ export const generateAttendanceCSV = async (req, res) => {
             employeeCode
         } = req.query;
 
-        const companyId = req.user._id
+        // const companyId = req.user._id
+        let companyId;
+        companyId = req.user._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
+
         // Validate required fields
         if (!companyId || !startDate || !endDate) {
             return res.status(400).json({
@@ -239,7 +246,13 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             department,
             employeeCode
         } = req.query;
-        const companyId = req.user._id
+        let companyId;
+        companyId = req.user._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
+
         // Validate required fields
         if (!companyId || !startDate || !endDate) {
             return res.status(400).json({
@@ -416,8 +429,13 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             department,
             employeeCode
         } = req.query;
+        let companyId;
+        companyId = req.user._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
-        const companyId=req.user._id
         // Validate required fields
         if (!companyId || !startDate || !endDate) {
             return res.status(400).json({

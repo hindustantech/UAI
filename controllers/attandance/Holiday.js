@@ -39,8 +39,8 @@ export const getAllEmpHolidays = async (req, res) => {
         const holidays = await Holiday.find({
             companyId: new mongoose.Types.ObjectId(companyId)
         })
-        .sort({ date: 1 })
-        .lean();
+            .sort({ date: 1 })
+            .lean();
 
         /* =========================================
            4. RESPONSE
@@ -54,7 +54,7 @@ export const getAllEmpHolidays = async (req, res) => {
     } catch (error) {
         console.error("GetAllEmpHolidays Error:", error);
 
-        return res.status(500).json({   
+        return res.status(500).json({
             success: false,
             message: "Failed to fetch holidays"
         });
@@ -66,7 +66,13 @@ export const getAllEmpHolidays = async (req, res) => {
  */
 export const createHoliday = async (req, res) => {
     try {
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         const {
             name,
@@ -120,7 +126,13 @@ export const createHoliday = async (req, res) => {
  */
 export const updateHoliday = async (req, res) => {
     try {
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
         const holidayId = req.params.id;
 
         if (!mongoose.Types.ObjectId.isValid(holidayId)) {
@@ -167,7 +179,13 @@ export const updateHoliday = async (req, res) => {
  */
 export const deleteHoliday = async (req, res) => {
     try {
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
         const holidayId = req.params.id;
 
         if (!mongoose.Types.ObjectId.isValid(holidayId)) {
@@ -209,7 +227,13 @@ export const deleteHoliday = async (req, res) => {
  */
 export const getAllHolidays = async (req, res) => {
     try {
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         const {
             year,

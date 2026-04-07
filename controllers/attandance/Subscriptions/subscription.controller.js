@@ -123,7 +123,12 @@ export const getAllSubscriptions = async (req, res) => {
 
 export const getCurrentActiveSubscription = async (req, res) => {
     try {
-        const companyId = req.user.id; // logged-in company
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         // =========================
         // VALIDATION
@@ -181,8 +186,12 @@ export const getCurrentActiveSubscription = async (req, res) => {
 
 export const getSubscriptionHistory = async (req, res) => {
     try {
-        const companyId = req.user.id; // logged-in company
-        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        } if (!mongoose.Types.ObjectId.isValid(companyId)) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid company ID"

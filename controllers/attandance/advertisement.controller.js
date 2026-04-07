@@ -91,7 +91,12 @@ export const createAdvertisement = async (req, res) => {
     try {
         const { title, description, linkUrl, category, status } = req.body;
         // Validate required fields
-        const companyId = req.user?._id || req.user?.id
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         if (!title || !description || !linkUrl || !category) {
             return res.status(400).json({
@@ -254,7 +259,12 @@ export const updateAdvertisementadmin = async (req, res) => {
 export const updateAdvertisement = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user?._id || req.user?.id
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
         const { title, description, linkUrl, category, status } = req.body;
 
         // Validate ID

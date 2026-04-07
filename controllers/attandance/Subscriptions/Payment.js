@@ -19,7 +19,13 @@ const razorpay = new Razorpay({
 export const createOrder = async (req, res) => {
     try {
         const { planId } = req.body;
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+
+        }
 
         // Validate plan
         const plan = await Plan.findById(planId);
@@ -230,7 +236,13 @@ export const verifyPayment = async (req, res) => {
             planId,
         } = req.body;
 
-        const companyId = req.user._id || req.user.id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+
+        }
 
         // Get plan details first
         const plan = await Plan.findById(planId);

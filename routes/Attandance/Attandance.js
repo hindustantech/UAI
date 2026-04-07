@@ -3,7 +3,7 @@ import express from "express";
 /* ===============================
    Controllers
 ================================ */
-
+import { checkPermission } from "../../middlewares/checkPermission.js";
 
 import {
     markAttendance,
@@ -61,6 +61,7 @@ router.get(
 router.get(
     "/getAttendanceSummary/:companyId",
     authMiddleware,
+    checkPermission('attendance_summary.read'),
     getAttendanceSummary
 );
 router.get(
@@ -89,6 +90,7 @@ router.get(
 router.get(
     "/employee-monthly-cards",
     authMiddleware,
+    checkPermission('employee.list'),
     getEmployeeSimpleMonthlySummary
 );
 router.get(
@@ -105,6 +107,7 @@ router.get(
 router.get(
     "/company-today",
     authMiddleware,
+    checkPermission('attendance_today.read'),
     getCompanyTodayAttendance
 );
 

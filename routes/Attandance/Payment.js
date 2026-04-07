@@ -8,7 +8,7 @@ import {
   getActiveSubscription,
 } from "../../controllers/attandance/Subscriptions/Payment.js";
 import {  createUpgradeOrder, verifyUpgradePayment, getUpgradeHistory } from "../../models/Attandance/subscration/upgradeController.js";
-
+import { checkPermission } from "../../middlewares/checkPermission.js";
 const router = express.Router();
 
 /**
@@ -21,6 +21,7 @@ const router = express.Router();
 router.post(
   "/create-order",
   authMiddleware,
+  checkPermission('payment.create'),
   createOrder
 );
 
@@ -40,7 +41,7 @@ router.get(
 
 // Employee upgrade routes
 
-router.post("/create-upgrade-order", authMiddleware, createUpgradeOrder);
+router.post("/create-upgrade-order", authMiddleware,checkPermission('payment.update') ,createUpgradeOrder);
 router.post("/verify-upgrade", authMiddleware, verifyUpgradePayment);
 router.get("/upgrade-history", authMiddleware, getUpgradeHistory);
 

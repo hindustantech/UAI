@@ -13,6 +13,7 @@ import {
     toggleOvertime,
     toggleWeeklyOff
 } from "../../controllers/attandance/Shift.js";
+import { checkPermission } from "../../middlewares/checkPermission.js";
 
 const router = express.Router();
 
@@ -30,6 +31,7 @@ const router = express.Router();
 router.post(
     "/",
     authMiddleware,
+    checkPermission('shift.create'),
     createShift
 );
 
@@ -40,7 +42,7 @@ router.post(
 router.get(
     "/",
     authMiddleware,
-    // checkPermission("shift.view"),
+    checkPermission("shift.read"),
     getAllShifts
 );
 
@@ -51,7 +53,7 @@ router.get(
 router.put(
     "/:id",
     authMiddleware,
-    // checkPermission("shift.update"),
+    checkPermission("shift.update"),
     updateShift
 );
 
@@ -62,7 +64,7 @@ router.put(
 router.delete(
     "/:id",
     authMiddleware,
-    // checkPermission("shift.delete"),
+    checkPermission("shift.delete"),
     deleteShift
 );
 
@@ -79,6 +81,7 @@ router.delete(
 router.patch(
     "/:id/toggle-night",
     authMiddleware,
+    checkPermission("shift.update"),
     toggleNightShift
 );
 
@@ -89,6 +92,7 @@ router.patch(
 router.patch(
     "/:id/toggle-overtime",
     authMiddleware,
+    checkPermission("shift.update"),
     toggleOvertime
 );
 

@@ -17,6 +17,7 @@ import {
     getWithEmpAdvertisementsByCategory
 } from "../../controllers/attandance/advertisement.controller.js";
 import authMiddleware from "../../middlewares/authMiddleware.js";
+import { checkPermission } from "../../middlewares/checkPermission.js";
 const router = express.Router();
 
 // Configure multer for memory storage
@@ -46,14 +47,14 @@ router.get("/:id", getAdvertisementById);
 router.post("/createAdvertisementAdmin", authMiddleware, upload.single('image'), createAdvertisementAdmin);
 router.put("/updateAdvertisementadmin/:id", authMiddleware, upload.single('image'), updateAdvertisementadmin);
 
-router.post("/", authMiddleware, upload.single('image'), createAdvertisement);
-router.put("/:id", authMiddleware, upload.single('image'), updateAdvertisement);
+router.post("/", authMiddleware, upload.single('image'),checkPermission('notice.create') ,createAdvertisement);
+router.put("/:id", authMiddleware, upload.single('image'), checkPermission('notice.update'), updateAdvertisement);
 
-router.delete("/:id", authMiddleware, deleteAdvertisement);
-router.patch("/:id/toggle-status", authMiddleware, toggleAdvertisementStatus);
+router.delete("/:id", authMiddleware,checkPermission('notice.delete'),deleteAdvertisement);
+router.patch("/:id/toggle-status", authMiddleware,checkPermission('notice.update'), toggleAdvertisementStatus);
 
 // Bulk operations (admin only)
-router.patch("/bulk/status", authMiddleware, bulkUpdateStatus);
-router.delete("/bulk/delete", authMiddleware, bulkDeleteAdvertisements);
+router.patch("/bulk/status", authMiddleware, checkPermission('notice.update'), bulkUpdateStatus);
+router.delete("/bulk/delete", authMiddleware, checkPermission('notice.delete'), bulkDeleteAdvertisements);
 
 export default router;

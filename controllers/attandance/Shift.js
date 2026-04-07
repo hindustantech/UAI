@@ -9,7 +9,13 @@ import mongoose from "mongoose";
  */
 export const createShift = async (req, res) => {
     try {
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         const {
             shiftName,
@@ -81,7 +87,13 @@ export const createShift = async (req, res) => {
 export const updateShift = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({
@@ -147,7 +159,13 @@ export const updateShift = async (req, res) => {
 export const deleteShift = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         const shift = await Shift.findOneAndUpdate(
             { _id: id, companyId },
@@ -184,7 +202,13 @@ export const deleteShift = async (req, res) => {
 export const toggleNightShift = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         const shift = await Shift.findOne({ _id: id, companyId });
 
@@ -212,7 +236,13 @@ export const toggleNightShift = async (req, res) => {
 export const toggleOvertime = async (req, res) => {
     try {
         const { id } = req.params;
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         const shift = await Shift.findOne({ _id: id, companyId });
 
@@ -241,7 +271,13 @@ export const toggleWeeklyOff = async (req, res) => {
     try {
         const { id } = req.params;
         const { day } = req.body;
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         const shift = await Shift.findOne({ _id: id, companyId });
 
@@ -275,7 +311,13 @@ export const toggleWeeklyOff = async (req, res) => {
 
 export const getAllShifts = async (req, res) => {
     try {
-        const companyId = req.user._id;
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         const {
             page = 1,

@@ -12,6 +12,7 @@ import {
     getRequestStatistics
 } from "../../controllers/attandance/Request.js";
 import authMiddleware from "../../middlewares/authMiddleware.js";
+import { checkPermission } from "../../middlewares/checkPermission.js";
 
 const router = express.Router();
 
@@ -49,12 +50,12 @@ ADMIN/MANAGER ROUTES
 */
 
 // Approve a request (admin/manager only)
-router.put("/:requestId/approve",  approveAttendanceRequest);
+router.put("/:requestId/approve", checkPermission('request.update'), approveAttendanceRequest);
 
 // Reject a request (admin/manager only)
-router.put("/:requestId/reject",  rejectAttendanceRequest);
+router.put("/:requestId/reject", checkPermission('request.update'), rejectAttendanceRequest);
 
 // Bulk approve requests (admin only)
-router.post("/bulk-approve",  bulkApproveRequests);
+router.post("/bulk-approve", checkPermission('request.update'), bulkApproveRequests);
 
 export default router;

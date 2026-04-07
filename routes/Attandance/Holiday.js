@@ -19,6 +19,7 @@ import {
 ================================ */
 
 import authMiddleware from "../../middlewares/authMiddleware.js";
+import { checkPermission } from "../../middlewares/checkPermission.js";
 
 /* ===============================
    Router Init
@@ -37,6 +38,7 @@ const router = express.Router();
 router.post(
     "/",
     authMiddleware,
+    checkPermission('holiday.create'),
     createHoliday
 );
 
@@ -47,6 +49,7 @@ router.post(
 router.put(
     "/:id",
     authMiddleware,
+    checkPermission('holiday.update'),
     updateHoliday
 );
 
@@ -57,6 +60,7 @@ router.put(
 router.delete(
     "/:id",
     authMiddleware,
+    checkPermission('holiday.delete'),
     deleteHoliday
 );
 

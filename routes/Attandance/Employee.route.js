@@ -15,7 +15,8 @@ import {
     checkEmpButton,
     delteEmployee,
     updateEmployee,
-    getLatestSubscription
+    getLatestSubscription,
+    changeEmployeeRole
 } from "../../controllers/attandance/Employee.js";
 
 /* ===============================
@@ -24,6 +25,7 @@ import {
 import authMiddleware from "../../middlewares/authMiddleware.js";
 import { checkFeature } from "../../middlewares/checkFeature.js";
 import { checkSubscription } from "../../middlewares/checkSubscription.js";
+import { checkPermission } from "../../middlewares/checkPermission.js";
 /* ===============================
    Router Init
 ================================ */
@@ -43,7 +45,8 @@ router.post(
     "/",
     authMiddleware,
     checkSubscription,                // 🔐 must have active plan
-    checkFeature("maxEmployees"),  // 🔐 feature-level access
+    checkFeature("maxEmployees"),
+    checkPermission('employee.create'),
     createEmployee
 );
 router.get(
@@ -62,6 +65,11 @@ router.post(
     findbyPhone
 );
 router.post(
+    "/changeEmployeeRole/:empId",
+    authMiddleware,
+    changeEmployeeRole
+);
+router.post(
     "/find-by-Referral-Code",
     authMiddleware,
     findbyReferralCode
@@ -69,6 +77,7 @@ router.post(
 router.patch(
     "/updateEmployee/:employeeId",
     authMiddleware,
+    checkPermission('employee.update'),
     updateEmployee
 );
 
@@ -89,6 +98,7 @@ router.get(
 router.delete(
     "/delteEmployee/:empId",
     authMiddleware,
+    checkPermission('employee.delete'),
     delteEmployee
 );
 router.get(

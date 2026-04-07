@@ -30,21 +30,23 @@ export const generateToken = async (userId) => {
   // 3. Build payload
   const payload = {
     id: userId,
-    globalRole: user.type, // super_admin / partner
+    type: user.type, // super_admin / partner
     scope: "GLOBAL",
     companyId: null,
-    role: null,
+    emp_role: null,
   };
 
   if (employee && employee.employmentStatus === "active") {
     payload.companyId = employee.companyId;
-    payload.role = employee.role;
+    payload.emp_role = employee.role;
     payload.scope = "COMPANY";
   }
 
   // 4. Sign token
   return jwt.sign(payload, JWT_SECRET);
 };
+
+
 
 const verifyToken = (token) => {
   try {

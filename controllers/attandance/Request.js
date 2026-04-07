@@ -409,7 +409,13 @@ export const approveAttendanceRequest = async (req, res) => {
 
     try {
         const { requestId } = req.params;
-        const adminId = req.user._id;
+        let adminId
+        adminId = req.user._id || req.user.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            adminId = req.user?.companyId || req.user?.companyId;
+        }
+
 
         // ───────────────────────── VALIDATION ─────────────────────────
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
@@ -663,7 +669,12 @@ export const rejectAttendanceRequest = async (req, res) => {
     try {
         const { requestId } = req.params;
         const { reason } = req.body;
-        const adminId = req.user._id;
+        let adminId
+        adminId = req.user._id || req.user.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            adminId = req.user?.companyId || req.user?.companyId;
+        }
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             return res.status(400).json({
