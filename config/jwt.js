@@ -12,7 +12,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 
 
-export const generateToken = async (userId) => {
+const generateToken = async (userId) => {
   // 1. Fetch user
   const user = await User.findById(userId)
     .select("type")
