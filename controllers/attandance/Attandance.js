@@ -1486,7 +1486,7 @@ export const getEmployeeSimpleMonthlySummary = async (req, res) => {
                         halfDays: "$halfDays",
                         leaveDays: "$leaveDays",
                         workingDays: "$workingDays",
-                        absentDays: 0 // temporary placeholder
+                        // absentDays: 0 // temporary placeholder
                     },
 
                     timeSummary: {
@@ -1535,7 +1535,7 @@ export const getEmployeeSimpleMonthlySummary = async (req, res) => {
         const companySummary = {
             totalEmployees: report.length,
             totalPresent: 0,
-            totalAbsent: 0,
+            // totalAbsent: 0,
             totalLeave: 0,
             totalWorkingDays: 0,
             totalHours: 0,
@@ -1548,7 +1548,7 @@ export const getEmployeeSimpleMonthlySummary = async (req, res) => {
             const t = emp.timeSummary;
 
             companySummary.totalPresent += s.presentDays || 0;
-            companySummary.totalAbsent += s.absentDays || 0;
+            // companySummary.totalAbsent += s.absentDays || 0;
             companySummary.totalLeave += s.leaveDays || 0;
             companySummary.totalWorkingDays += s.workingDays || 0;
             companySummary.totalHours += t.totalHours || 0;
