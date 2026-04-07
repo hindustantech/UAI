@@ -1370,15 +1370,15 @@ export const completOtp = async (req, res) => {
       { new: true }
     );
 
-    
+
 
     // 4. JWT
     const token = generateToken(
       updated._id,
       updated.type
     );
-    logger.info(`Generated JWT for user ${userId}: ${token}`);
 
+    console.log(`Generated JWT for user ${userId}:`, token);
     logger.info(`Login success for user ${userId}`, {
       id: updated._id,
       phone: updated.phone,
@@ -1480,7 +1480,7 @@ export const startAdminAuth = async (req, res) => {
       message: "OTP sent successfully",
       userId: user._id,
       phone: user.phone,
-      
+
     });
 
   } catch (err) {
@@ -1530,7 +1530,7 @@ export const completeAdminOtp = async (req, res) => {
       });
     }
 
- 
+
 
 
 
@@ -1548,8 +1548,8 @@ export const completeAdminOtp = async (req, res) => {
     /* ---------- Generate JWT Token ---------- */
     const token = generateToken(user._id, user.type);
 
-   
- 
+
+
 
     /* ---------- Response with Minimal User Info ---------- */
     return res.json({
