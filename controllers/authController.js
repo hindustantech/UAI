@@ -1370,31 +1370,14 @@ export const completOtp = async (req, res) => {
       { new: true }
     );
 
-    // // 3. Bind device atomically
-    // const updated = await User.findOneAndUpdate(
-    //   {
-    //     _id: userId,
-    //     $or: [
-    //       { deviceId: null },        // First time login
-    //       { deviceId: deviceId },    // Same device re-login
-    //     ],
-    //   },
-    //   {
-    //     $set: {
-    //       isVerified: true,
-    //       deviceId,
-    //       otp: null,
-    //     },
-    //   },
-    //   { new: true }
-    // );
-
+    
 
     // 4. JWT
     const token = generateToken(
       updated._id,
       updated.type
     );
+    logger.info(`Generated JWT for user ${userId}: ${token}`);
 
     logger.info(`Login success for user ${userId}`, {
       id: updated._id,
