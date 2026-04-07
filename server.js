@@ -24,7 +24,7 @@ import './models/Attandance/Holiydaycron.js'
 import ExportRoutes from './routes/Attandance/Export/attendanceRoutes.js'
 import permissionRoutes from './routes/permissionRoutes.js';
 import subscriptionsdata from './routes/Attandance/subscription.routes.js';
-import './cron/subscription.js'; // Import the subscription cron job
+import './cron/subscription.js'; 
 import './cron/markAbsent.cron.js'
 dotenv.config();
 await connectDB();

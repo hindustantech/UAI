@@ -1373,7 +1373,7 @@ export const completOtp = async (req, res) => {
 
 
     // 4. JWT
-    const token = generateToken(
+    const token = await generateToken(
       updated._id,
       updated.type
     );
