@@ -1,46 +1,54 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/userModel.js';
 
-const JWTS = process.env.JWT_SECRET;
 const authMiddleware = async (req, res, next) => {
   try {
-    // 1) Get token from header or cookie
     let token;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+
+    // Extract token
+    if (req.headers.authorization?.startsWith('Bearer ')) {
       token = req.headers.authorization.split(' ')[1];
-    } else if (req.cookies && req.cookies.token) {
+    } else if (req.cookies?.token) {
       token = req.cookies.token;
     }
 
     if (!token) {
-      return res.status(401).json({ message: 'No token provided, authorization denied' });
+      return res.status(401).json({ message: 'No token provided' });
     }
 
-    // 2) Verify token
-
+    // Verify
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!decoded || !decoded.id) {
-      return res.status(401).json({ message: 'Invalid or expired token' });
+
+    if (!decoded?.id) {
+      return res.status(401).json({ message: 'Invalid token' });
     }
 
-    // 3) Fetch user from DB
-    const user = await User.findById(decoded.id).select('-password -otp -__v');
+    // Fetch user (plain object)
+    const user = await User.findById(decoded.id)
+      .select('-password -otp -__v')
+      .lean();
+
     if (!user) {
-      return res.status(401).json({ message: 'User not found, authorization denied' });
+      return res.status(401).json({ message: 'User not found' });
     }
 
-    // 4) Attach user object (safe + token info)
-    req.user = user;
+    // Merge (JWT has priority)
+    req.user = {
+      ...decoded,
+      ...user
+    };
 
     next();
+
   } catch (error) {
     console.error('Auth Middleware Error:', error.message);
-    return res.status(500).json({ message: 'Authentication error' });
+
+    return res.status(401).json({
+      message: 'Authentication failed',
+      error: error.message
+    });
   }
 };
-
-
-
 
 export default authMiddleware;
 
