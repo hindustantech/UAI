@@ -287,7 +287,14 @@ export const getAllHolidays = async (req, res) => {
  */
 export const getHolidayById = async (req, res) => {
     try {
-        const companyId = req.user._id;
+        
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
+
         const holidayId = req.params.id;
 
         if (!mongoose.Types.ObjectId.isValid(holidayId)) {
