@@ -28,6 +28,6 @@ router.delete('/:id', authMiddleware, checkPermission('permission.delete'), dele
 router.post('/assign', authMiddleware, checkPermission('permission.assign'), assignPermission);
 router.post('/remove', authMiddleware, checkPermission('permission.assign'), removePermission);
 // Any admin can view
-router.get('/:userId', authMiddleware, getUserPermissions);
+router.get('/', authMiddleware, getUserPermissions);
 
 export default router;
