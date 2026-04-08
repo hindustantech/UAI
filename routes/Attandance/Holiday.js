@@ -84,7 +84,7 @@ router.get(
  * GET /api/holidays/:id
  */
 router.get(
-    "/:id",
+    "/getHolidayById/:id",
     authMiddleware,
     getHolidayById
 );
