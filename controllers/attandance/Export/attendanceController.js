@@ -20,9 +20,11 @@ export const generateAttendanceCSV = async (req, res) => {
         // const companyId = req.user._id
         let companyId;
         companyId = req.user._id || req.user?.id;
+        console.log("Initial companyId from user:", companyId);
         const role = req.user?.role || req.user?.type;
         if (role === 'user') {
             companyId = req.user?.companyId || req.user?.companyId;
+            console.log("User role detected, using companyId from user:", companyId);
         }
 
         // Validate required fields
