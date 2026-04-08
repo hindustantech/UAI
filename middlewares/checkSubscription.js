@@ -7,7 +7,8 @@ export const checkSubscription = async (req, res, next) => {
         let companyId;
 
         companyId = req.user._id || req.user?.id;
-        if (req.user?.role === 'user') {
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
             companyId = req.user?.companyId || req.user?.companyId;
         }
 
