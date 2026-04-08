@@ -109,6 +109,7 @@ router.get(
 router.get(
     "/",
     authMiddleware,
+    checkPermission('employee.list'),
     getAllEmployees
 );
 

@@ -524,7 +524,7 @@ export const updateEmployee = async (req, res) => {
         if (role === 'user') {
             companyId = req.user?.companyId || req.user?.companyId;
         }
-       
+
 
         if (!companyId) {
             return res.status(401).json({
@@ -801,8 +801,16 @@ export const getAllEmployees = async (req, res) => {
     try {
         /* ---------------------------------------------
            1. Auth Validation
-        ---------------------------------------------- */
-        const companyId = req.user?._id;
+           ---------------------------------------------- */
+        let companyId;
+        companyId = req.user?._id || req.user?.id;
+        const roles = req.user?.role || req.user?.type;
+s
+        if (roles === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
+
+
 
         if (!companyId) {
             return res.status(401).json({
