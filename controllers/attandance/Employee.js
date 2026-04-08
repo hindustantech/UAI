@@ -521,7 +521,7 @@ export const updateEmployee = async (req, res) => {
         companyId = req.user?._id || req.user?.id;
         const userRole = req.user?.role || req.user?.type;
 
-        if (role === 'user') {
+        if (userRole === 'user') {
             companyId = req.user?.companyId || req.user?.companyId;
         }
 
