@@ -1,16 +1,20 @@
 import mongoose from 'mongoose';
 
 const PermissionLogSchema = new mongoose.Schema({
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+        index: true
+    },
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true
-
     },
     permissionKey: {
         type: String,
         required: true
-
     },
     actionType: {
         type: String,
@@ -19,13 +23,12 @@ const PermissionLogSchema = new mongoose.Schema({
     },
     performedBy: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', required: true
-
+        ref: 'User',
+        required: true
     },
     note: {
         type: String,
         default: ''
-
     }
 }, { timestamps: true });
 

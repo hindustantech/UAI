@@ -1,5 +1,6 @@
 import User from "../models/userModel.js";
 import Employee from "../models/Attandance/Employee.js";
+import AssingPermission from "../models/AssingPermission.js";
 
 /**
  * permissionKey: the key required to access this route
@@ -48,8 +49,12 @@ export const checkPermission = (permissionKey) => {
                 return next();
             }
 
-            // 🔹 Direct permission
-            if (user.permissions?.includes(permissionKey)) {
+            // 🔹 Direct permission from AssingPermission
+            const assignment = await AssingPermission.findOne({ 
+                companyId, 
+                userId: user._id 
+            });
+            if (assignment && assignment.permissions.includes(permissionKey)) {
                 return next();
             }
 

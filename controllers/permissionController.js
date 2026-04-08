@@ -3,13 +3,17 @@
 import User from "../models/userModel.js";
 import Permission from "../models/Permission.js";
 import PermissionLog from "../models/PermissionLog.js";
+import AssingPermission from "../models/AssingPermission.js";
 /**
  * Assign permission to a user
  */
 export const assignPermission = async (req, res) => {
   try {
-    const { userId, permissionKey } = req.body;
-    const performedBy = req.user._id; // admin performing this action
+    const { userId, permissionKey, companyId } = req.body;
+    const performedBy = req.user._id;
+    const company = companyId || req.user.companyId; // fallback to performer's company
+
+    if (!company) return res.status(400).json({ message: 'companyId required' });
 
     const perm = await Permission.findOne({ key: permissionKey });
     if (!perm) return res.status(404).json({ message: 'Permission not found' });
@@ -17,16 +21,19 @@ export const assignPermission = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    if (user.permissions.includes(permissionKey)) {
-      return res.status(400).json({ message: 'Permission already assigned' });
-    }
+    await AssingPermission.assignToUser(company, userId, permissionKey, performedBy);
 
-    user.permissions.push(permissionKey);
-    await user.save();
+    await PermissionLog.create({ 
+      companyId: company, 
+      userId, 
+      permissionKey, 
+      actionType: 'ASSIGNED', 
+      performedBy 
+    });
 
-    await PermissionLog.create({ userId, permissionKey, actionType: 'ASSIGNED', performedBy });
+    const assignment = await AssingPermission.findOne({ companyId: company, userId }).populate('assignedBy', 'name email');
 
-    res.json({ success: true, message: 'Permission assigned', user });
+    res.json({ success: true, message: 'Permission assigned', assignment });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -37,22 +44,28 @@ export const assignPermission = async (req, res) => {
  */
 export const removePermission = async (req, res) => {
   try {
-    const { userId, permissionKey } = req.body;
+    const { userId, permissionKey, companyId } = req.body;
     const performedBy = req.user._id;
+    const company = companyId || req.user.companyId;
+
+    if (!company) return res.status(400).json({ message: 'companyId required' });
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    if (!user.permissions.includes(permissionKey)) {
-      return res.status(400).json({ message: 'Permission not assigned' });
-    }
+    await AssingPermission.removeFromUser(company, userId, permissionKey);
 
-    user.permissions = user.permissions.filter(p => p !== permissionKey);
-    await user.save();
+    await PermissionLog.create({ 
+      companyId: company, 
+      userId, 
+      permissionKey, 
+      actionType: 'REMOVED', 
+      performedBy 
+    });
 
-    await PermissionLog.create({ userId, permissionKey, actionType: 'REMOVED', performedBy });
+    const assignment = await AssingPermission.findOne({ companyId: company, userId });
 
-    res.json({ success: true, message: 'Permission removed', user });
+    res.json({ success: true, message: 'Permission removed', assignment });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -63,11 +76,15 @@ export const removePermission = async (req, res) => {
  */
 export const getUserPermissions = async (req, res) => {
   try {
-    const { userId } = req.params;
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    const { userId, companyId } = req.query;
+    const company = companyId || req.user.companyId;
 
-    res.json({ permissions: user.permissions });
+    if (!company) return res.status(400).json({ message: 'companyId required' });
+
+    const assignment = await AssingPermission.findOne({ companyId: company, userId }).populate('assignedBy', 'name email');
+    if (!assignment) return res.status(404).json({ message: 'Assignment not found' });
+
+    res.json({ success: true, permissions: assignment.permissions, assignment });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
