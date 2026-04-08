@@ -4,7 +4,12 @@ import { getActiveSubscription } from "../services/subscription.service.js";
 
 export const checkSubscription = async (req, res, next) => {
     try {
-        const companyId = req.user._id;
+        let companyId;
+
+        companyId = req.user._id || req.user?.id;
+        if (req.user?.role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
 
         const subscription = await getActiveSubscription(companyId);
 
