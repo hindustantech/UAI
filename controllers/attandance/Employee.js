@@ -533,7 +533,7 @@ export const updateEmployee = async (req, res) => {
             });
         }
 
-        if (!['partner', 'admin', 'super_admin'].includes(userRole)) {
+        if (!['partner', 'admin', 'super_admin', 'user'].includes(userRole)) {
             return res.status(403).json({
                 success: false,
                 message: "Access denied",
