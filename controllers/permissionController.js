@@ -76,7 +76,7 @@ export const getUserPermissions = async (req, res) => {
 
 
 
-
+              
 
 
 /**
@@ -115,7 +115,7 @@ export const createPermission = async (req, res) => {
  */
 export const getAllPermissions = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search = '' } = req.query;
+    const { page = 1, limit = 50, search = '' } = req.query;
     const query = search ? { $or: [{ key: { $regex: search, $options: 'i' } }, { resource: { $regex: search, $options: 'i' } }] } : {};
 
     const permissions = await Permission.find(query)
