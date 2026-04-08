@@ -156,7 +156,6 @@ export const getCompanyByUser = async (req, res) => {
     try {
         const { userType } = req.params;
         const userId = req.user?._id || req.user?.id;
-
         if (!userId || !userType) {
             return res.status(400).json({
                 success: false,
@@ -203,7 +202,7 @@ export const getCompanyByUser = async (req, res) => {
             }
 
             const companyUserId = employee.companyId?._id || employee.companyId;
-
+            console.log("Employee found, companyUserId:", companyUserId);
             const partnerProfile = await PatnerProfile.findOne({
                 User_id: companyUserId
             }).lean();
