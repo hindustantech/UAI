@@ -51,7 +51,7 @@ router.get(
  * PUT /api/shifts/:id
  */
 router.put(
-    "/:id",
+    "/updateShift/:id",
     authMiddleware,
     checkPermission("shift.update"),
     updateShift
