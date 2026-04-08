@@ -201,6 +201,7 @@ export const getCompanyByUser = async (req, res) => {
                 });
             }
 
+            console.log("Employee found:", employee);
             const companyUserId = employee.companyId?._id || employee.companyId;
             console.log("Employee found, companyUserId:", companyUserId);
             const partnerProfile = await PatnerProfile.findOne({
