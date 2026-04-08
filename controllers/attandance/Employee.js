@@ -805,7 +805,7 @@ export const getAllEmployees = async (req, res) => {
         let companyId;
         companyId = req.user?._id || req.user?.id;
         const roles = req.user?.role || req.user?.type;
-s
+
         if (roles === 'user') {
             companyId = req.user?.companyId || req.user?.companyId;
         }
