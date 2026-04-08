@@ -14,6 +14,124 @@ import User from "../../models/userModel.js";
 import { resolveDateRange } from "../../utils/dateRangeResolver.js";
 // utils/dateRange.js
 
+
+
+
+
+// ─── DTO helpers (defined once, reused) ──────────────────────────────────────
+
+const formatRecord = (rec) => ({
+    employeeId: rec.employeeId?._id,
+    name: rec.employeeId?.user_name ?? "Unknown",
+    empCode: rec.employeeId?.empCode ?? "-",
+    department: rec.employeeId?.jobInfo?.department ?? "-",
+    punchIn: rec.punchIn ?? null,
+    punchOut: rec.punchOut ?? null,
+    lateMinutes: rec.workSummary?.lateMinutes ?? 0,
+    status: rec.status,
+});
+
+const formatAbsent = (emp) => ({
+    employeeId: emp._id,
+    name: emp.user_name ?? "Unknown",
+    empCode: emp.empCode ?? "-",
+    department: emp.jobInfo?.department ?? "-",
+    punchIn: null,
+    punchOut: null,
+    lateMinutes: 0,
+    status: "absent",
+});
+
+// ─── Controller ──────────────────────────────────────────────────────────────
+
+export const getTodaySummary = async (req, res) => {
+    try {
+        const { companyId } = req.user;
+
+        // 1. Date range — midnight to end of day
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+
+        const endOfDay = new Date();
+        endOfDay.setHours(23, 59, 59, 999);
+
+        // 2. Fire both queries in parallel
+        const [records, allEmployees] = await Promise.all([
+
+            Attendance
+                .find({ companyId, date: { $gte: startOfDay, $lte: endOfDay } })
+                .select("employeeId status punchIn punchOut workSummary.lateMinutes") // only needed fields
+                .populate("employeeId", "user_name empCode jobInfo.department")        // only needed fields
+                .lean(),                                                                // skip mongoose overhead
+
+            Employee
+                .find({ companyId, employmentStatus: "active" })
+                .select("_id user_name empCode jobInfo.department")                    // only needed fields
+                .lean(),
+
+        ]);
+
+        // 3. Single-pass grouping — O(n), no multiple loops
+        const grouped = {
+            present: [],
+            late: [],
+            absent: [],
+            leave: [],
+            week_off: [],
+            half_day: [],
+            pending_approval: [],
+            rejected: [],
+        };
+
+        const markedIds = new Set();  // O(1) lookup
+
+        for (const rec of records) {
+            const empId = rec.employeeId?._id?.toString();
+            if (empId) markedIds.add(empId);
+
+            const isLate = rec.status === "present" && (rec.workSummary?.lateMinutes ?? 0) > 0;
+            const bucket = isLate ? "late" : rec.status;
+
+            if (bucket in grouped) grouped[bucket].push(formatRecord(rec));  // format here, not later
+        }
+
+        // 4. Absent = active employees with no attendance record
+        for (const emp of allEmployees) {
+            if (!markedIds.has(emp._id.toString())) {
+                grouped.absent.push(formatAbsent(emp));
+            }
+        }
+
+        // 5. Build counts from already-grouped arrays — no re-iteration
+        const counts = {};
+        let totalMarked = 0;
+        for (const [key, arr] of Object.entries(grouped)) {
+            counts[key] = arr.length;
+            if (key !== "absent") totalMarked += arr.length;
+        }
+
+        return res.status(200).json({
+            meta: {
+                companyId,
+                date: startOfDay,
+                generatedAt: new Date(),
+            },
+            counts: {
+                ...counts,
+                totalEmployees: allEmployees.length,
+                totalMarked,
+                totalAbsent: grouped.absent.length,
+            },
+            employees: grouped,
+        });
+
+    } catch (err) {
+        console.error("[getTodaySummary]", err);
+        return res.status(500).json({ message: "Failed to fetch attendance summary" });
+    }
+};
+
+
 export const buildMonthRange = (year, month) => {
     const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
     const end = new Date(Date.UTC(year, month, 0, 23, 59, 59));

@@ -22,7 +22,8 @@ import {
     exportAttendanceAsExcel,
     exportAttendanceAsCSV,
     getTodayPunchStatus,
-    getAttendanceSummary
+    getAttendanceSummary,
+    getTodaySummary
 } from "../../controllers/attandance/Attandance.js";
 /* ===============================
    Middlewares
@@ -165,6 +166,11 @@ router.get(
  * Export Attendance CSV
  * GET /api/attendance/export
  */
+router.get(
+    "/getTodaySummary",
+    authMiddleware,
+    getTodaySummary
+);
 router.get(
     "/export",
     authMiddleware,
