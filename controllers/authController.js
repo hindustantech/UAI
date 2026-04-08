@@ -1290,7 +1290,7 @@ export const startAuth = async (req, res) => {
     const otpResponse = await sendWhatsAppOtp(phone);
 
     if (!otpResponse.success) {
-      await User.findByIdAndDelete(user._id); // rollback
+  
 
       return res.status(500).json({ message: 'Failed to send OTP', error: otpResponse.error });
     }
