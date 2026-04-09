@@ -1237,10 +1237,24 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
     }
 };
 // Helper function to format time from Date object
-function formatTime(date) {
+export function formatTime(date) {
     if (!date) return "N/A";
-    const d = new Date(date);
-    return d.toTimeString().split(' ')[0];
+
+    try {
+        const d = new Date(date);
+
+        return new Intl.DateTimeFormat("en-IN", {
+            timeZone: "Asia/Kolkata",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false, // 24-hour format
+        }).format(d);
+
+    } catch (error) {
+        console.error("formatTime error:", error);
+        return "Invalid Date";
+    }
 }
 
 // Helper function to format working hours
