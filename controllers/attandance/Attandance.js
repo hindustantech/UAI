@@ -44,7 +44,7 @@ const formatAbsent = (emp) => ({
 
 // ─── Controller ──────────────────────────────────────────────────────────────
 
-export const getTodaySummary = async (req,es) => {
+export const getTodaySummary = async (req,res) => {
     try {
         let companyId;
         companyId = req.user?.id || req.user?._id;
