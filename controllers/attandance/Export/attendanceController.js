@@ -782,7 +782,7 @@ const styleDataCell = (cell, value, opts = {}) => {
    SUMMARY + SALARY PIVOT EXPORT
 ───────────────────────────────────────── */
 
-export const generateAttendanceSummaryXLSX = async (req, res) => {
+export const generateAttendanceSummaryCSV = async (req, res) => {
     try {
         const { startDate, endDate, department, employeeCode } = req.query;
         const companyId = resolveCompanyId(req);
