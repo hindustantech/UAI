@@ -755,10 +755,10 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
  * @param {Object} res - Response object
  */
 
-const formatTime = (date) =>
-    date
-        ? new Date(date).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })
-        : null;
+// const formatTime = (date) =>
+//     date
+//         ? new Date(date).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })
+//         : null;
 
 
 const ALT_ROW = "FFF2F6FC";
