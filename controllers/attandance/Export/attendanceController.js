@@ -133,7 +133,7 @@ export const generateAttendanceCSV = async (req, res) => {
 
             for (const date of dateRange) {
                 const dateKey = date.toISOString().split("T")[0];
-                const dayOfWeek = date.toLocaleDateString("en-US", { weekday: "long" });
+                const dayOfWeek = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const attendance = attendanceMap.get(`${emp._id}_${dateKey}`);
                 const isWeeklyOff = weeklyOffDays.includes(dayOfWeek);
 
@@ -709,7 +709,7 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
 
             for (const date of dateRange) {
                 const dateKey = date.toISOString().split("T")[0];
-                const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
+                const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const att = attMap.get(`${emp._id}_${dateKey}`);
                 const isWO = weeklyOff.includes(dayName);
                 const { code, label, punchIn, punchOut, hours } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
