@@ -68,7 +68,7 @@ const totalBreakMinutes = (breaks = []) =>
    MAIN EXPORT HANDLER
 ───────────────────────────────────────────── */
 
-export const generateAttendanceReport = async (req, res) => {
+export const generateAttendanceCSV = async (req, res) => {
     try {
         const { startDate, endDate, department, employeeCode, format = "xlsx" } = req.query;
 
