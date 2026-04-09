@@ -15,15 +15,15 @@ const timeStrToMinutes = (timeStr = "00:00") => {
     return (h || 0) * 60 + (m || 0);
 };
 
-/** Date object → "HH:MM" */
-const formatTime = (date) => {
-    if (!date) return "N/A";
-    return new Date(date).toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-    });
-};
+// /** Date object → "HH:MM" */
+// const formatTime = (date) => {
+//     if (!date) return "N/A";
+//     return new Date(date).toLocaleTimeString("en-IN", {
+//         hour: "2-digit",
+//         minute: "2-digit",
+//         hour12: false,
+//     });
+// };
 
 /** minutes → "H:MM" */
 const formatMinutes = (mins = 0) => {
