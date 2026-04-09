@@ -44,9 +44,16 @@ const formatAbsent = (emp) => ({
 
 // ─── Controller ──────────────────────────────────────────────────────────────
 
-export const getTodaySummary = async (req, res) => {
+export const getTodaySummary = async (req,es) => {
     try {
-        const { companyId } = req.user;
+        let companyId;
+        companyId = req.user?.id || req.user?._id;
+        const role = req.user?.role || req.user?.type;
+        if (role === 'user') {
+            companyId = req.user?.companyId || req.user?.companyId;
+        }
+
+
 
         // 1. Date range — midnight to end of day
         const startOfDay = new Date();
