@@ -64,6 +64,25 @@ const totalBreakMinutes = (breaks = []) =>
     }, 0);
 
 
+/**
+* Format minutes:
+* < 60  → "X min"
+* >= 60 → "X hr : Y min"
+*/
+export const formatLateTime = (totalMinutes = 0) => {
+    if (typeof totalMinutes !== "number" || totalMinutes < 0) {
+        return "0 min";
+    }
+
+    if (totalMinutes < 60) {
+        return `${totalMinutes} min`;
+    }
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    return `${hours} hr : ${minutes} min`;
+};
 /* ─────────────────────────────────────────────
    MAIN EXPORT HANDLER
 ───────────────────────────────────────────── */
@@ -169,7 +188,7 @@ export const generateAttendanceCSV = async (req, res) => {
                     punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
                     totalHours = minutesToHours(attendance.workSummary?.totalMinutes || 0);
                     overtimeMinutes = attendance.workSummary?.overtimeMinutes || 0;
-                    lateMinutes = attendance.workSummary?.lateMinutes || 0;
+                    lateMinutes = formatLateTime(attendance?.workSummary?.lateMinutes) || 0;
                     earlyLeaveMinutes = attendance.workSummary?.earlyLeaveMinutes || 0;
                     breakMinutes = totalBreakMinutes(attendance.breaks);
                     locationVerified = attendance.geoLocation?.verified ? "Yes" : "No";
@@ -1248,7 +1267,7 @@ export function formatTime(date) {
             hour: "2-digit",
             minute: "2-digit",
             second: "2-digit",
-            hour12: false, // 24-hour format
+            hour12: true, // 24-hour format
         }).format(d);
 
     } catch (error) {
