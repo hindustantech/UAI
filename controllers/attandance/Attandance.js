@@ -1638,33 +1638,19 @@ const formatHours = (minutes) => {
 ========================= */
 
 export const getEmployeeAttendanceSummary = async (req, res) => {
-
     try {
 
-        /* ========= AUTH ========= */
-
         const userId = req.query.userId;
-
-        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized"
-            });
-        }
-
-        /* ========= PARAM ========= */
-
         const month = Number(req.query.month);
         const year = Number(req.query.year);
 
-        if (!month || !year) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid params"
-            });
+        if (!userId || !month || !year) {
+            return res.status(400).json({ success: false, message: "Invalid params" });
         }
 
-        /* ========= EMPLOYEE ========= */
+        /* ===========================
+           EMPLOYEE
+        ============================ */
 
         const employee = await Employee.findOne({
             userId,
@@ -1672,26 +1658,30 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
         }).lean();
 
         if (!employee) {
-            return res.status(404).json({
-                success: false,
-                message: "Employee not found"
-            });
+            return res.status(404).json({ success: false, message: "Employee not found" });
         }
-
-        /* ========= SHIFT ========= */
 
         const shift = employee.shift
             ? await Shift.findById(employee.shift).lean()
             : null;
 
-        /* ========= DATE RANGE ========= */
+        /* ===========================
+           DATE RANGE
+        ============================ */
 
         const start = new Date(year, month - 1, 1);
         const end = new Date(year, month, 0);
 
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        /* ===========================
+           FETCH ONLY TILL TODAY
+        ============================ */
+
         const records = await Attendance.find({
             employeeId: employee._id,
-            date: { $gte: start, $lte: end }
+            date: { $gte: start, $lte: today }
         }).lean();
 
         const map = new Map();
@@ -1700,7 +1690,9 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
             map.set(key, r);
         });
 
-        /* ========= LOOP ========= */
+        /* ===========================
+           METRICS
+        ============================ */
 
         let presentDays = 0;
         let absentDays = 0;
@@ -1709,6 +1701,10 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
         const report = [];
 
+        /* ===========================
+           LOOP
+        ============================ */
+
         for (let i = 1; i <= end.getDate(); i++) {
 
             const date = new Date(year, month - 1, i);
@@ -1716,7 +1712,21 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
             const key = date.toISOString().split("T")[0];
 
-            /* ===== BEFORE JOINING ===== */
+            /* ===========================
+               FUTURE DATE (SHOW ONLY)
+            ============================ */
+
+            if (date > today) {
+                report.push({
+                    Date: key,
+                    TimeIn: "—",
+                    TimeOut: "—",
+                    TotalHours: "—"
+                });
+                continue; // ❌ DO NOT COUNT
+            }
+
+            /* BEFORE JOINING */
             if (isBeforeJoining(date, employee)) {
                 report.push({
                     Date: key,
@@ -1729,7 +1739,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
             const rec = map.get(key);
 
-            /* ===== WEEK OFF ===== */
+            /* WEEK OFF */
             if (!rec && isWeekOff(date, shift, employee)) {
                 report.push({
                     Date: key,
@@ -1740,9 +1750,10 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* ===== NO RECORD ===== */
+            /* ABSENT (ONLY PAST DAYS) */
             if (!rec) {
                 absentDays++;
+
                 report.push({
                     Date: key,
                     TimeIn: "Absent",
@@ -1752,7 +1763,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* ===== HOLIDAY ===== */
+            /* HOLIDAY */
             if (rec.status === "holiday") {
                 report.push({
                     Date: key,
@@ -1763,18 +1774,18 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* ===== INVALID PUNCH ===== */
+            /* INVALID PUNCH */
             if (!isValidPunch(rec)) {
                 report.push({
                     Date: key,
                     TimeIn: rec.punchIn ? formatTime(rec.punchIn) : "-",
                     TimeOut: rec.punchOut ? formatTime(rec.punchOut) : "-",
-                    TotalHours: "Invalid Punch"
+                    TotalHours: "Invalid"
                 });
                 continue;
             }
 
-            /* ===== VALID PRESENT ===== */
+            /* VALID */
 
             const minutes = rec.workSummary?.totalMinutes || 0;
 
@@ -1795,13 +1806,17 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
             });
         }
 
-        /* ========= AVG FIX ========= */
+        /* ===========================
+           AVG CALCULATION (SAFE)
+        ============================ */
 
         const avgMinutes = validDays > 0
             ? Math.round(totalMinutes / validDays)
             : 0;
 
-        /* ========= RESPONSE ========= */
+        /* ===========================
+           RESPONSE
+        ============================ */
 
         return res.status(200).json({
             success: true,
