@@ -1053,7 +1053,10 @@ export const getCompanyTodayAttendance = async (req, res) => {
 
 
 
-export const getEmployeeSimpleMonthlySummary = async (req, res) => {
+/* =====================================
+   GET ACTIVE EMPLOYEES (SIMPLE LIST)
+===================================== */
+export const getActiveEmployees = async (req, res) => {
     try {
         let companyId
         companyId = req.user?._id;
@@ -1062,21 +1065,39 @@ export const getEmployeeSimpleMonthlySummary = async (req, res) => {
             companyId = req.user?.companyId || req.user?.companyId;
         }
 
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid companyId"
+            });
+        }
+
         const employees = await Employee.find({
-            companyId,
+            companyId: new mongoose.Types.ObjectId(companyId),
             employmentStatus: "active"
         })
-            .select("user_name empCode jobInfo.designation jobInfo.department")
+            .select(`
+            user_name
+            empCode
+            jobInfo.designation
+            jobInfo.department
+            userId
+        `)
             .sort({ user_name: 1 })
             .lean();
 
         return res.status(200).json({
             success: true,
             count: employees.length,
-            data: employees
+            data: employees || [],
+            message: employees.length === 0
+                ? "No active employees found"
+                : "Employees fetched successfully"
         });
 
     } catch (error) {
+        console.error("Get Active Employees Error:", error);
+
         return res.status(500).json({
             success: false,
             message: "Failed to fetch employees",
@@ -1084,6 +1105,7 @@ export const getEmployeeSimpleMonthlySummary = async (req, res) => {
         });
     }
 };
+
 
 
 
