@@ -16,7 +16,9 @@ import {
     deactivateEmployee,
     updateEmployee,
     getLatestSubscription,
-    changeEmployeeRole
+    changeEmployeeRole,
+    activateEmployee,
+    getEmployees
 } from "../../controllers/attandance/Employee.js";
 
 /* ===============================
@@ -135,6 +137,16 @@ router.get(
     "/me/profile",
     authMiddleware,
     getEmpByUserId
+);
+router.put(
+    "/me/profile",
+    authMiddleware,
+    activateEmployee,
+);
+router.get(
+    "/me/profile",
+    authMiddleware,
+    getEmployees
 );
 
 export default router;

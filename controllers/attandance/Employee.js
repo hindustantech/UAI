@@ -13,6 +13,111 @@ import { validateSubscription, canCreateEmployee, getEmployeeLimit, isNearingEmp
 
 
 
+export const activateEmployee = async (req, res) => {
+    const session = await mongoose.startSession();
+
+    try {
+        await session.startTransaction();
+
+        const { empId } = req.params;
+        const adminId = req.user._id;
+
+        /* ===========================
+           FETCH EMPLOYEE (SECURE)
+        ============================ */
+
+        const employee = await Employee.findOne({
+            _id: empId,
+            companyId: adminId
+        }).session(session);
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "Employee not found"
+            });
+        }
+
+        /* ===========================
+           ONLY INACTIVE → ACTIVE
+        ============================ */
+
+        if (employee.employmentStatus === "active") {
+            return res.status(200).json({
+                success: true,
+                message: "Employee already active",
+                data: {
+                    employeeId: employee._id,
+                    status: employee.employmentStatus
+                }
+            });
+        }
+
+        /* ===========================
+           ACTIVATE
+        ============================ */
+
+        employee.employmentStatus = "active";
+        employee.deactivatedAt = null;
+        employee.deactivatedBy = null;
+        employee.deactivationReason = null;
+
+        await employee.save({ session });
+
+        await session.commitTransaction();
+
+        return res.status(200).json({
+            success: true,
+            message: "Employee activated successfully",
+            data: {
+                employeeId: employee._id,
+                status: employee.employmentStatus
+            }
+        });
+
+    } catch (error) {
+        await session.abortTransaction();
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message
+        });
+
+    } finally {
+        session.endSession();
+    }
+};
+
+
+export const getEmployees = async (req, res) => {
+    try {
+        const companyId = req.user._id;
+
+        const status = req.query.status || "all";
+
+        const filter = { companyId };
+
+        if (status !== "all") {
+            filter.employmentStatus = status;
+        }
+
+        const employees = await Employee.find(filter)
+            .sort({ createdAt: -1 })
+            .lean();
+
+        return res.status(200).json({
+            success: true,
+            data: employees
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
 // controllers/subscription.controller.js
 
 
