@@ -1000,9 +1000,6 @@ export const getTodayPunchStatus = async (req, res) => {
 
 
 
-// services/attendance.company.export.service.js
-
-
 export const exportCompanyAttendanceSummary = async ({
     companyId,
     fromDate,
@@ -1171,6 +1168,7 @@ export const exportCompanyAttendanceSummary = async ({
 
     return await Attendance.aggregate(pipeline, { allowDiskUse: true });
 };
+
 export const AttendanceSummaryFields = [
     "empCode",
     "employeeName",
@@ -2094,13 +2092,64 @@ const formatMinutes = (minutes) => {
    GET: Employee Attendance Summary + CSV
 ================================================= */
 
+
+/* =========================
+   HELPERS (PURE FUNCTIONS)
+========================= */
+
+const getJoiningDate = (employee) => {
+    return employee?.jobInfo?.joiningDate
+        ? new Date(employee.jobInfo.joiningDate)
+        : new Date(employee.createdAt);
+};
+
+const isBeforeJoining = (date, employee) => {
+    const joining = getJoiningDate(employee);
+
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+
+    joining.setHours(0, 0, 0, 0);
+
+    return d < joining;
+};
+
+const getWeekDay = (date) => {
+    return date.toLocaleDateString("en-US", { weekday: "long" });
+};
+
+const isWeekOff = (date, shift, employee) => {
+    const day = getWeekDay(date);
+
+    if (shift?.weeklyOff?.length) {
+        return shift.weeklyOff.includes(day);
+    }
+
+    if (employee?.weeklyOff?.length) {
+        return employee.weeklyOff.includes(day);
+    }
+
+    return day === "Sunday"; // fallback
+};
+
+const isValidPunch = (rec) => {
+    return rec?.punchIn && rec?.punchOut;
+};
+
+
+const formatHours = (minutes) => {
+    return (minutes / 60).toFixed(2) + " hrs";
+};
+
+/* =========================
+   CONTROLLER
+========================= */
+
 export const getEmployeeAttendanceSummary = async (req, res) => {
 
     try {
 
-        /* ============================
-           1. Auth
-        ============================ */
+        /* ========= AUTH ========= */
 
         const userId = req.query.userId;
 
@@ -2111,51 +2160,24 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
             });
         }
 
-
-        /* ============================
-           2. Params
-        ============================ */
+        /* ========= PARAM ========= */
 
         const month = Number(req.query.month);
         const year = Number(req.query.year);
-        const format = req.query.format; // csv | json
 
-        if (!month || !year || month < 1 || month > 12 || year < 2000) {
+        if (!month || !year) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid month/year"
+                message: "Invalid params"
             });
         }
 
-
-        /* ============================
-           3. Block Future Months
-        ============================ */
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        if (
-            year > today.getFullYear() ||
-            (year === today.getFullYear() && month > today.getMonth() + 1)
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: "Future month not allowed"
-            });
-        }
-
-
-        /* ============================
-           4. Employee
-        ============================ */
+        /* ========= EMPLOYEE ========= */
 
         const employee = await Employee.findOne({
             userId,
             employmentStatus: "active"
-        })
-            .select("_id empCode")
-            .lean();
+        }).lean();
 
         if (!employee) {
             return res.status(404).json({
@@ -2164,224 +2186,150 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
             });
         }
 
+        /* ========= SHIFT ========= */
 
-        /* ============================
-           5. Date Range
-        ============================ */
+        const shift = employee.shift
+            ? await Shift.findById(employee.shift).lean()
+            : null;
 
-        const { start, end } = buildMonthRange(year, month);
+        /* ========= DATE RANGE ========= */
 
-
-        /* ============================
-           6. Attendance
-        ============================ */
+        const start = new Date(year, month - 1, 1);
+        const end = new Date(year, month, 0);
 
         const records = await Attendance.find({
             employeeId: employee._id,
             date: { $gte: start, $lte: end }
-        })
-            .sort({ date: -1 })
-            .lean();
-
-
-        /* ============================
-           7. Build Lookup Map
-        ============================ */
+        }).lean();
 
         const map = new Map();
-
         records.forEach(r => {
             const key = r.date.toISOString().split("T")[0];
             map.set(key, r);
         });
 
-
-        /* ============================
-           8. Calculate Loop Range
-        ============================ */
-
-        const isCurrentMonth =
-            today.getFullYear() === year &&
-            today.getMonth() + 1 === month;
-
-        const lastDay = isCurrentMonth
-            ? today.getDate() // till today
-            : new Date(year, month, 0).getDate(); // full month
-
-
-        const todayKey = today.toISOString().split("T")[0];
-        const yesterdayKey = new Date(today.getTime() - 86400000)
-            .toISOString()
-            .split("T")[0];
-
-
-        /* ============================
-           9. Build Report
-        ============================ */
+        /* ========= LOOP ========= */
 
         let presentDays = 0;
         let absentDays = 0;
         let totalMinutes = 0;
+        let validDays = 0;
 
         const report = [];
 
-
-        for (let i = lastDay; i >= 1; i--) {
+        for (let i = 1; i <= end.getDate(); i++) {
 
             const date = new Date(year, month - 1, i);
             date.setHours(0, 0, 0, 0);
 
             const key = date.toISOString().split("T")[0];
 
-            let label = date.toLocaleDateString("en-IN", {
-                day: "2-digit",
-                month: "short"
-            });
-
-            if (key === todayKey) label = "Today";
-            if (key === yesterdayKey) label = "Yesterday";
+            /* ===== BEFORE JOINING ===== */
+            if (isBeforeJoining(date, employee)) {
+                report.push({
+                    Date: key,
+                    TimeIn: "—",
+                    TimeOut: "—",
+                    TotalHours: "—"
+                });
+                continue;
+            }
 
             const rec = map.get(key);
 
-
-            /* ---------- No Record ---------- */
-            if (!rec) {
-
-                // Today without punch → Pending
-                if (key === todayKey) {
-
-                    report.push({
-                        Date: "Today",
-                        TimeIn: "Pending",
-                        TimeOut: "-",
-                        TotalHours: "-"
-                    });
-
-                    continue;
-                }
-
-                // Past day → Absent
-                absentDays++;
-
+            /* ===== WEEK OFF ===== */
+            if (!rec && isWeekOff(date, shift, employee)) {
                 report.push({
-                    Date: label,
+                    Date: key,
+                    TimeIn: "Week Off",
+                    TimeOut: "-",
+                    TotalHours: "-"
+                });
+                continue;
+            }
+
+            /* ===== NO RECORD ===== */
+            if (!rec) {
+                absentDays++;
+                report.push({
+                    Date: key,
                     TimeIn: "Absent",
                     TimeOut: "-",
                     TotalHours: "-"
                 });
-
                 continue;
             }
 
-
-            /* ---------- Holiday / Week Off ---------- */
-
-            if (
-                rec.status === "holiday" ||
-                rec.status === "week_off"
-            ) {
-
+            /* ===== HOLIDAY ===== */
+            if (rec.status === "holiday") {
                 report.push({
-                    Date: label,
-                    TimeIn: rec.status === "holiday" ? "Holiday" : "Week Off",
+                    Date: key,
+                    TimeIn: "Holiday",
                     TimeOut: "-",
                     TotalHours: "-"
                 });
-
                 continue;
             }
 
+            /* ===== INVALID PUNCH ===== */
+            if (!isValidPunch(rec)) {
+                report.push({
+                    Date: key,
+                    TimeIn: rec.punchIn ? formatTime(rec.punchIn) : "-",
+                    TimeOut: rec.punchOut ? formatTime(rec.punchOut) : "-",
+                    TotalHours: "Invalid Punch"
+                });
+                continue;
+            }
 
-            /* ---------- Present ---------- */
-
-            if (rec.status === "present") presentDays++;
+            /* ===== VALID PRESENT ===== */
 
             const minutes = rec.workSummary?.totalMinutes || 0;
 
-            totalMinutes += minutes;
+            if (rec.status === "present") {
+                presentDays++;
+            }
+
+            if (minutes > 0) {
+                totalMinutes += minutes;
+                validDays++;
+            }
 
             report.push({
-                Date: label,
+                Date: key,
                 TimeIn: formatTime(rec.punchIn),
-                TimeOut: rec.punchOut
-                    ? formatTime(rec.punchOut)
-                    : "-",
-                TotalHours: formatMinutes(minutes)
+                TimeOut: formatTime(rec.punchOut),
+                TotalHours: formatHours(minutes)
             });
         }
 
+        /* ========= AVG FIX ========= */
 
-        /* ============================
-           10. CSV Export
-        ============================ */
-
-        if (format === "csv") {
-
-            const parser = new Parser({
-                fields: ["Date", "TimeIn", "TimeOut", "TotalHours"]
-            });
-
-            const csv = parser.parse(report);
-
-            const fileName =
-                `attendance_${employee.empCode}_${month}_${year}.csv`;
-
-
-            res.setHeader("Content-Type", "text/csv");
-            res.setHeader(
-                "Content-Disposition",
-                `attachment; filename="${fileName}"`
-            );
-
-            return res.status(200).send(csv);
-        }
-
-
-        /* ============================
-           11. Summary
-        ============================ */
-
-        const avgMinutes = presentDays
-            ? Math.round(totalMinutes / presentDays)
+        const avgMinutes = validDays > 0
+            ? Math.round(totalMinutes / validDays)
             : 0;
 
-
-        /* ============================
-           12. JSON Response
-        ============================ */
+        /* ========= RESPONSE ========= */
 
         return res.status(200).json({
-
             success: true,
-
-            meta: {
-                employeeId: employee._id,
-                empCode: employee.empCode,
-                month,
-                year
-            },
-
             summary: {
-                avgPerDay: formatMinutes(avgMinutes),
                 presentDays,
                 absentDays,
-                totalShownDays: lastDay
+                validWorkingDays: validDays,
+                avgPerDay: formatHours(avgMinutes)
             },
-
             records: report
         });
 
     } catch (error) {
-
-        console.error("Attendance Summary Error:", error);
-
+        console.error("Attendance Error:", error);
         return res.status(500).json({
             success: false,
             message: "Internal server error"
         });
     }
 };
-
 
 /**
  * @desc   Get Monthly Attendance Summary (Payroll)
