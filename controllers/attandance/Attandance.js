@@ -1056,7 +1056,7 @@ export const getCompanyTodayAttendance = async (req, res) => {
 /* =====================================
    GET ACTIVE EMPLOYEES (SIMPLE LIST)
 ===================================== */
-export const getActiveEmployees = async (req, res) => {
+export const getEmployeeSimpleMonthlySummary = async (req, res) => {
     try {
         let companyId
         companyId = req.user?._id;
