@@ -92,6 +92,10 @@ const ShiftSchema = new Schema({
      * Grace Periods (Safe Defaults)
      */
     gracePeriod: {
+        earlyEntry: {   // ✅ ADD THIS
+            type: Number,
+            default: 30
+        },
         lateEntry: {
             type: Number,
             default: 10
@@ -104,8 +108,8 @@ const ShiftSchema = new Schema({
             type: Number,
             default: 10
         }
-    },
-
+    }
+    ,
     /**
      * Overtime Rules
      */
