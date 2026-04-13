@@ -15,15 +15,7 @@ const timeStrToMinutes = (timeStr = "00:00") => {
     return (h || 0) * 60 + (m || 0);
 };
 
-// /** Date object → "HH:MM" */
-// const formatTime = (date) => {
-//     if (!date) return "N/A";
-//     return new Date(date).toLocaleTimeString("en-IN", {
-//         hour: "2-digit",
-//         minute: "2-digit",
-//         hour12: false,
-//     });
-// };
+
 
 /** minutes → "H:MM" */
 const formatMinutes = (mins = 0) => {
@@ -434,10 +426,7 @@ export const generateAttendanceCSV = async (req, res) => {
  */
 
 
-// const formatTime = (date) =>
-//     date
-//         ? new Date(date).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })
-//         : null;
+
 
 const resolveCompanyId = (req) => {
     let id = req.user._id || req.user?.id;
@@ -766,7 +755,7 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
     }
 };
 
-// controllers/attendanceController.js
+
 
 /**
  * Generate attendance summary report with statistics
@@ -774,10 +763,6 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
  * @param {Object} res - Response object
  */
 
-// const formatTime = (date) =>
-//     date
-//         ? new Date(date).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })
-//         : null;
 
 
 const ALT_ROW = "FFF2F6FC";

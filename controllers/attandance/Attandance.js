@@ -12,11 +12,659 @@ import moment from "moment-timezone";
 import jwt from "jsonwebtoken";
 import User from "../../models/userModel.js";
 import { resolveDateRange } from "../../utils/dateRangeResolver.js";
+import Shift from "../../models/Attandance/Shift.js";
 // utils/dateRange.js
 
 
 
 
+/**
+ * ============================================
+ * UTILITY FUNCTIONS
+ * ============================================
+ */
+
+/**
+ * Normalize date to midnight UTC
+ */
+const normalizeDate = (date) => {
+    const d = new Date(date);
+    d.setUTCHours(0, 0, 0, 0);
+    return d;
+};
+
+/**
+ * Calculate minutes difference between two dates
+ */
+const diffMinutes = (start, end) => {
+    return Math.round((end - start) / (1000 * 60));
+};
+
+/**
+ * Calculate distance between two geo coordinates (Haversine formula)
+ */
+const getDistance = (lat1, lng1, lat2, lng2) => {
+    const R = 6371000; // Earth radius in meters
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+};
+
+/**
+ * Create time string from date and time string
+ * dateString: "2024-01-15" | timeString: "09:00"
+ */
+const createDateTime = (dateString, timeString) => {
+    if (!dateString || !timeString) return null;
+    const [hours, minutes] = timeString.split(":").map(Number);
+    const date = new Date(dateString);
+    date.setHours(hours, minutes, 0, 0);
+    return date;
+};
+
+/**
+ * Apply grace period to determine actual late minutes
+ */
+const applyGracePeriod = (actualTime, shiftStartTime, gracePeriod) => {
+    if (actualTime <= shiftStartTime) return 0;
+
+    const lateMinutes = diffMinutes(shiftStartTime, actualTime);
+    const effectiveLateMinutes = Math.max(0, lateMinutes - gracePeriod);
+
+    return effectiveLateMinutes;
+};
+
+/**
+ * Calculate payable minutes (work time minus unpaid breaks)
+ */
+const calculatePayableMinutes = (totalMinutes, breaks) => {
+    let breakMinutes = 0;
+
+    if (breaks && Array.isArray(breaks)) {
+        for (const b of breaks) {
+            if (b.start && b.end) {
+                breakMinutes += diffMinutes(new Date(b.start), new Date(b.end));
+            }
+        }
+    }
+
+    return Math.max(0, totalMinutes - breakMinutes);
+};
+
+/**
+ * Determine attendance status based on work hours
+ */
+const determineStatus = (payableMinutes, shiftMinutes, isHoliday) => {
+    if (isHoliday) return "holiday";
+
+    // Half day threshold (less than 50% of shift)
+    if (payableMinutes < shiftMinutes * 0.5) {
+        return "half_day";
+    }
+
+    return "present";
+};
+
+/**
+ * ============================================
+ * MAIN CONTROLLER: MARK ATTENDANCE
+ * ============================================
+ */
+
+export const markAttendance = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        /* ===========================
+           1. AUTHENTICATION & BODY VALIDATION
+        =========================== */
+
+        const u_id = req.user._id;
+
+        const {
+            date,
+            punchIn,
+            punchOut,
+            breaks,
+            geoLocation,
+            deviceInfo,
+            shift: shiftId,
+            remarks,
+            token
+        } = req.body;
+
+        // Token validation
+        if (!token) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(401).json({
+                success: false,
+                errorCode: "TOKEN_MISSING",
+                message: "Attendance token required"
+            });
+        }
+
+        // Required fields
+        if (!date) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                success: false,
+                errorCode: "DATE_MISSING",
+                message: "Date is required"
+            });
+        }
+
+        if (!geoLocation?.coordinates || geoLocation.coordinates.length !== 2) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                success: false,
+                errorCode: "GEOLOCATION_INVALID",
+                message: "Valid geoLocation coordinates required"
+            });
+        }
+
+        if (!punchIn && !punchOut) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                success: false,
+                errorCode: "PUNCH_MISSING",
+                message: "Either punchIn or punchOut is required"
+            });
+        }
+
+        /* ===========================
+           2. JWT VERIFICATION
+        =========================== */
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (err) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(401).json({
+                success: false,
+                errorCode: "TOKEN_INVALID",
+                message: "Invalid or expired token"
+            });
+        }
+
+        if (!decoded?.userId) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(401).json({
+                success: false,
+                errorCode: "TOKEN_PAYLOAD_INVALID",
+                message: "Invalid token payload"
+            });
+        }
+
+        const companyUser = await User
+            .findById(decoded.userId)
+            .select("-password -otp -__v")
+            .session(session);
+
+        if (!companyUser) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(401).json({
+                success: false,
+                errorCode: "USER_NOT_FOUND",
+                message: "Company user not found"
+            });
+        }
+
+        const companyId = companyUser._id;
+
+        /* ===========================
+           3. EMPLOYEE VALIDATION
+        =========================== */
+
+        const employee = await Employee.findOne({
+            userId: u_id,
+            employmentStatus: "active"
+        }).session(session);
+
+        if (!employee) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                success: false,
+                errorCode: "EMPLOYEE_NOT_FOUND",
+                message: "Active employee not found"
+            });
+        }
+
+        // Verify employee belongs to company
+        if (employee.companyId.toString() !== companyId.toString()) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({
+                success: false,
+                errorCode: "UNAUTHORIZED_COMPANY",
+                message: "Unauthorized company access"
+            });
+        }
+
+        /* ===========================
+           4. SHIFT RESOLUTION
+        =========================== */
+
+        let shiftData = null;
+        let effectiveShiftId = shiftId;
+
+        // If shift ID provided, fetch it
+        if (shiftId) {
+            shiftData = await Shift.findOne({
+                _id: shiftId,
+                companyId,
+                isDeleted: false
+            }).session(session);
+
+            if (!shiftData) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({
+                    success: false,
+                    errorCode: "SHIFT_NOT_FOUND",
+                    message: "Shift not found"
+                });
+            }
+
+            effectiveShiftId = shiftData._id;
+        }
+
+        // If no shift provided, use employee's assigned shift
+        else if (employee.shift) {
+            shiftData = await Shift.findOne({
+                _id: employee.shift,
+                companyId,
+                isDeleted: false
+            }).session(session);
+
+            if (!shiftData) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({
+                    success: false,
+                    errorCode: "EMPLOYEE_SHIFT_NOT_FOUND",
+                    message: "Employee's assigned shift not found. Please update shift assignment."
+                });
+            }
+
+            effectiveShiftId = shiftData._id;
+        }
+
+        // If still no shift, return error
+        else {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                success: false,
+                errorCode: "NO_SHIFT_ASSIGNED",
+                message: "No shift assigned to employee. Please assign a shift first."
+            });
+        }
+
+        /* ===========================
+           5. NORMALIZE DATE & CHECK HOLIDAY
+        =========================== */
+
+        const attendanceDate = normalizeDate(date);
+        const dateString = attendanceDate.toISOString().split("T")[0];
+
+        const holiday = await Holiday.findOne({
+            companyId,
+            date: attendanceDate
+        }).session(session);
+
+        let baseStatus = holiday ? "holiday" : "present";
+
+        /* ===========================
+           6. GEO-FENCE VALIDATION
+        =========================== */
+
+        let geoVerified = false;
+        let suspicious = false;
+
+        if (
+            employee.officeLocation?.coordinates &&
+            employee.officeLocation.coordinates.length === 2
+        ) {
+            const [officeLng, officeLat] = employee.officeLocation.coordinates;
+            const [userLng, userLat] = geoLocation.coordinates;
+
+            const distance = getDistance(
+                officeLat,
+                officeLng,
+                userLat,
+                userLng
+            );
+
+            if (distance > (employee.officeLocation.radius || 500)) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(403).json({
+                    success: false,
+                    errorCode: "OUTSIDE_OFFICE_RADIUS",
+                    message: "You are outside the allowed office location range.",
+                    data: {
+                        allowedRadius: employee.officeLocation.radius || 500,
+                        currentDistance: Math.round(distance),
+                        unit: "meters"
+                    }
+                });
+            }
+
+            geoVerified = true;
+        }
+
+        /* ===========================
+           7. FIND EXISTING ATTENDANCE
+        =========================== */
+
+        let attendance = await Attendance.findOne({
+            companyId,
+            employeeId: employee._id,
+            date: attendanceDate
+        }).session(session);
+
+        /* ===========================
+           8. PUNCH IN (NEW ATTENDANCE)
+        =========================== */
+
+        if (!attendance) {
+
+            if (!punchIn) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({
+                    success: false,
+                    errorCode: "PUNCH_IN_REQUIRED",
+                    message: "Punch In time is required for new attendance"
+                });
+            }
+
+            const inTime = new Date(punchIn);
+            const outTime = punchOut ? new Date(punchOut) : null;
+
+            const shiftStartTime = createDateTime(dateString, shiftData.startTime);
+            const shiftEndTime = createDateTime(dateString, shiftData.endTime);
+            const shiftDurationMinutes = diffMinutes(shiftStartTime, shiftEndTime);
+
+            /* Calculate late minutes with grace period */
+            const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
+            const lateMinutes = applyGracePeriod(inTime, shiftStartTime, gracePeriodLate);
+
+            /* Calculate total work time */
+            let totalMinutes = 0;
+            let overtimeMinutes = 0;
+            let earlyLeaveMinutes = 0;
+
+            if (outTime) {
+                totalMinutes = diffMinutes(inTime, outTime);
+
+                // Deduct breaks
+                const payableMinutes = calculatePayableMinutes(totalMinutes, breaks);
+                totalMinutes = payableMinutes;
+
+                // Calculate overtime
+                if (outTime > shiftEndTime) {
+                    overtimeMinutes = Math.max(
+                        0,
+                        diffMinutes(shiftEndTime, outTime) -
+                        (shiftData.gracePeriod?.earlyExit || 10)
+                    );
+                }
+
+                // Calculate early leave
+                if (outTime < shiftEndTime) {
+                    earlyLeaveMinutes = diffMinutes(outTime, shiftEndTime);
+                }
+            } else {
+                // Punch in only, no punch out yet
+                suspicious = true;
+            }
+
+            const payableMinutes = calculatePayableMinutes(totalMinutes, breaks);
+            const finalStatus = determineStatus(
+                payableMinutes,
+                shiftDurationMinutes,
+                baseStatus === "holiday"
+            );
+
+            /* Create new attendance record */
+            attendance = new Attendance({
+                companyId,
+                employeeId: employee._id,
+                date: attendanceDate,
+                punchIn: inTime,
+                punchOut: outTime,
+                shift: {
+                    name: shiftData.shiftName,
+                    startTime: shiftData.startTime,
+                    endTime: shiftData.endTime,
+                    shiftMinutes: shiftDurationMinutes
+                },
+                breaks: breaks || [],
+                status: finalStatus,
+                geoLocation: {
+                    type: "Point",
+                    coordinates: geoLocation.coordinates,
+                    accuracy: geoLocation.accuracy,
+                    verified: geoVerified,
+                    source: geoLocation.source || "gps"
+                },
+                deviceInfo,
+                workSummary: {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: Math.max(0, payableMinutes),
+                    overtimeMinutes: Math.max(0, overtimeMinutes),
+                    lateMinutes: Math.max(0, lateMinutes),
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                },
+                lateByMinutes: Math.max(0, lateMinutes),
+                totalworkinghars: Math.max(0, totalMinutes / 60),
+                remarks,
+                isSuspicious: suspicious,
+                punchHistory: outTime
+                    ? [
+                        {
+                            punchOut: outTime,
+                            geoLocation: {
+                                type: "Point",
+                                coordinates: geoLocation.coordinates,
+                                accuracy: geoLocation.accuracy,
+                                verified: geoVerified,
+                                source: geoLocation.source || "gps"
+                            },
+                            deviceInfo,
+                            source: deviceInfo?.source || "mobile"
+                        }
+                    ]
+                    : [],
+                lastPunchAt: outTime || inTime,
+                approvalStatus: "pending"
+            });
+        }
+
+        /* ===========================
+           9. PUNCH OUT (EXISTING ATTENDANCE)
+        =========================== */
+
+        else {
+
+            if (!punchOut) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({
+                    success: false,
+                    errorCode: "PUNCH_OUT_REQUIRED",
+                    message: "Punch Out time is required"
+                });
+            }
+
+            const outTime = new Date(punchOut);
+
+            /* Anti-spam check */
+            const lastPunch = attendance.punchHistory?.[attendance.punchHistory.length - 1];
+            if (lastPunch) {
+                const gap = diffMinutes(new Date(lastPunch.punchOut), outTime);
+                if (gap < 3) {
+                    await session.abortTransaction();
+                    session.endSession();
+                    return res.status(429).json({
+                        success: false,
+                        errorCode: "PUNCH_TOO_FREQUENT",
+                        message: "Punch registered too soon. Please wait before trying again.",
+                        data: {
+                            lastPunchTime: lastPunch.punchOut,
+                            minimumGapMinutes: 3
+                        }
+                    });
+                }
+            }
+
+            /* Add to punch history */
+            attendance.punchHistory.push({
+                punchOut: outTime,
+                geoLocation: {
+                    type: "Point",
+                    coordinates: geoLocation.coordinates,
+                    accuracy: geoLocation.accuracy,
+                    verified: geoVerified,
+                    source: geoLocation.source || "gps"
+                },
+                deviceInfo,
+                source: deviceInfo?.source || "mobile",
+                createdAt: new Date()
+            });
+
+            attendance.lastPunchAt = outTime;
+
+            /* Recalculate all metrics */
+            const inTime = new Date(attendance.punchIn);
+            const shiftStartTime = createDateTime(
+                dateString,
+                attendance.shift.startTime
+            );
+            const shiftEndTime = createDateTime(
+                dateString,
+                attendance.shift.endTime
+            );
+            const shiftDurationMinutes = diffMinutes(shiftStartTime, shiftEndTime);
+
+            let totalMinutes = diffMinutes(inTime, outTime);
+            const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
+
+            /* Calculate late with grace period */
+            const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
+            const lateMinutes = applyGracePeriod(inTime, shiftStartTime, gracePeriodLate);
+
+            /* Calculate overtime */
+            let overtimeMinutes = 0;
+            if (outTime > shiftEndTime) {
+                overtimeMinutes = Math.max(
+                    0,
+                    diffMinutes(shiftEndTime, outTime) -
+                    (shiftData.gracePeriod?.earlyExit || 10)
+                );
+
+                // Check overtime limit
+                const maxOvertimeMinutes =
+                    (shiftData.overtime?.maxHoursPerDay || 4) * 60;
+                if (overtimeMinutes > maxOvertimeMinutes && !shiftData.overtime?.allowed) {
+                    suspicious = true;
+                }
+            }
+
+            /* Calculate early leave */
+            let earlyLeaveMinutes = 0;
+            if (outTime < shiftEndTime) {
+                earlyLeaveMinutes = diffMinutes(outTime, shiftEndTime);
+            }
+
+            const finalStatus = determineStatus(
+                payableMinutes,
+                shiftDurationMinutes,
+                baseStatus === "holiday"
+            );
+
+            /* Update attendance */
+            attendance.punchOut = outTime;
+            attendance.status = finalStatus;
+            attendance.workSummary = {
+                totalMinutes: Math.max(0, totalMinutes),
+                payableMinutes: Math.max(0, payableMinutes),
+                overtimeMinutes: Math.max(0, overtimeMinutes),
+                lateMinutes: Math.max(0, lateMinutes),
+                earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+            };
+            attendance.lateByMinutes = Math.max(0, lateMinutes);
+            attendance.totalworkinghars = Math.max(0, totalMinutes / 60);
+
+            /* Device fraud detection */
+            if (
+                attendance.deviceInfo?.deviceId &&
+                deviceInfo?.deviceId &&
+                attendance.deviceInfo.deviceId !== deviceInfo.deviceId
+            ) {
+                suspicious = true;
+            }
+
+            attendance.isSuspicious = suspicious;
+        }
+
+        /* ===========================
+           10. SAVE & COMMIT TRANSACTION
+        =========================== */
+
+        await attendance.save({ session });
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(201).json({
+            success: true,
+            message: "Attendance processed successfully",
+            data: {
+                attendanceId: attendance._id,
+                employeeId: employee._id,
+                date: attendanceDate,
+                status: attendance.status,
+                punchIn: attendance.punchIn,
+                punchOut: attendance.punchOut,
+                workSummary: attendance.workSummary,
+                geoVerified: attendance.geoLocation?.verified,
+                isSuspicious: attendance.isSuspicious
+            }
+        });
+
+    } catch (error) {
+
+        await session.abortTransaction();
+        session.endSession();
+
+        console.error("Attendance Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            errorCode: "ATTENDANCE_ERROR",
+            message: "Failed to process attendance",
+            error: process.env.NODE_ENV === "development" ? error.message : undefined
+        });
+    }
+};
 
 // ─── DTO helpers (defined once, reused) ──────────────────────────────────────
 
@@ -44,7 +692,7 @@ const formatAbsent = (emp) => ({
 
 // ─── Controller ──────────────────────────────────────────────────────────────
 
-export const getTodaySummary = async (req,res) => {
+export const getTodaySummary = async (req, res) => {
     try {
         let companyId;
         companyId = req.user?.id || req.user?._id;
@@ -348,44 +996,6 @@ export const getTodayPunchStatus = async (req, res) => {
         });
     }
 };
-
-/* =====================================================
-   Utility Functions
-===================================================== */
-
-// Distance in meters (Haversine)
-function getDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371000; // meters
-    const toRad = (x) => (x * Math.PI) / 180;
-
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-
-    const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) *
-        Math.cos(toRad(lat2)) *
-        Math.sin(dLon / 2) ** 2;
-
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// Minutes between two dates
-function diffMinutes(start, end) {
-    return Math.max(0, Math.floor((end - start) / 60000));
-}
-
-// Normalize date (00:00:00)
-function normalizeDate(d) {
-    const date = new Date(d);
-    date.setHours(0, 0, 0, 0);
-    return date;
-}
-
-/* =====================================================
-   MARK ATTENDANCE CONTROLLER
-===================================================== */
-// controllers/attendanceController.js
 
 
 
@@ -726,464 +1336,7 @@ export const getAttendanceExport = async (req, res) => {
 };
 
 
-/* ======================================================
-   MARK ATTENDANCE (Punch In + Multi Punch Out)
-====================================================== */
 
-export const markAttendance = async (req, res) => {
-
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
-
-        /* --------------------------------
-           1. Auth + Body
-        -------------------------------- */
-
-        const u_id = req.user._id;
-
-        const {
-            date,
-            punchIn,
-            punchOut,
-            breaks,
-            geoLocation,
-            deviceInfo,
-            shift,
-            remarks,
-            token
-        } = req.body;
-
-
-        if (!token) {
-            return res.status(401).json({
-                message: "Attendance token required"
-            });
-        }
-
-        if (!date || !geoLocation?.coordinates) {
-            return res.status(400).json({
-                message: "date and geoLocation required"
-            });
-        }
-
-
-        /* --------------------------------
-           2. Verify JWT
-        -------------------------------- */
-
-        let decoded;
-
-        try {
-            decoded = jwt.verify(token, process.env.JWT_SECRET);
-        } catch (err) {
-            return res.status(401).json({
-                message: "Invalid or expired token"
-            });
-        }
-
-        if (!decoded?.userId) {
-            return res.status(401).json({
-                message: "Invalid token payload"
-            });
-        }
-
-
-        const user = await User
-            .findById(decoded.userId)
-            .select("-password -otp -__v");
-
-        if (!user) {
-            return res.status(401).json({
-                message: "User not found"
-            });
-        }
-
-
-        const companyId = user._id;
-
-
-        /* --------------------------------
-           3. Employee Validation
-        -------------------------------- */
-
-        const employee = await Employee.findOne({
-            userId: u_id,
-            employmentStatus: "active"
-        }).session(session);
-
-        if (!employee) {
-            return res.status(404).json({
-                message: "Active employee not found"
-            });
-        }
-
-        if (employee.companyId.toString() !== companyId.toString()) {
-            return res.status(403).json({
-                message: "Unauthorized company"
-            });
-        }
-
-
-        const attendanceDate = normalizeDate(date);
-
-
-        /* --------------------------------
-           4. Check Holiday
-        -------------------------------- */
-
-        const holiday = await Holiday.findOne({
-            companyId,
-            date: attendanceDate
-        }).session(session);
-
-        let status = holiday ? "holiday" : "present";
-
-
-        /* --------------------------------
-           5. Geo Fence Validation
-        -------------------------------- */
-
-        let geoVerified = false;
-        let suspicious = false;
-
-        if (employee.officeLocation?.coordinates?.length === 2) {
-
-            const [officeLng, officeLat] =
-                employee.officeLocation.coordinates;
-
-            const [userLng, userLat] =
-                geoLocation.coordinates;
-
-            const distance = getDistance(
-                officeLat,
-                officeLng,
-                userLat,
-                userLng
-            );
-
-
-            // Outside allowed radius
-            if (distance > employee.officeLocation.radius) {
-
-                return res.status(403).json({
-                    success: false,
-                    errorCode: "OUTSIDE_OFFICE_RADIUS",
-                    message: "You are not within the allowed office location range.",
-                    data: {
-                        allowedRadius: employee.officeLocation.radius,
-                        currentDistance: Math.round(distance),
-                        unit: "meters"
-                    }
-                });
-
-            } else {
-                geoVerified = true;
-            }
-        }
-
-
-        /* --------------------------------
-           6. Find Existing Attendance
-        -------------------------------- */
-
-        let attendance = await Attendance.findOne({
-            companyId,
-            employeeId: employee._id,
-            date: attendanceDate
-        }).session(session);
-
-
-        /* --------------------------------
-           7. FIRST TIME → PUNCH IN
-        -------------------------------- */
-
-        if (!attendance) {
-
-            if (!punchIn) {
-                return res.status(400).json({
-                    message: "Punch In required"
-                });
-            }
-
-            const inTime = new Date(punchIn);
-            const outTime = punchOut ? new Date(punchOut) : null;
-
-
-            let totalMinutes = 0;
-
-            if (outTime) {
-                totalMinutes = diffMinutes(inTime, outTime);
-            }
-
-
-            /* Break Deduction */
-
-            if (breaks?.length) {
-                for (const b of breaks) {
-                    if (b.start && b.end) {
-                        totalMinutes -= diffMinutes(
-                            new Date(b.start),
-                            new Date(b.end)
-                        );
-                    }
-                }
-            }
-
-
-            let overtimeMinutes = 0;
-            let lateMinutes = 0;
-            let earlyLeaveMinutes = 0;
-
-
-            /* Shift Calculation */
-
-            if (shift?.startTime && shift?.endTime) {
-
-                const shiftStart = new Date(
-                    `${attendanceDate
-                        .toISOString()
-                        .split("T")[0]}T${shift.startTime}:00`
-                );
-
-                const shiftEnd = new Date(
-                    `${attendanceDate
-                        .toISOString()
-                        .split("T")[0]}T${shift.endTime}:00`
-                );
-
-                if (inTime > shiftStart) {
-                    lateMinutes = diffMinutes(shiftStart, inTime);
-                }
-
-                if (outTime && outTime < shiftEnd) {
-                    earlyLeaveMinutes = diffMinutes(outTime, shiftEnd);
-                }
-
-                if (outTime && outTime > shiftEnd) {
-                    overtimeMinutes = diffMinutes(shiftEnd, outTime);
-                }
-            }
-
-
-            if (totalMinutes < 240 && status === "present") {
-                status = "half_day";
-            }
-
-            if (!outTime) {
-                suspicious = true;
-            }
-
-
-            /* Create Attendance */
-
-            attendance = new Attendance({
-
-                companyId,
-                employeeId: employee._id,
-
-                date: attendanceDate,
-
-                punchIn: inTime,
-                punchOut: outTime,
-
-                breaks,
-                shift,
-
-                status,
-
-                geoLocation: {
-                    ...geoLocation,
-                    verified: geoVerified
-                },
-
-                deviceInfo,
-
-                workSummary: {
-                    totalMinutes,
-                    overtimeMinutes,
-                    lateMinutes,
-                    earlyLeaveMinutes
-                },
-
-                remarks,
-
-                isSuspicious: suspicious,
-
-                punchHistory: outTime ? [{
-                    punchOut: outTime,
-                    deviceInfo,
-                    geoLocation
-                }] : []
-            });
-
-        }
-
-
-        /* --------------------------------
-           8. ALREADY EXISTS → PUNCH OUT
-        -------------------------------- */
-
-        else {
-
-            if (!punchOut) {
-                return res.status(400).json({
-                    message: "Punch Out required"
-                });
-            }
-
-            const outTime = new Date(punchOut);
-
-
-            /* Anti-Spam */
-
-            const last = attendance.punchHistory?.at(-1);
-
-            if (last) {
-
-                const gap = diffMinutes(
-                    new Date(last.punchOut),
-                    outTime
-                );
-
-                if (gap < 3) {
-                    return res.status(429).json({
-                        message: "Too frequent punch"
-                    });
-                }
-            }
-
-
-            /* Save History */
-
-            attendance.punchHistory.push({
-                punchOut: outTime,
-                deviceInfo,
-                geoLocation
-            });
-
-
-            /* Update Latest */
-
-            attendance.punchOut = outTime;
-
-
-            /* Recalculate */
-
-            const inTime = new Date(attendance.punchIn);
-
-            let totalMinutes =
-                diffMinutes(inTime, outTime);
-
-
-            if (attendance.breaks?.length) {
-                for (const b of attendance.breaks) {
-                    if (b.start && b.end) {
-                        totalMinutes -= diffMinutes(
-                            new Date(b.start),
-                            new Date(b.end)
-                        );
-                    }
-                }
-            }
-
-
-            let overtimeMinutes = 0;
-            let lateMinutes = 0;
-            let earlyLeaveMinutes = 0;
-
-
-            if (
-                attendance.shift?.startTime &&
-                attendance.shift?.endTime
-            ) {
-
-                const shiftStart = new Date(
-                    `${attendanceDate
-                        .toISOString()
-                        .split("T")[0]}T${attendance.shift.startTime}:00`
-                );
-
-                const shiftEnd = new Date(
-                    `${attendanceDate
-                        .toISOString()
-                        .split("T")[0]}T${attendance.shift.endTime}:00`
-                );
-
-                if (inTime > shiftStart) {
-                    lateMinutes =
-                        diffMinutes(shiftStart, inTime);
-                }
-
-                if (outTime < shiftEnd) {
-                    earlyLeaveMinutes =
-                        diffMinutes(outTime, shiftEnd);
-                }
-
-                if (outTime > shiftEnd) {
-                    overtimeMinutes =
-                        diffMinutes(shiftEnd, outTime);
-                }
-            }
-
-
-            attendance.workSummary = {
-                totalMinutes,
-                overtimeMinutes,
-                lateMinutes,
-                earlyLeaveMinutes
-            };
-
-
-            attendance.status =
-                totalMinutes < 240
-                    ? "half_day"
-                    : "present";
-
-
-            /* Device Fraud */
-
-            if (
-                attendance.deviceInfo?.deviceId &&
-                attendance.deviceInfo.deviceId !==
-                deviceInfo?.deviceId
-            ) {
-                attendance.isSuspicious = true;
-            }
-
-        }
-
-
-        /* --------------------------------
-           9. Save + Commit
-        -------------------------------- */
-
-        await attendance.save({ session });
-
-        await session.commitTransaction();
-        session.endSession();
-
-
-        return res.status(201).json({
-            message: "Attendance processed successfully",
-            attendance
-        });
-
-
-    } catch (error) {
-
-        await session.abortTransaction();
-        session.endSession();
-
-        console.error("Attendance Error:", error);
-
-        return res.status(500).json({
-            message: "Attendance failed",
-            error: error.message
-        });
-    }
-};
 
 
 

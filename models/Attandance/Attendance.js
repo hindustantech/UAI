@@ -46,6 +46,15 @@ const attendanceSchema = new mongoose.Schema({
         }
     },
 
+    totalworkinghars: {
+        type: Number,
+        default: 0
+    },
+    lateByMinutes: {
+        type: Number,
+        default: 0
+    },
+    
 
     /* ===========================
        Punch Timing

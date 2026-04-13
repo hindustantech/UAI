@@ -1,18 +1,28 @@
-// models/Shift.js
-
 import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
+/**
+ * Break Schema
+ */
 const BreakSchema = new Schema({
-    name: String,
-    duration: Number, // minutes
+    name: {
+        type: String,
+        default: "Default Break"
+    },
+    duration: {
+        type: Number,
+        default: 30 // 30 mins default
+    },
     isPaid: {
         type: Boolean,
         default: false
     }
 }, { _id: false });
 
+/**
+ * Shift Schema
+ */
 const ShiftSchema = new Schema({
 
     companyId: {
@@ -25,27 +35,31 @@ const ShiftSchema = new Schema({
     shiftName: {
         type: String,
         required: true,
-        trim: true
+        trim: true,
+        default: "General Shift"
     },
 
     shiftCode: {
         type: String,
         required: true,
-        uppercase: true
+        uppercase: true,
+        default: "GEN"
     },
 
     startTime: {
-        type: String, // "09:00"
-        required: true
+        type: String,
+        required: true,
+        default: "09:00"
     },
 
     endTime: {
-        type: String, // "18:00"
-        required: true
+        type: String,
+        required: true,
+        default: "18:00"
     },
 
     /**
-     * 🔹 Shift Type
+     * Shift Type
      */
     shiftType: {
         type: String,
@@ -54,36 +68,60 @@ const ShiftSchema = new Schema({
     },
 
     /**
-     * 🔹 Weekly Offs
+     * Weekly Off Default = Sunday
      */
-    weeklyOff: [{
-        type: String,
-        enum: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    }],
+    weeklyOff: {
+        type: [String],
+        enum: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+        default: ["Sunday"]
+    },
 
     /**
-     * 🔹 Breaks
+     * Breaks Default
      */
-    breaks: [BreakSchema],
+    breaks: {
+        type: [BreakSchema],
+        default: () => [{
+            name: "Lunch Break",
+            duration: 30,
+            isPaid: false
+        }]
+    },
 
     /**
-     * 🔹 Grace Periods
+     * Grace Periods (Safe Defaults)
      */
     gracePeriod: {
-        lateEntry: { type: Number, default: 10 },   // minutes
-        earlyExit: { type: Number, default: 10 }
+        lateEntry: {
+            type: Number,
+            default: 10
+        },
+        afterAbsentMark: {
+            type: Number,
+            default: 30
+        },
+        earlyExit: {
+            type: Number,
+            default: 10
+        }
     },
 
     /**
-     * 🔹 Overtime Rules
+     * Overtime Rules
      */
     overtime: {
-        allowed: { type: Boolean, default: true },
-        maxHoursPerDay: { type: Number, default: 4 }
+        allowed: {
+            type: Boolean,
+            default: true
+        },
+        maxHoursPerDay: {
+            type: Number,
+            default: 4
+        }
     },
 
     /**
-     * 🔹 Night Shift Config
+     * Night Shift
      */
     isNightShift: {
         type: Boolean,
@@ -91,7 +129,7 @@ const ShiftSchema = new Schema({
     },
 
     /**
-     * 🔹 Soft Delete
+     * Soft Delete
      */
     isDeleted: {
         type: Boolean,
@@ -106,12 +144,43 @@ const ShiftSchema = new Schema({
 });
 
 /**
- * Indexing
+ * Index (multi-tenant safe)
  */
 ShiftSchema.index({ companyId: 1, shiftCode: 1 }, { unique: true });
 
 /**
- * Middleware
+ * Auto Apply Defaults Middleware (CRITICAL)
+ */
+ShiftSchema.pre("save", function (next) {
+
+    // Ensure breaks always exist
+    if (!this.breaks || this.breaks.length === 0) {
+        this.breaks = [{
+            name: "Lunch Break",
+            duration: 30,
+            isPaid: false
+        }];
+    }
+
+    // Ensure weeklyOff exists
+    if (!this.weeklyOff || this.weeklyOff.length === 0) {
+        this.weeklyOff = ["Sunday"];
+    }
+
+    // Ensure gracePeriod exists
+    if (!this.gracePeriod) {
+        this.gracePeriod = {
+            lateEntry: 10,
+            afterAbsentMark: 30,
+            earlyExit: 10
+        };
+    }
+
+    next();
+});
+
+/**
+ * Query Middleware (Soft Delete Safe)
  */
 ShiftSchema.pre(/^find/, function (next) {
     this.where({ isDeleted: false });
