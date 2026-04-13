@@ -966,7 +966,7 @@ export const getAllEmployees = async (req, res) => {
         const [employees, total] = await Promise.all([
 
             Employee.find(filter)
-                .populate("userId", "name email phone")
+                .populate("userId", "name email phone profileImage")
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
