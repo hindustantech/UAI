@@ -1845,7 +1845,6 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
         });
     }
 };
-
 /**
  * @desc   Get Monthly Attendance Summary (Payroll)
  * @route  GET /api/attendance/summary
