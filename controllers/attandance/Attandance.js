@@ -1645,7 +1645,10 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
         const year = Number(req.query.year);
 
         if (!userId || !month || !year) {
-            return res.status(400).json({ success: false, message: "Invalid params" });
+            return res.status(400).json({
+                success: false,
+                message: "Invalid params"
+            });
         }
 
         /* ===========================
@@ -1658,7 +1661,10 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
         }).lean();
 
         if (!employee) {
-            return res.status(404).json({ success: false, message: "Employee not found" });
+            return res.status(404).json({
+                success: false,
+                message: "Employee not found"
+            });
         }
 
         const shift = employee.shift
@@ -1702,6 +1708,12 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
         const report = [];
 
         /* ===========================
+           SAFE VALUE (EXPORT SAFE)
+        ============================ */
+
+        const safe = (val) => val || "-";
+
+        /* ===========================
            LOOP
         ============================ */
 
@@ -1712,34 +1724,31 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
             const key = date.toISOString().split("T")[0];
 
-            /* ===========================
-               FUTURE DATE (SHOW ONLY)
-            ============================ */
-
+            /* ========= FUTURE ========= */
             if (date > today) {
                 report.push({
                     Date: key,
-                    TimeIn: "—",
-                    TimeOut: "—",
-                    TotalHours: "—"
+                    TimeIn: "-",
+                    TimeOut: "-",
+                    TotalHours: "-"
                 });
-                continue; // ❌ DO NOT COUNT
+                continue;
             }
 
-            /* BEFORE JOINING */
+            /* ========= BEFORE JOINING ========= */
             if (isBeforeJoining(date, employee)) {
                 report.push({
                     Date: key,
-                    TimeIn: "—",
-                    TimeOut: "—",
-                    TotalHours: "—"
+                    TimeIn: "-",
+                    TimeOut: "-",
+                    TotalHours: "-"
                 });
                 continue;
             }
 
             const rec = map.get(key);
 
-            /* WEEK OFF */
+            /* ========= WEEK OFF ========= */
             if (!rec && isWeekOff(date, shift, employee)) {
                 report.push({
                     Date: key,
@@ -1750,7 +1759,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* ABSENT (ONLY PAST DAYS) */
+            /* ========= ABSENT ========= */
             if (!rec) {
                 absentDays++;
 
@@ -1763,7 +1772,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* HOLIDAY */
+            /* ========= HOLIDAY ========= */
             if (rec.status === "holiday") {
                 report.push({
                     Date: key,
@@ -1774,40 +1783,38 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* INVALID PUNCH */
+            /* ========= INVALID ========= */
             if (!isValidPunch(rec)) {
                 report.push({
                     Date: key,
-                    TimeIn: rec.punchIn ? formatTime(rec.punchIn) : "-",
-                    TimeOut: rec.punchOut ? formatTime(rec.punchOut) : "-",
+                    TimeIn: safe(formatTime(rec.punchIn)),
+                    TimeOut: safe(formatTime(rec.punchOut)),
                     TotalHours: "Invalid"
                 });
                 continue;
             }
 
-            /* VALID */
+            /* ========= VALID WORK ========= */
 
             const minutes = rec.workSummary?.totalMinutes || 0;
 
-            if (rec.status === "present") {
-                presentDays++;
-            }
-
+            // ✅ FIXED PRESENT COUNT
             if (minutes > 0) {
+                presentDays++;
                 totalMinutes += minutes;
                 validDays++;
             }
 
             report.push({
                 Date: key,
-                TimeIn: formatTime(rec.punchIn),
-                TimeOut: formatTime(rec.punchOut),
-                TotalHours: formatHours(minutes)
+                TimeIn: safe(formatTime(rec.punchIn)),
+                TimeOut: safe(formatTime(rec.punchOut)),
+                TotalHours: minutes > 0 ? formatHours(minutes) : "-"
             });
         }
 
         /* ===========================
-           AVG CALCULATION (SAFE)
+           AVG CALCULATION
         ============================ */
 
         const avgMinutes = validDays > 0
@@ -1831,6 +1838,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
     } catch (error) {
         console.error("Attendance Error:", error);
+
         return res.status(500).json({
             success: false,
             message: "Internal server error"
