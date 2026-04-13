@@ -139,12 +139,12 @@ router.get(
     getEmpByUserId
 );
 router.put(
-    "/me/profile",
+    "/activateEmployee/:empId",
     authMiddleware,
     activateEmployee,
 );
 router.get(
-    "/me/profile",
+    "/getEmployees",
     authMiddleware,
     getEmployees
 );
