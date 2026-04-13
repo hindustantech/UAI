@@ -13,7 +13,7 @@ import {
     getEmpByUserId,
     findbyReferralCode,
     checkEmpButton,
-    delteEmployee,
+    deactivateEmployee,
     updateEmployee,
     getLatestSubscription,
     changeEmployeeRole
@@ -99,7 +99,7 @@ router.delete(
     "/delteEmployee/:empId",
     authMiddleware,
     checkPermission('employee.delete'),
-    delteEmployee
+    deactivateEmployee
 );
 router.get(
     "/checkEmpButton",

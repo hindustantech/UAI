@@ -84,19 +84,30 @@ const employeeSchema = new mongoose.Schema({
         },
         locationtype: {
             type: String,
-            enum:['current','employee']
+            enum: ['current', 'employee']
         },
         radius: {
             type: Number // meters
         },
         manual: {
-            type: String,  
+            type: String,
         }
     },
     employmentStatus: {
         type: String,
-        enum: ["active", "suspended", "terminated", "resigned"],
+        enum: ["active", "inactive"],
         default: "active"
+    },
+    deactivatedAt: Date,
+
+    deactivatedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User"
+    },
+
+    deactivationReason: {
+        type: String,
+        maxlength: 500
     }
 
 }, {

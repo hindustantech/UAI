@@ -986,29 +986,107 @@ export const checkEmpButton = async (req, res) => {
     }
 }
 
-export const delteEmployee = async (req, res) => {
-    const { empId } = req.params;
+
+
+export const deactivateEmployee = async (req, res) => {
+    const session = await mongoose.startSession();
+
     try {
-        const employee = await Employee.findByIdAndDelete(empId);
+        await session.startTransaction();
+
+        const { empId } = req.params;
+        const { reason } = req.body;
+
+        const adminId = req.user._id;
+
+        /* ===========================
+           VALIDATE ADMIN
+        ============================ */
+
+        const admin = await User.findById(adminId).session(session);
+        if (!admin) throw new Error("ADMIN_NOT_FOUND");
+
+        /* ===========================
+           FETCH EMPLOYEE (MULTI-TENANT SAFE)
+        ============================ */
+
+        const employee = await Employee.findOne({
+            _id: empId,
+            companyId: admin._id // 🔒 company isolation
+        }).session(session);
+
         if (!employee) {
-            return res.status(404).json({
-                success: false,
-                message: "Employee not found"
-            })
+            throw new Error("EMPLOYEE_NOT_FOUND");
         }
+
+        /* ===========================
+           IDEMPOTENCY CHECK
+        ============================ */
+
+        if (employee.employmentStatus === "inactive") {
+            return res.status(200).json({
+                success: true,
+                message: "Employee already inactive",
+                data: employee
+            });
+        }
+
+        /* ===========================
+           BUSINESS RULES
+        ============================ */
+
+        // Prevent self-deactivation (optional)
+        if (employee.userId.toString() === adminId.toString()) {
+            throw new Error("CANNOT_DEACTIVATE_SELF");
+        }
+
+        /* ===========================
+           UPDATE (SOFT DELETE)
+        ============================ */
+
+        employee.employmentStatus = "inactive";
+        employee.deactivatedAt = new Date();
+        employee.deactivatedBy = adminId;
+        employee.deactivationReason = reason || "No reason provided";
+
+        await employee.save({ session });
+
+        /* ===========================
+           OPTIONAL: CASCADE EFFECTS
+        ============================ */
+
+        // Example:
+        // - Disable login
+        // - Remove active sessions
+        // - Stop attendance marking
+        // - Remove from active shifts
+
+        /* ===========================
+           COMMIT
+        ============================ */
+
+        await session.commitTransaction();
+
         return res.status(200).json({
             success: true,
-            message: "Employee deleted successfully",
-            data: employee
-        })
-    }
-    catch (error) {
-        console.error("deleteEmployee Error:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-            error: error.message,
+            message: "Employee deactivated successfully",
+            data: {
+                employeeId: employee._id,
+                status: employee.employmentStatus,
+                deactivatedAt: employee.deactivatedAt
+            }
         });
+
+    } catch (error) {
+        await session.abortTransaction();
+
+        return res.status(400).json({
+            success: false,
+            error: error.message
+        });
+
+    } finally {
+        session.endSession();
     }
-}
+};
 
