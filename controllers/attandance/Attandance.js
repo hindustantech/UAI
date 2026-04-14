@@ -16,76 +16,200 @@ import Shift from "../../models/Attandance/Shift.js";
 // utils/dateRange.js
 import {
     normalizeDate,
+    diffMinutes,
+    createDateTime,
     validatePunch,
+    validatePunchDates,
     checkJoiningDate,
     checkWeeklyOff,
+    checkHoliday,
     buildShiftWindow,
     validateShiftWindow,
     calculateWork,
-    calculateLate
+    calculateLate,
+    calculateEarlyLeave,
+    calculateOvertime,
+    calculatePayableMinutes,
+    determineAttendanceStatus,
+    validateGeoLocation,
+    checkDeviceFraud,
+    sanitizeAttendanceData,
+    getErrorMessage,
+    logAttendanceAction,
+    logAttendanceError,
+    calculateDistance
 } from "./attendanceHelper.js";
 
 
 
 /**
- * ============================================
- * UTILITY FUNCTIONS
- * ============================================
+ * ========================================
+ * MARK ATTENDANCE CONTROLLER
+ * ========================================
  */
-
-/**
- * Normalize date to midnight UTC
- */
-// const normalizeDate = (date) => {
-//     const d = new Date(date);
-//     d.setUTCHours(0, 0, 0, 0);
-//     return d;
-// };
-
 
 export const markAttendance = async (req, res) => {
     const session = await mongoose.startSession();
+    session.startTransaction();
 
     try {
-        await session.startTransaction();
+        const {
+            date,
+            punchIn,
+            punchOut,
+            breaks = [],
+            geoLocation,
+            deviceInfo,
+            shiftId,
+            remarks,
+            token
+        } = req.body;
 
-        const { date, punchIn, punchOut, breaks, geoLocation, deviceInfo, shift: shiftId, token } = req.body;
-        const userId = req.user._id;
+        const userId = req.user?._id;
 
-        if (!token) throw new Error("TOKEN_REQUIRED");
-        if (!date) throw new Error("DATE_REQUIRED");
-        if (!punchIn && !punchOut) throw new Error("PUNCH_REQUIRED");
+        // ===== VALIDATION =====
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (!token) {
+            throw { code: "TOKEN_REQUIRED", status: 401 };
+        }
 
-        const company = await User.findById(decoded.userId).session(session);
-        if (!company) throw new Error("COMPANY_NOT_FOUND");
+        if (!date) {
+            throw { code: "DATE_REQUIRED", status: 400 };
+        }
+
+        if (!punchIn && !punchOut) {
+            throw { code: "PUNCH_REQUIRED", status: 400 };
+        }
+
+        if (!userId) {
+            throw { code: "UNAUTHORIZED", status: 401 };
+        }
+
+        // ===== DECODE & VERIFY TOKEN =====
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (err) {
+            throw { code: "INVALID_TOKEN", status: 401 };
+        }
+
+        // ===== FETCH COMPANY =====
+
+        const company = await User.findById(decoded.userId)
+            .lean()
+            .session(session);
+
+        if (!company) {
+            throw { code: "COMPANY_NOT_FOUND", status: 404 };
+        }
+
+        // ===== FETCH EMPLOYEE =====
 
         const employee = await Employee.findOne({
             userId,
+            companyId: company._id,
             employmentStatus: "active"
-        }).session(session);
+        })
+            .lean()
+            .session(session);
 
-        if (!employee) throw new Error("EMPLOYEE_NOT_FOUND");
+        if (!employee) {
+            throw { code: "EMPLOYEE_NOT_FOUND", status: 404 };
+        }
+
+        // ===== FETCH SHIFT =====
 
         const shift = await Shift.findOne({
             _id: shiftId || employee.shift,
-            companyId: company._id
-        }).session(session);
+            companyId: company._id,
+            isDeleted: false
+        })
+            .lean()
+            .session(session);
 
-        if (!shift) throw new Error("SHIFT_NOT_FOUND");
+        if (!shift) {
+            throw { code: "SHIFT_NOT_FOUND", status: 404 };
+        }
+
+        // ===== DATE NORMALIZATION & VALIDATION =====
 
         const attendanceDate = normalizeDate(date);
         const dateStr = attendanceDate.toISOString().split("T")[0];
 
+        // Check joining date
         checkJoiningDate(employee, attendanceDate);
-        checkWeeklyOff(employee, shift, attendanceDate);
-        validatePunch(punchIn, punchOut);
 
-        const currentTime = new Date(punchIn || punchOut);
+        // Check weekly off
+        checkWeeklyOff(employee, shift, attendanceDate);
+
+        // Check holidays (if applicable)
+        if (company.holidays && Array.isArray(company.holidays)) {
+            checkHoliday(attendanceDate, company.holidays);
+        }
+
+        // ===== PUNCH VALIDATION =====
+
+        validatePunch(punchIn, punchOut);
+        validatePunchDates(punchIn, punchOut, attendanceDate);
+
+        // ===== SHIFT WINDOW CALCULATION =====
 
         const window = buildShiftWindow(shift, dateStr);
+        const currentTime = new Date(punchIn || punchOut);
         const baseStatus = validateShiftWindow(currentTime, window);
+
+        // ===== WORK HOUR CALCULATIONS =====
+
+        const inTime = punchIn ? new Date(punchIn) : null;
+        const outTime = punchOut ? new Date(punchOut) : null;
+
+        const workMinutes = calculateWork(inTime, outTime, breaks);
+        const shiftMinutes = diffMinutes(window.shiftStart, window.shiftEnd);
+
+        const lateMinutes = inTime ? calculateLate(inTime, window.shiftStart, window.lateGrace) : 0;
+        const earlyLeaveMinutes = outTime ? calculateEarlyLeave(outTime, window.shiftEnd, window.earlyExit || 10) : 0;
+        const overtimeMinutes = calculateOvertime(workMinutes, shiftMinutes);
+        const payableMinutes = calculatePayableMinutes(workMinutes, shiftMinutes, lateMinutes, earlyLeaveMinutes);
+
+        // ===== FINAL STATUS DETERMINATION =====
+
+        const finalStatus = determineAttendanceStatus(baseStatus, workMinutes, shiftMinutes);
+
+        // ===== GEO-LOCATION VALIDATION =====
+
+        let geoValidation = null;
+        if (geoLocation && employee.officeLocation) {
+            geoValidation = validateGeoLocation(
+                geoLocation,
+                employee.officeLocation,
+                employee.officeLocation.radius || 100
+            );
+        }
+
+        // ===== DEVICE FRAUD CHECK =====
+
+        let deviceFraudCheck = null;
+        if (deviceInfo) {
+            const recentAttendances = await Attendance.find({
+                employeeId: employee._id,
+                companyId: company._id,
+                date: {
+                    $gte: new Date(attendanceDate.getTime() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
+                }
+            })
+                .lean()
+                .session(session)
+                .limit(10);
+
+            const previousDevices = recentAttendances
+                .filter(a => a.deviceInfo)
+                .map(a => a.deviceInfo);
+
+            deviceFraudCheck = checkDeviceFraud(deviceInfo, previousDevices);
+        }
+
+        // ===== FETCH OR CREATE ATTENDANCE =====
 
         let attendance = await Attendance.findOne({
             companyId: company._id,
@@ -94,13 +218,11 @@ export const markAttendance = async (req, res) => {
         }).session(session);
 
         if (!attendance) {
-            if (!punchIn) throw new Error("PUNCH_IN_REQUIRED");
+            // ===== NEW ATTENDANCE RECORD =====
 
-            const inTime = new Date(punchIn);
-            const outTime = punchOut ? new Date(punchOut) : null;
-
-            const totalMinutes = calculateWork(inTime, outTime, breaks);
-            const lateMinutes = calculateLate(inTime, window?.shiftStart, window?.lateGrace);
+            if (!punchIn) {
+                throw { code: "PUNCH_IN_REQUIRED", status: 400 };
+            }
 
             attendance = new Attendance({
                 companyId: company._id,
@@ -108,57 +230,157 @@ export const markAttendance = async (req, res) => {
                 date: attendanceDate,
                 punchIn: inTime,
                 punchOut: outTime,
-                status: baseStatus,
+                status: finalStatus,
+                approvalStatus: "approved",
                 shift: {
                     name: shift.shiftName,
                     startTime: shift.startTime,
-                    endTime: shift.endTime
+                    endTime: shift.endTime,
+                    shiftMinutes: shiftMinutes
                 },
+                breaks: breaks,
                 workSummary: {
-                    totalMinutes,
-                    payableMinutes: totalMinutes,
-                    lateMinutes
+                    totalMinutes: workMinutes,
+                    payableMinutes: payableMinutes,
+                    overtimeMinutes: overtimeMinutes,
+                    lateMinutes: lateMinutes,
+                    earlyLeaveMinutes: earlyLeaveMinutes
                 },
-                totalWorkingHours: totalMinutes / 60,
-                geoLocation,
-                deviceInfo
+                totalWorkingHours: workMinutes / 60,
+                lateByMinutes: lateMinutes,
+                geoLocation: geoLocation ? {
+                    ...geoLocation,
+                    verified: geoValidation?.verified || false
+                } : undefined,
+                deviceInfo: deviceInfo,
+                isSuspicious: deviceFraudCheck?.isSuspicious || false,
+                remarks: remarks || `Auto-marked on ${new Date().toISOString()}`,
+                isAutoMarked: true
+            });
+
+            logAttendanceAction("ATTENDANCE_CREATED", attendance, userId, {
+                workMinutes,
+                lateMinutes,
+                geoValidation,
+                deviceFraud: deviceFraudCheck
             });
 
         } else {
-            if (!punchOut) throw new Error("PUNCH_OUT_REQUIRED");
+            // ===== UPDATE EXISTING ATTENDANCE =====
 
-            const outTime = new Date(punchOut);
-            const inTime = new Date(attendance.punchIn);
+            if (!punchOut) {
+                throw { code: "PUNCH_OUT_REQUIRED", status: 400 };
+            }
 
-            const totalMinutes = calculateWork(inTime, outTime, attendance.breaks);
+            // Store old values for audit
+            const oldValue = {
+                punchOut: attendance.punchOut,
+                status: attendance.status,
+                workSummary: attendance.workSummary
+            };
 
             attendance.punchOut = outTime;
-            attendance.workSummary.totalMinutes = totalMinutes;
-            attendance.totalWorkingHours = totalMinutes / 60;
+            attendance.status = finalStatus;
+            attendance.workSummary = {
+                totalMinutes: workMinutes,
+                payableMinutes: payableMinutes,
+                overtimeMinutes: overtimeMinutes,
+                lateMinutes: lateMinutes,
+                earlyLeaveMinutes: earlyLeaveMinutes
+            };
+            attendance.totalWorkingHours = workMinutes / 60;
+
+            if (breaks && breaks.length > 0) {
+                attendance.breaks = breaks;
+            }
+
+            // Add edit log
+            if (!attendance.editLogs) {
+                attendance.editLogs = [];
+            }
+
+            attendance.editLogs.push({
+                editedBy: userId,
+                reason: "PUNCH_OUT_COMPLETION",
+                oldValue,
+                newValue: {
+                    punchOut: outTime,
+                    status: finalStatus,
+                    workSummary: attendance.workSummary
+                },
+                editedAt: new Date()
+            });
+
+            // Update device info if provided
+            if (deviceInfo) {
+                attendance.deviceInfo = deviceInfo;
+            }
+
+            logAttendanceAction("ATTENDANCE_UPDATED", attendance, userId, {
+                oldValue,
+                workMinutes,
+                lateMinutes
+            });
         }
+
+        attendance.lastPunchAt = new Date(outTime || inTime);
+
+        // ===== SAVE ATTENDANCE =====
 
         await attendance.save({ session });
 
+        // ===== COMMIT TRANSACTION =====
+
         await session.commitTransaction();
+
+        // ===== PREPARE RESPONSE =====
+
+        const sanitizedAttendance = sanitizeAttendanceData(attendance.toObject());
 
         return res.status(200).json({
             success: true,
-            data: attendance
+            message: "Attendance marked successfully",
+            data: {
+                ...sanitizedAttendance,
+                geoValidation,
+                deviceFraudCheck
+            }
         });
 
-    } catch (err) {
+    } catch (error) {
         await session.abortTransaction();
 
-        return res.status(400).json({
+        // Log error
+        if (error.code) {
+            logAttendanceError(error.code, {
+                message: error.message,
+                userId: req.user?._id,
+                body: req.body
+            });
+        } else {
+            logger.error("[ATTENDANCE_ERROR] Unexpected Error", {
+                error: error.message,
+                stack: error.stack,
+                userId: req.user?._id
+            });
+        }
+
+        const errorCode = error.code || "DATABASE_ERROR";
+        const statusCode = error.status || 400;
+        const message = getErrorMessage(errorCode);
+
+        return res.status(statusCode).json({
             success: false,
-            error: err.message
+            error: errorCode,
+            message: message,
+            details: process.env.NODE_ENV === "development" ? error.message : undefined
         });
-        logger.error("Mark Attendance Error:", err);
 
     } finally {
         session.endSession();
     }
 };
+
 // ─── DTO helpers (defined once, reused) ──────────────────────────────────────
 
 const formatRecord = (rec) => ({
