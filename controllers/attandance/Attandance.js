@@ -164,7 +164,8 @@ export const markAttendance = async (req, res) => {
 
         const window = buildShiftWindow(shift, dateStr);
         const currentTime = new Date(punchIn || punchOut);
-        const baseStatus = validateShiftWindow(currentTime, window);
+        const dateStr1 = currentTime.toISOString().split("T")[0];
+        const baseStatus = validateShiftWindow(dateStr1, window);
 
         // ===== WORK HOUR CALCULATIONS =====
 
