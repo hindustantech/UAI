@@ -21,12 +21,12 @@ export const diffMinutes = (start, end) => {
 
 export const createDateTime = (dateStr, timeStr) => {
     if (!timeStr || !dateStr) return null;
-    
+
     const [h, m] = timeStr.split(":").map(Number);
     if (isNaN(h) || isNaN(m)) {
         throw new Error("INVALID_TIME_FORMAT");
     }
-    
+
     const d = new Date(dateStr);
     d.setHours(h, m, 0, 0);
     return d;
@@ -42,7 +42,7 @@ export const validatePunch = (punchIn, punchOut) => {
     if (punchIn && punchOut) {
         const inTime = new Date(punchIn);
         const outTime = new Date(punchOut);
-        
+
         if (outTime <= inTime) {
             throw new Error("PUNCH_OUT_BEFORE_IN");
         }
@@ -51,14 +51,14 @@ export const validatePunch = (punchIn, punchOut) => {
 
 export const validatePunchDates = (punchIn, punchOut, attendanceDate) => {
     const normalizedDate = normalizeDate(attendanceDate);
-    
+
     if (punchIn) {
         const punchInDate = normalizeDate(punchIn);
         if (punchInDate.getTime() !== normalizedDate.getTime()) {
             throw new Error("PUNCH_DATE_MISMATCH");
         }
     }
-    
+
     if (punchOut) {
         const punchOutDate = normalizeDate(punchOut);
         if (punchOutDate.getTime() !== normalizedDate.getTime()) {
@@ -74,7 +74,7 @@ export const checkJoiningDate = (employee, attendanceDate) => {
 
     const joining = normalizeDate(employee.jobInfo.joiningDate);
     const normalized = normalizeDate(attendanceDate);
-    
+
     if (normalized < joining) {
         throw new Error("ATTENDANCE_BEFORE_JOINING_DATE");
     }
@@ -163,15 +163,28 @@ export const validateShiftWindow = (currentTime, window) => {
 
     // Too early to punch
     if (current < window.allowedStart) {
+        const minutesEarly = diffMinutes(current, window.allowedStart);
+        const minutesToWait = diffMinutes(current, window.allowedStart);
+        const waitUntilTime = window.allowedStart.toLocaleTimeString();
+
         logger.warn(
             `Punch attempt too early: ${current.toISOString()} < ${window.allowedStart.toISOString()}`,
             {
                 punchTime: current,
                 allowedStart: window.allowedStart,
-                minutesToEarly: diffMinutes(current, window.allowedStart)
+                minutesEarly: minutesEarly
             }
         );
-        throw new Error("PUNCH_TOO_EARLY");
+
+        // Throw with more context
+        const error = new Error("PUNCH_TOO_EARLY");
+        error.details = {
+            message: `Punch in too early. Allowed from ${waitUntilTime}`,
+            allowedFrom: window.allowedStart,
+            minutesToWait: minutesToWait,
+            waitUntil: waitUntilTime
+        };
+        throw error;
     }
 
     // Mark as absent if punch is after threshold
@@ -211,7 +224,7 @@ export const calculateWork = (inTime, outTime, breaks = []) => {
             if (breakItem.start && breakItem.end) {
                 const breakStart = new Date(breakItem.start).getTime();
                 const breakEnd = new Date(breakItem.end).getTime();
-                
+
                 if (breakEnd > breakStart) {
                     totalMinutes -= diffMinutes(breakStart, breakEnd);
                 }
@@ -259,13 +272,13 @@ export const calculatePayableMinutes = (
     minimumHours = 4 * 60 // 4 hours minimum
 ) => {
     let payable = workMinutes - lateMinutes - earlyLeaveMinutes;
-    
+
     // Apply minimum hours rule
     if (payable > 0 && payable < minimumHours) {
         // Less than minimum, might count as half day or full day depending on policy
         return 0;
     }
-    
+
     return Math.max(0, payable);
 };
 

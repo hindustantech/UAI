@@ -25,7 +25,7 @@ import {
     getAttendanceSummary,
     getTodaySummary
 } from "../../controllers/attandance/Attandance.js";
-import { validateMarkAttendanceRules, handleValidationErrors } from "../../controllers/attandance/attendanceValidation.js";
+import { validateMarkAttendanceRules, handleValidationErrors,validatePunchTiming } from "../../controllers/attandance/attendanceValidation.js";
 /* ===============================
    Middlewares
 ================================ */
@@ -48,6 +48,7 @@ const router = express.Router();
 router.post(
     "/mark",
     authMiddleware,
+    validatePunchTiming,
     validateMarkAttendanceRules,
     handleValidationErrors,
     markAttendance

@@ -2,7 +2,11 @@
 
 import { body, param, query, validationResult } from "express-validator";
 import logger from "../../utils/logger.js";
-
+import User from "../../models/userModel.js";
+import Shift from "../../models/Attandance/Shift.js";
+import Employee from "../../models/Attandance/Employee.js";
+import Attendance from "../../models/Attandance/Attendance.js";
+import { buildShiftWindow, validateShiftWindow } from "./attendanceHelper.js";
 /**
  * ========================================
  * FIELD VALIDATORS
@@ -441,19 +445,67 @@ export const validatePunchTimesMiddleware = (req, res, next) => {
     next();
 };
 
-/**
- * ========================================
- * USAGE IN ROUTES
- * ========================================
- */
-
-// Example usage in routes:
-
-// router.post(
-//     "/mark",
-//     authenticate,
-//     validateMarkAttendanceRules,
-//     validatePunchTimesMiddleware,
-//     handleValidationErrors,
-//     markAttendance
-// );
+export const validatePunchTiming = async (req, res, next) => {
+    try {
+        const { punchIn, date, shiftId } = req.body;
+        
+        // Only validate if this is a punch in attempt
+        if (!punchIn || !date) {
+            return next();
+        }
+        
+        const userId = req.user?._id;
+        if (!userId) {
+            return next();
+        }
+        
+        // Get employee and shift information
+        const company = await User.findById(req.user.companyId || (await Employee.findOne({ userId }))?.companyId);
+        if (!company) {
+            return next();
+        }
+        
+        const employee = await Employee.findOne({
+            userId,
+            companyId: company._id,
+            employmentStatus: "active"
+        });
+        
+        if (!employee) {
+            return next();
+        }
+        
+        const shift = await Shift.findOne({
+            _id: shiftId || employee.shift,
+            companyId: company._id,
+            isDeleted: false
+        });
+        
+        if (!shift) {
+            return next();
+        }
+        
+        // Build shift window and validate
+        const dateStr = new Date(date).toISOString().split("T")[0];
+        const window = buildShiftWindow(shift, dateStr);
+        const currentTime = new Date(punchIn);
+        
+        // This will throw if too early
+        validateShiftWindow(currentTime, window);
+        
+        next();
+    } catch (error) {
+        // If validation fails, return early error
+        if (error.message === "PUNCH_TOO_EARLY") {
+            return res.status(400).json({
+                success: false,
+                error: "PUNCH_TOO_EARLY",
+                message: `Punch in too early. Allowed from ${error.details?.waitUntil || 'shift start time'}`,
+                details: error.details
+            });
+        }
+        
+        // For other errors, continue to main handler
+        next();
+    }
+};
