@@ -14,38 +14,49 @@ import User from "../../models/userModel.js";
 import { resolveDateRange } from "../../utils/dateRangeResolver.js";
 import Shift from "../../models/Attandance/Shift.js";
 // utils/dateRange.js
-import {
-    normalizeDate,
-    diffMinutes,
-    createDateTime,
-    validatePunch,
-    validatePunchDates,
-    checkJoiningDate,
-    checkWeeklyOff,
-    checkHoliday,
-    buildShiftWindow,
-    validateShiftWindow,
-    calculateWork,
-    calculateLate,
-    calculateEarlyLeave,
-    calculateOvertime,
-    calculatePayableMinutes,
-    determineAttendanceStatus,
-    validateGeoLocation,
-    checkDeviceFraud,
-    sanitizeAttendanceData,
-    getErrorMessage,
-    logAttendanceAction,
-    logAttendanceError,
-    calculateDistance
-} from "./attendanceHelper.js";
+// import {
+//     normalizeDate,
+//     diffMinutes,
+//     createDateTime,
+//     validatePunch,
+//     validatePunchDates,
+//     checkJoiningDate,
+//     checkWeeklyOff,
+//     checkHoliday,
+//     buildShiftWindow,
+//     validateShiftWindow,
+//     calculateWork,
+//     calculateLate,
+//     calculateEarlyLeave,
+//     calculateOvertime,
+//     calculatePayableMinutes,
+//     determineAttendanceStatus,
+//     validateGeoLocation,
+//     checkDeviceFraud,
+//     sanitizeAttendanceData,
+//     getErrorMessage,
+//     logAttendanceAction,
+//     logAttendanceError,
+//     calculateDistance
+// } from "./attendanceHelper.js";
 
 
-// import logger from "../../utils/logger.js";
+
+const normalizeDate = (date) => {
+    const d = new Date(date);
+    d.setUTCHours(0, 0, 0, 0);
+    return d;
+};
+
 /**
- * ========================================
- * MARK ATTENDANCE CONTROLLER
- * ========================================
+ * Calculate minutes difference between two dates
+ */
+const diffMinutes = (start, end) => {
+    return Math.round((end - start) / (1000 * 60));
+};
+
+/**
+ * Calculate distance between two geo coordinates (Haversine formula)
  */
 const getDistance = (lat1, lng1, lat2, lng2) => {
     const R = 6371000; // Earth radius in meters
@@ -59,6 +70,61 @@ const getDistance = (lat1, lng1, lat2, lng2) => {
         Math.sin(dLng / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
+};
+
+/**
+ * Create time string from date and time string
+ * dateString: "2024-01-15" | timeString: "09:00"
+ */
+const createDateTime = (dateString, timeString) => {
+    if (!dateString || !timeString) return null;
+    const [hours, minutes] = timeString.split(":").map(Number);
+    const date = new Date(dateString);
+    date.setHours(hours, minutes, 0, 0);
+    return date;
+};
+
+/**
+ * Apply grace period to determine actual late minutes
+ */
+const applyGracePeriod = (actualTime, shiftStartTime, gracePeriod) => {
+    if (actualTime <= shiftStartTime) return 0;
+
+    const lateMinutes = diffMinutes(shiftStartTime, actualTime);
+    const effectiveLateMinutes = Math.max(0, lateMinutes - gracePeriod);
+
+    return effectiveLateMinutes;
+};
+
+/**
+ * Calculate payable minutes (work time minus unpaid breaks)
+ */
+const calculatePayableMinutes = (totalMinutes, breaks) => {
+    let breakMinutes = 0;
+
+    if (breaks && Array.isArray(breaks)) {
+        for (const b of breaks) {
+            if (b.start && b.end) {
+                breakMinutes += diffMinutes(new Date(b.start), new Date(b.end));
+            }
+        }
+    }
+
+    return Math.max(0, totalMinutes - breakMinutes);
+};
+
+/**
+ * Determine attendance status based on work hours
+ */
+const determineStatus = (payableMinutes, shiftMinutes, isHoliday) => {
+    if (isHoliday) return "holiday";
+
+    // Half day threshold (less than 50% of shift)
+    if (payableMinutes < shiftMinutes * 0.5) {
+        return "half_day";
+    }
+
+    return "present";
 };
 
 export const markAttendance = async (req, res) => {
