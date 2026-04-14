@@ -100,7 +100,7 @@ export const markAttendance = async (req, res) => {
             const outTime = punchOut ? new Date(punchOut) : null;
 
             const totalMinutes = calculateWork(inTime, outTime, breaks);
-            const lateMinutes = calculateLate(inTime, window.shiftStart, window.lateGrace);
+            const lateMinutes = calculateLate(inTime, window?.shiftStart, window?.lateGrace);
 
             attendance = new Attendance({
                 companyId: company._id,

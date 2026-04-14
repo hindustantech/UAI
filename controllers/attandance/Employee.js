@@ -17,7 +17,7 @@ export const activateEmployee = async (req, res) => {
     const session = await mongoose.startSession();
 
     try {
-        await session.startTransaction();
+        session.startTransaction();
 
         const { empId } = req.params;
         const adminId = req.user._id;
