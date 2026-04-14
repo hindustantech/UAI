@@ -48,9 +48,9 @@ const router = express.Router();
 router.post(
     "/mark",
     authMiddleware,
-    validatePunchTiming,
-    validateMarkAttendanceRules,
-    handleValidationErrors,
+    // validatePunchTiming,
+    // validateMarkAttendanceRules,
+    // handleValidationErrors,
     markAttendance
 );
 
