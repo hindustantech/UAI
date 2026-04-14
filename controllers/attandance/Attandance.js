@@ -162,10 +162,24 @@ export const markAttendance = async (req, res) => {
 
         // ===== SHIFT WINDOW CALCULATION =====
 
-        const window = buildShiftWindow(shift, dateStr);
+
+        const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+
         const currentTime = new Date(punchIn || punchOut);
-        const dateStr1 = currentTime.toISOString().split("T")[0];
-        const baseStatus = validateShiftWindow(dateStr1, window);
+        const currentIST = new Date(currentTime.getTime() + IST_OFFSET);
+
+        const dateStr1 = currentIST.toLocaleDateString("en-CA", {
+            timeZone: "Asia/Kolkata"
+        });
+
+        const window = buildShiftWindow(shift, dateStr1);
+
+        const baseStatus = validateShiftWindow(currentIST, window);
+
+        // const window = buildShiftWindow(shift, dateStr);
+        // const currentTime = new Date(punchIn || punchOut);
+        // const dateStr1 = currentTime.toISOString().split("T")[0];
+        // const baseStatus = validateShiftWindow(dateStr1, window);
 
         // ===== WORK HOUR CALCULATIONS =====
 
