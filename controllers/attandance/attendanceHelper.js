@@ -161,49 +161,42 @@ export const validateShiftWindow = (currentTime, window) => {
 
     const current = new Date(currentTime);
 
-    // Too early to punch
+    // 1. TOO EARLY
     if (current < window.allowedStart) {
         const minutesEarly = diffMinutes(current, window.allowedStart);
-        const minutesToWait = diffMinutes(current, window.allowedStart);
-        const waitUntilTime = window.allowedStart.toLocaleTimeString("en-IN", {
-            timeZone: "Asia/Kolkata"
-        });
 
-        logger.warn(
-            `Punch attempt too early: ${current.toISOString()} < ${window.allowedStart.toISOString()}`,
-            {
-                punchTime: current,
-                allowedStart: window.allowedStart,
-                minutesEarly: minutesEarly
-            }
-        );
-
-        // Throw with more context
         const error = new Error("PUNCH_TOO_EARLY");
         error.details = {
-            message: `Punch in too early. Allowed from ${waitUntilTime}`,
-            allowedFrom: window.allowedStart,
-            minutesToWait: minutesToWait,
-            waitUntil: waitUntilTime
+            message: "Punch in too early",
+            minutesEarly,
+            allowedFrom: window.allowedStart
         };
         throw error;
     }
 
-    // Mark as absent if punch is after threshold
-    if (current >= window.absentThreshold) {
-        logger.warn(
-            `Punch after absent threshold: ${current.toISOString()} >= ${window.absentThreshold.toISOString()}`,
-            {
-                punchTime: current,
-                absentThreshold: window.absentThreshold
-            }
-        );
-        return "absent";
+    // 2. LATE (after allowedEnd)
+    if (current > window.allowedEnd && current < window.absentThreshold) {
+        const minutesLate = diffMinutes(window.shiftStart, current);
+
+        return {
+            status: "late",
+            minutesLate,
+            punchTime: current.toISOString()
+        };
     }
 
-    return "present";
-};
+    // 3. ABSENT
+    if (current >= window.absentThreshold) {
+        return {
+            status: "absent"
+        };
+    }
 
+    // 4. ON TIME / WITHIN GRACE
+    return {
+        status: "present"
+    };
+};
 /**
  * ========================================
  * WORK TIME CALCULATIONS
