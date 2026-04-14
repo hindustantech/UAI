@@ -66,6 +66,13 @@ export const markAttendance = async (req, res) => {
         } = req.body;
 
         const userId = req.user?._id;
+        logger.info("[MARK_ATTENDANCE] Request received", {
+            userId,
+            date,
+            punchIn,
+            punchOut,
+            shiftId
+        });
 
         // ===== VALIDATION =====
 
