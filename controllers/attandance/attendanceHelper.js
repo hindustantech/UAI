@@ -165,7 +165,9 @@ export const validateShiftWindow = (currentTime, window) => {
     if (current < window.allowedStart) {
         const minutesEarly = diffMinutes(current, window.allowedStart);
         const minutesToWait = diffMinutes(current, window.allowedStart);
-        const waitUntilTime = window.allowedStart.toLocaleTimeString();
+        const waitUntilTime = window.allowedStart.toLocaleTimeString("en-IN", {
+            timeZone: "Asia/Kolkata"
+        });
 
         logger.warn(
             `Punch attempt too early: ${current.toISOString()} < ${window.allowedStart.toISOString()}`,
