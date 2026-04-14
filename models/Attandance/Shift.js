@@ -11,8 +11,9 @@ const BreakSchema = new Schema({
         default: "Default Break"
     },
     duration: {
-        type: Number,
-        default: 30 // 30 mins default
+        type: Number, // minutes
+        default: 30,
+        min: 0
     },
     isPaid: {
         type: Boolean,
@@ -21,7 +22,7 @@ const BreakSchema = new Schema({
 }, { _id: false });
 
 /**
- * Shift Schema
+ * Shift Schema (Production Ready)
  */
 const ShiftSchema = new Schema({
 
@@ -43,19 +44,31 @@ const ShiftSchema = new Schema({
         type: String,
         required: true,
         uppercase: true,
+        trim: true,
         default: "GEN"
     },
 
+    /**
+     * ✅ CRITICAL FIX: Store business time + timezone
+     */
     startTime: {
-        type: String,
+        type: String, // "HH:mm"
         required: true,
-        default: "09:00"
+        default: "09:00",
+        match: /^([01]\d|2[0-3]):([0-5]\d)$/
     },
 
     endTime: {
         type: String,
         required: true,
-        default: "18:00"
+        default: "18:00",
+        match: /^([01]\d|2[0-3]):([0-5]\d)$/
+    },
+
+    timezone: {
+        type: String,
+        default: "Asia/Kolkata",
+        index: true
     },
 
     /**
@@ -68,7 +81,7 @@ const ShiftSchema = new Schema({
     },
 
     /**
-     * Weekly Off Default = Sunday
+     * Weekly Off
      */
     weeklyOff: {
         type: [String],
@@ -77,7 +90,7 @@ const ShiftSchema = new Schema({
     },
 
     /**
-     * Breaks Default
+     * Breaks
      */
     breaks: {
         type: [BreakSchema],
@@ -89,27 +102,35 @@ const ShiftSchema = new Schema({
     },
 
     /**
-     * Grace Periods (Safe Defaults)
+     * Grace Periods (Validated)
      */
     gracePeriod: {
-        earlyEntry: {   // ✅ ADD THIS
+        earlyEntry: {
             type: Number,
-            default: 30
+            default: 30,
+            min: 0,
+            max: 180
         },
         lateEntry: {
             type: Number,
-            default: 10
+            default: 10,
+            min: 0,
+            max: 60
         },
         afterAbsentMark: {
             type: Number,
-            default: 30
+            default: 30,
+            min: 0,
+            max: 180
         },
         earlyExit: {
             type: Number,
-            default: 10
+            default: 10,
+            min: 0,
+            max: 60
         }
-    }
-    ,
+    },
+
     /**
      * Overtime Rules
      */
@@ -120,16 +141,26 @@ const ShiftSchema = new Schema({
         },
         maxHoursPerDay: {
             type: Number,
-            default: 4
+            default: 4,
+            min: 0,
+            max: 24
         }
     },
 
     /**
-     * Night Shift
+     * Night Shift Handling
      */
     isNightShift: {
         type: Boolean,
         default: false
+    },
+
+    /**
+     * Versioning (CRITICAL for audit)
+     */
+    version: {
+        type: Number,
+        default: 1
     },
 
     /**
@@ -148,16 +179,24 @@ const ShiftSchema = new Schema({
 });
 
 /**
- * Index (multi-tenant safe)
+ * Unique Index (multi-tenant safe)
  */
-ShiftSchema.index({ companyId: 1, shiftCode: 1 }, { unique: true });
+ShiftSchema.index(
+    { companyId: 1, shiftCode: 1 },
+    { unique: true }
+);
 
 /**
- * Auto Apply Defaults Middleware (CRITICAL)
+ * Pre-save Middleware (Hardened)
  */
 ShiftSchema.pre("save", function (next) {
 
-    // Ensure breaks always exist
+    // Normalize shiftCode
+    if (this.shiftCode) {
+        this.shiftCode = this.shiftCode.toUpperCase().trim();
+    }
+
+    // Ensure breaks
     if (!this.breaks || this.breaks.length === 0) {
         this.breaks = [{
             name: "Lunch Break",
@@ -166,25 +205,32 @@ ShiftSchema.pre("save", function (next) {
         }];
     }
 
-    // Ensure weeklyOff exists
+    // Ensure weeklyOff
     if (!this.weeklyOff || this.weeklyOff.length === 0) {
         this.weeklyOff = ["Sunday"];
     }
 
-    // Ensure gracePeriod exists
+    // Ensure gracePeriod
     if (!this.gracePeriod) {
         this.gracePeriod = {
+            earlyEntry: 30,
             lateEntry: 10,
             afterAbsentMark: 30,
             earlyExit: 10
         };
     }
 
+    // Detect night shift automatically
+    const [startHour] = this.startTime.split(":").map(Number);
+    const [endHour] = this.endTime.split(":").map(Number);
+
+    this.isNightShift = endHour < startHour;
+
     next();
 });
 
 /**
- * Query Middleware (Soft Delete Safe)
+ * Soft Delete Query Middleware
  */
 ShiftSchema.pre(/^find/, function (next) {
     this.where({ isDeleted: false });
