@@ -1,5 +1,7 @@
 // helpers/attendanceHelper.js
 
+import logger from "../../utils/logger";
+
 export const normalizeDate = (date) => {
     const d = new Date(date);
     d.setUTCHours(0, 0, 0, 0);
@@ -69,6 +71,7 @@ export const buildShiftWindow = (shift, dateStr) => {
 
 export const validateShiftWindow = (currentTime, window) => {
     if (currentTime < window.allowedStart) {
+    logger.warn(`Punch attempt too early: ${currentTime} < ${window.allowedStart}`);
         throw new Error("TOO_EARLY");
     }
 
