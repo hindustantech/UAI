@@ -15,7 +15,7 @@ import { resolveDateRange } from "../../utils/dateRangeResolver.js";
 import Shift from "../../models/Attandance/Shift.js";
 // utils/dateRange.js
 import {
-    // normalizeDate,
+    normalizeDate,
     validatePunch,
     checkJoiningDate,
     checkWeeklyOff,
@@ -36,11 +36,11 @@ import {
 /**
  * Normalize date to midnight UTC
  */
-const normalizeDate = (date) => {
-    const d = new Date(date);
-    d.setUTCHours(0, 0, 0, 0);
-    return d;
-};
+// const normalizeDate = (date) => {
+//     const d = new Date(date);
+//     d.setUTCHours(0, 0, 0, 0);
+//     return d;
+// };
 
 
 export const markAttendance = async (req, res) => {
