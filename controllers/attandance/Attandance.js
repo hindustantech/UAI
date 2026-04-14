@@ -153,6 +153,7 @@ export const markAttendance = async (req, res) => {
             success: false,
             error: err.message
         });
+        logger.error("Mark Attendance Error:", err);
 
     } finally {
         session.endSession();
