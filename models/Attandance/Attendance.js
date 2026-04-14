@@ -46,7 +46,7 @@ const attendanceSchema = new mongoose.Schema({
         }
     },
 
-    totalworkinghars: {
+    totalWorkingHours: {
         type: Number,
         default: 0
     },
