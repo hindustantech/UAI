@@ -1,6 +1,6 @@
 // helpers/attendanceHelper.js
 
-import logger from "../../utils/logger";
+import logger from "../../utils/logger.js";
 
 export const normalizeDate = (date) => {
     const d = new Date(date);
