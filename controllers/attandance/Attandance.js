@@ -40,8 +40,13 @@ import Shift from "../../models/Attandance/Shift.js";
 //     calculateDistance
 // } from "./attendanceHelper.js";
 
+/* ===========================
+   UTILITY FUNCTIONS
+=========================== */
 
-
+/**
+ * Normalize date to UTC midnight (00:00:00)
+ */
 const normalizeDate = (date) => {
     const d = new Date(date);
     d.setUTCHours(0, 0, 0, 0);
@@ -73,8 +78,9 @@ const getDistance = (lat1, lng1, lat2, lng2) => {
 };
 
 /**
- * Create time string from date and time string
- * dateString: "2024-01-15" | timeString: "09:00"
+ * Create DateTime from date string and time string
+ * @param {string} dateString - "2024-01-15"
+ * @param {string} timeString - "09:00"
  */
 const createDateTime = (dateString, timeString) => {
     if (!dateString || !timeString) return null;
@@ -86,6 +92,10 @@ const createDateTime = (dateString, timeString) => {
 
 /**
  * Apply grace period to determine actual late minutes
+ * @param {Date} actualTime - Actual punch-in time
+ * @param {Date} shiftStartTime - Shift start time
+ * @param {number} gracePeriod - Grace period in minutes
+ * @returns {number} Late minutes after grace period
  */
 const applyGracePeriod = (actualTime, shiftStartTime, gracePeriod) => {
     if (actualTime <= shiftStartTime) return 0;
@@ -94,6 +104,33 @@ const applyGracePeriod = (actualTime, shiftStartTime, gracePeriod) => {
     const effectiveLateMinutes = Math.max(0, lateMinutes - gracePeriod);
 
     return effectiveLateMinutes;
+};
+
+/**
+ * Check if punch is within afterAbsentMark grace period
+ * Returns true if punch is within grace period after shift start
+ * 
+ * @param {Date} punchTime - Actual punch time
+ * @param {Date} shiftStartTime - Shift start time
+ * @param {number} afterAbsentMarkGrace - Grace period in minutes
+ * @returns {object} { isWithinGrace: boolean, minutesAfterShiftStart: number }
+ */
+const checkAfterAbsentMarkGrace = (punchTime, shiftStartTime, afterAbsentMarkGrace) => {
+    // If punch is before shift start, not after
+    if (punchTime <= shiftStartTime) {
+        return {
+            isWithinGrace: true,  // Before/at shift start is always valid
+            minutesAfterShiftStart: 0
+        };
+    }
+
+    const minutesAfter = diffMinutes(shiftStartTime, punchTime);
+    const isWithinGrace = minutesAfter <= afterAbsentMarkGrace;
+
+    return {
+        isWithinGrace,
+        minutesAfterShiftStart: minutesAfter
+    };
 };
 
 /**
@@ -127,6 +164,30 @@ const determineStatus = (payableMinutes, shiftMinutes, isHoliday) => {
     return "present";
 };
 
+/**
+ * Helper to abort transaction and send error response
+ */
+const abortAndRespond = async (session, res, statusCode, errorCode, message, data = null) => {
+    try {
+        await session.abortTransaction();
+    } catch (e) {
+        console.error("Error aborting transaction:", e);
+    } finally {
+        session.endSession();
+    }
+
+    return res.status(statusCode).json({
+        success: false,
+        errorCode,
+        message,
+        ...(data && { data })
+    });
+};
+
+/* ===========================
+   MAIN CONTROLLER
+=========================== */
+
 export const markAttendance = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -152,44 +213,26 @@ export const markAttendance = async (req, res) => {
 
         // Token validation
         if (!token) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(401).json({
-                success: false,
-                errorCode: "TOKEN_MISSING",
-                message: "Attendance token required"
-            });
+            return abortAndRespond(session, res, 401, "TOKEN_MISSING", "Attendance token required");
         }
 
         // Required fields
         if (!date) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-                success: false,
-                errorCode: "DATE_MISSING",
-                message: "Date is required"
-            });
+            return abortAndRespond(session, res, 400, "DATE_MISSING", "Date is required");
         }
 
         if (!geoLocation?.coordinates || geoLocation.coordinates.length !== 2) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-                success: false,
-                errorCode: "GEOLOCATION_INVALID",
-                message: "Valid geoLocation coordinates required"
-            });
+            return abortAndRespond(
+                session, res, 400, "GEOLOCATION_INVALID",
+                "Valid geoLocation coordinates required"
+            );
         }
 
         if (!punchIn && !punchOut) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-                success: false,
-                errorCode: "PUNCH_MISSING",
-                message: "Either punchIn or punchOut is required"
-            });
+            return abortAndRespond(
+                session, res, 400, "PUNCH_MISSING",
+                "Either punchIn or punchOut is required"
+            );
         }
 
         /* ===========================
@@ -200,23 +243,17 @@ export const markAttendance = async (req, res) => {
         try {
             decoded = jwt.verify(token, process.env.JWT_SECRET);
         } catch (err) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(401).json({
-                success: false,
-                errorCode: "TOKEN_INVALID",
-                message: "Invalid or expired token"
-            });
+            return abortAndRespond(
+                session, res, 401, "TOKEN_INVALID",
+                "Invalid or expired token"
+            );
         }
 
         if (!decoded?.userId) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(401).json({
-                success: false,
-                errorCode: "TOKEN_PAYLOAD_INVALID",
-                message: "Invalid token payload"
-            });
+            return abortAndRespond(
+                session, res, 401, "TOKEN_PAYLOAD_INVALID",
+                "Invalid token payload"
+            );
         }
 
         const companyUser = await User
@@ -225,13 +262,10 @@ export const markAttendance = async (req, res) => {
             .session(session);
 
         if (!companyUser) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(401).json({
-                success: false,
-                errorCode: "USER_NOT_FOUND",
-                message: "Company user not found"
-            });
+            return abortAndRespond(
+                session, res, 401, "USER_NOT_FOUND",
+                "Company user not found"
+            );
         }
 
         const companyId = companyUser._id;
@@ -246,34 +280,27 @@ export const markAttendance = async (req, res) => {
         }).session(session);
 
         if (!employee) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(404).json({
-                success: false,
-                errorCode: "EMPLOYEE_NOT_FOUND",
-                message: "Active employee not found"
-            });
+            return abortAndRespond(
+                session, res, 404, "EMPLOYEE_NOT_FOUND",
+                "Active employee not found"
+            );
         }
 
         // Verify employee belongs to company
         if (employee.companyId.toString() !== companyId.toString()) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(403).json({
-                success: false,
-                errorCode: "UNAUTHORIZED_COMPANY",
-                message: "Unauthorized company access"
-            });
+            return abortAndRespond(
+                session, res, 403, "UNAUTHORIZED_COMPANY",
+                "Unauthorized company access"
+            );
         }
 
         /* ===========================
-           4. SHIFT RESOLUTION
+           4. SHIFT RESOLUTION - CRITICAL
         =========================== */
 
         let shiftData = null;
-        let effectiveShiftId = shiftId;
 
-        // If shift ID provided, fetch it
+        // Priority 1: Use provided shift ID
         if (shiftId) {
             shiftData = await Shift.findOne({
                 _id: shiftId,
@@ -282,19 +309,13 @@ export const markAttendance = async (req, res) => {
             }).session(session);
 
             if (!shiftData) {
-                await session.abortTransaction();
-                session.endSession();
-                return res.status(404).json({
-                    success: false,
-                    errorCode: "SHIFT_NOT_FOUND",
-                    message: "Shift not found"
-                });
+                return abortAndRespond(
+                    session, res, 404, "SHIFT_NOT_FOUND",
+                    "Provided shift not found or has been deleted"
+                );
             }
-
-            effectiveShiftId = shiftData._id;
         }
-
-        // If no shift provided, use employee's assigned shift
+        // Priority 2: Use employee's assigned shift
         else if (employee.shift) {
             shiftData = await Shift.findOne({
                 _id: employee.shift,
@@ -303,28 +324,26 @@ export const markAttendance = async (req, res) => {
             }).session(session);
 
             if (!shiftData) {
-                await session.abortTransaction();
-                session.endSession();
-                return res.status(404).json({
-                    success: false,
-                    errorCode: "EMPLOYEE_SHIFT_NOT_FOUND",
-                    message: "Employee's assigned shift not found. Please update shift assignment."
-                });
+                return abortAndRespond(
+                    session, res, 404, "EMPLOYEE_SHIFT_NOT_FOUND",
+                    "Employee's assigned shift not found or has been deleted. Please update shift assignment."
+                );
             }
-
-            effectiveShiftId = shiftData._id;
         }
-
-        // If still no shift, return error
+        // Priority 3: No shift available
         else {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-                success: false,
-                errorCode: "NO_SHIFT_ASSIGNED",
-                message: "No shift assigned to employee. Please assign a shift first."
-            });
+            return abortAndRespond(
+                session, res, 400, "NO_SHIFT_ASSIGNED",
+                "No shift assigned to employee. Please assign a shift first.",
+                {
+                    employeeId: employee._id,
+                    empCode: employee.empCode,
+                    action: "Assign a shift to this employee"
+                }
+            );
         }
+
+        console.log(`✓ Shift Resolved: ${shiftData.shiftName} (${shiftData.shiftCode}) for employee ${employee.empCode}`);
 
         /* ===========================
            5. NORMALIZE DATE & CHECK HOLIDAY
@@ -340,12 +359,15 @@ export const markAttendance = async (req, res) => {
 
         let baseStatus = holiday ? "holiday" : "present";
 
+        if (holiday) {
+            console.log(`✓ Holiday Detected: ${holiday.name || 'Holiday'} on ${dateString}`);
+        }
+
         /* ===========================
            6. GEO-FENCE VALIDATION
         =========================== */
 
         let geoVerified = false;
-        let suspicious = false;
 
         if (
             employee.officeLocation?.coordinates &&
@@ -354,29 +376,25 @@ export const markAttendance = async (req, res) => {
             const [officeLng, officeLat] = employee.officeLocation.coordinates;
             const [userLng, userLat] = geoLocation.coordinates;
 
-            const distance = getDistance(
-                officeLat,
-                officeLng,
-                userLat,
-                userLng
-            );
+            const distance = getDistance(officeLat, officeLng, userLat, userLng);
+            const allowedRadius = employee.officeLocation.radius || 500;
 
-            if (distance > (employee.officeLocation.radius || 500)) {
-                await session.abortTransaction();
-                session.endSession();
-                return res.status(403).json({
-                    success: false,
-                    errorCode: "OUTSIDE_OFFICE_RADIUS",
-                    message: "You are outside the allowed office location range.",
-                    data: {
-                        allowedRadius: employee.officeLocation.radius || 500,
+            if (distance > allowedRadius) {
+                return abortAndRespond(
+                    session, res, 403, "OUTSIDE_OFFICE_RADIUS",
+                    `You are outside the allowed office location range (${Math.round(distance)}m from office).`,
+                    {
+                        allowedRadius,
                         currentDistance: Math.round(distance),
                         unit: "meters"
                     }
-                });
+                );
             }
 
             geoVerified = true;
+            console.log(`✓ Geo-Location Verified: ${Math.round(distance)}m from office`);
+        } else {
+            console.log(`⚠ Geo-Location: No office location set for employee`);
         }
 
         /* ===========================
@@ -390,138 +408,238 @@ export const markAttendance = async (req, res) => {
         }).session(session);
 
         /* ===========================
-           8. PUNCH IN (NEW ATTENDANCE)
+           8. CHECK FOR ABSENT MARKING
+        =========================== */
+
+        const afterAbsentMarkGrace = shiftData.gracePeriod?.afterAbsentMark || 30;
+        const shiftStartTime = createDateTime(dateString, shiftData.startTime);
+
+        console.log(`📍 Shift Start Time: ${shiftStartTime.toISOString()}`);
+        console.log(`⏱️  After Absent Mark Grace: ${afterAbsentMarkGrace} mins`);
+
+        if (punchIn) {
+            const punchInTime = new Date(punchIn);
+            const graceCheck = checkAfterAbsentMarkGrace(punchInTime, shiftStartTime, afterAbsentMarkGrace);
+
+            console.log(`🕐 Punch In Time: ${punchInTime.toISOString()}`);
+            console.log(`⏰ Minutes After Shift Start: ${graceCheck.minutesAfterShiftStart}`);
+            console.log(`✅ Within Grace Period: ${graceCheck.isWithinGrace}`);
+
+            if (!graceCheck.isWithinGrace) {
+                console.log(`❌ ABSENT: Punch-in ${graceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
+            }
+        }
+
+        /* ===========================
+           9. PUNCH IN (NEW ATTENDANCE)
         =========================== */
 
         if (!attendance) {
+            console.log(`→ Creating NEW attendance record for ${dateString}`);
 
             if (!punchIn) {
-                await session.abortTransaction();
-                session.endSession();
-                return res.status(400).json({
-                    success: false,
-                    errorCode: "PUNCH_IN_REQUIRED",
-                    message: "Punch In time is required for new attendance"
-                });
+                return abortAndRespond(
+                    session, res, 400, "PUNCH_IN_REQUIRED",
+                    "Punch In time is required for new attendance record"
+                );
             }
 
             const inTime = new Date(punchIn);
             const outTime = punchOut ? new Date(punchOut) : null;
 
-            const shiftStartTime = createDateTime(dateString, shiftData.startTime);
             const shiftEndTime = createDateTime(dateString, shiftData.endTime);
             const shiftDurationMinutes = diffMinutes(shiftStartTime, shiftEndTime);
 
-            /* Calculate late minutes with grace period */
+            /* ===== GRACE PERIOD HANDLING ===== */
             const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
             const lateMinutes = applyGracePeriod(inTime, shiftStartTime, gracePeriodLate);
 
-            /* Calculate total work time */
+            console.log(`  Punch In: ${inTime.toISOString()}`);
+            console.log(`  Shift Start: ${shiftStartTime.toISOString()}`);
+            console.log(`  Grace Period (Late Entry): ${gracePeriodLate} mins`);
+            console.log(`  Late Minutes (after grace): ${lateMinutes}`);
+
+            /* ===== CALCULATE WORK TIME ===== */
             let totalMinutes = 0;
             let overtimeMinutes = 0;
             let earlyLeaveMinutes = 0;
+            let isSuspicious = false;
+            let finalStatus = baseStatus;
 
-            if (outTime) {
-                totalMinutes = diffMinutes(inTime, outTime);
+            // Check for absent marking
+            const absentGraceCheck = checkAfterAbsentMarkGrace(inTime, shiftStartTime, afterAbsentMarkGrace);
 
-                // Deduct breaks
-                const payableMinutes = calculatePayableMinutes(totalMinutes, breaks);
-                totalMinutes = payableMinutes;
+            if (!absentGraceCheck.isWithinGrace) {
+                // Punch-in is AFTER the grace period → Mark as ABSENT
+                console.log(`❌ ABSENT MARKING: Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
+                finalStatus = "absent";
 
-                // Calculate overtime
-                if (outTime > shiftEndTime) {
-                    overtimeMinutes = Math.max(
-                        0,
-                        diffMinutes(shiftEndTime, outTime) -
-                        (shiftData.gracePeriod?.earlyExit || 10)
-                    );
-                }
-
-                // Calculate early leave
-                if (outTime < shiftEndTime) {
-                    earlyLeaveMinutes = diffMinutes(outTime, shiftEndTime);
-                }
+                // Even if punch-out exists, mark as absent if punch-in was too late
+                attendance = new Attendance({
+                    companyId,
+                    employeeId: employee._id,
+                    date: attendanceDate,
+                    punchIn: inTime,
+                    punchOut: outTime,
+                    shift: {
+                        name: shiftData.shiftName,
+                        startTime: shiftData.startTime,
+                        endTime: shiftData.endTime,
+                        shiftMinutes: shiftDurationMinutes
+                    },
+                    breaks: breaks || [],
+                    status: "absent",
+                    geoLocation: {
+                        type: "Point",
+                        coordinates: geoLocation.coordinates,
+                        accuracy: geoLocation.accuracy,
+                        verified: geoVerified,
+                        source: geoLocation.source || "gps"
+                    },
+                    deviceInfo,
+                    workSummary: {
+                        totalMinutes: 0,
+                        payableMinutes: 0,
+                        overtimeMinutes: 0,
+                        lateMinutes: 0,
+                        earlyLeaveMinutes: 0
+                    },
+                    lateByMinutes: 0,
+                    totalWorkingHours: 0,
+                    remarks: remarks || `Marked absent - Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift start (grace: ${afterAbsentMarkGrace}mins)`,
+                    isSuspicious: false,
+                    punchHistory: outTime
+                        ? [
+                            {
+                                punchOut: outTime,
+                                geoLocation: {
+                                    type: "Point",
+                                    coordinates: geoLocation.coordinates,
+                                    accuracy: geoLocation.accuracy,
+                                    verified: geoVerified,
+                                    source: geoLocation.source || "gps"
+                                },
+                                deviceInfo,
+                                source: deviceInfo?.source || "mobile"
+                            }
+                        ]
+                        : [],
+                    lastPunchAt: outTime || inTime,
+                    approvalStatus: "pending"
+                });
             } else {
-                // Punch in only, no punch out yet
-                suspicious = true;
-            }
+                // Punch-in is WITHIN grace period → Calculate normal attendance
 
-            const payableMinutes = calculatePayableMinutes(totalMinutes, breaks);
-            const finalStatus = determineStatus(
-                payableMinutes,
-                shiftDurationMinutes,
-                baseStatus === "holiday"
-            );
+                if (outTime) {
+                    totalMinutes = diffMinutes(inTime, outTime);
 
-            /* Create new attendance record */
-            attendance = new Attendance({
-                companyId,
-                employeeId: employee._id,
-                date: attendanceDate,
-                punchIn: inTime,
-                punchOut: outTime,
-                shift: {
-                    name: shiftData.shiftName,
-                    startTime: shiftData.startTime,
-                    endTime: shiftData.endTime,
-                    shiftMinutes: shiftDurationMinutes
-                },
-                breaks: breaks || [],
-                status: finalStatus,
-                geoLocation: {
-                    type: "Point",
-                    coordinates: geoLocation.coordinates,
-                    accuracy: geoLocation.accuracy,
-                    verified: geoVerified,
-                    source: geoLocation.source || "gps"
-                },
-                deviceInfo,
-                workSummary: {
-                    totalMinutes: Math.max(0, totalMinutes),
-                    payableMinutes: Math.max(0, payableMinutes),
-                    overtimeMinutes: Math.max(0, overtimeMinutes),
-                    lateMinutes: Math.max(0, lateMinutes),
-                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
-                },
-                lateByMinutes: Math.max(0, lateMinutes),
-                totalworkinghars: Math.max(0, totalMinutes / 60),
-                remarks,
-                isSuspicious: suspicious,
-                punchHistory: outTime
-                    ? [
-                        {
-                            punchOut: outTime,
-                            geoLocation: {
-                                type: "Point",
-                                coordinates: geoLocation.coordinates,
-                                accuracy: geoLocation.accuracy,
-                                verified: geoVerified,
-                                source: geoLocation.source || "gps"
-                            },
-                            deviceInfo,
-                            source: deviceInfo?.source || "mobile"
+                    // Deduct breaks
+                    const payableMinutes = calculatePayableMinutes(totalMinutes, breaks);
+
+                    // Calculate overtime
+                    if (outTime > shiftEndTime) {
+                        const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
+                        const rawOvertime = diffMinutes(shiftEndTime, outTime);
+                        overtimeMinutes = Math.max(0, rawOvertime - earlyExitGrace);
+
+                        console.log(`  Overtime: ${rawOvertime}mins - ${earlyExitGrace}mins grace = ${overtimeMinutes}mins`);
+
+                        // Check overtime limits
+                        const maxOvertimeMinutes = (shiftData.overtime?.maxHoursPerDay || 4) * 60;
+                        if (overtimeMinutes > maxOvertimeMinutes && !shiftData.overtime?.allowed) {
+                            isSuspicious = true;
+                            console.log(`  ⚠ Overtime suspicious: ${overtimeMinutes}mins exceeds ${maxOvertimeMinutes}mins`);
                         }
-                    ]
-                    : [],
-                lastPunchAt: outTime || inTime,
-                approvalStatus: "pending"
-            });
+                    }
+
+                    // Calculate early leave
+                    if (outTime < shiftEndTime) {
+                        earlyLeaveMinutes = diffMinutes(outTime, shiftEndTime);
+                        console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
+                    }
+                } else {
+                    // Only punch-in, no punch-out yet
+                    isSuspicious = true;
+                    console.log(`  ⚠ Incomplete: Punch-out not provided`);
+                }
+
+                const finalPayableMinutes = calculatePayableMinutes(totalMinutes, breaks);
+                finalStatus = determineStatus(
+                    finalPayableMinutes,
+                    shiftDurationMinutes,
+                    baseStatus === "holiday"
+                );
+
+                console.log(`  Final Status: ${finalStatus}`);
+
+                /* Create new attendance record */
+                attendance = new Attendance({
+                    companyId,
+                    employeeId: employee._id,
+                    date: attendanceDate,
+                    punchIn: inTime,
+                    punchOut: outTime,
+                    shift: {
+                        name: shiftData.shiftName,
+                        startTime: shiftData.startTime,
+                        endTime: shiftData.endTime,
+                        shiftMinutes: shiftDurationMinutes
+                    },
+                    breaks: breaks || [],
+                    status: finalStatus,
+                    geoLocation: {
+                        type: "Point",
+                        coordinates: geoLocation.coordinates,
+                        accuracy: geoLocation.accuracy,
+                        verified: geoVerified,
+                        source: geoLocation.source || "gps"
+                    },
+                    deviceInfo,
+                    workSummary: {
+                        totalMinutes: Math.max(0, totalMinutes),
+                        payableMinutes: Math.max(0, finalPayableMinutes),
+                        overtimeMinutes: Math.max(0, overtimeMinutes),
+                        lateMinutes: Math.max(0, lateMinutes),
+                        earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                    },
+                    lateByMinutes: Math.max(0, lateMinutes),
+                    totalWorkingHours: Math.max(0, totalMinutes / 60),
+                    remarks,
+                    isSuspicious,
+                    punchHistory: outTime
+                        ? [
+                            {
+                                punchOut: outTime,
+                                geoLocation: {
+                                    type: "Point",
+                                    coordinates: geoLocation.coordinates,
+                                    accuracy: geoLocation.accuracy,
+                                    verified: geoVerified,
+                                    source: geoLocation.source || "gps"
+                                },
+                                deviceInfo,
+                                source: deviceInfo?.source || "mobile"
+                            }
+                        ]
+                        : [],
+                    lastPunchAt: outTime || inTime,
+                    approvalStatus: "pending"
+                });
+            }
         }
 
         /* ===========================
-           9. PUNCH OUT (EXISTING ATTENDANCE)
+           10. PUNCH OUT (EXISTING ATTENDANCE)
         =========================== */
 
         else {
+            console.log(`→ Updating EXISTING attendance record for ${dateString}`);
 
             if (!punchOut) {
-                await session.abortTransaction();
-                session.endSession();
-                return res.status(400).json({
-                    success: false,
-                    errorCode: "PUNCH_OUT_REQUIRED",
-                    message: "Punch Out time is required"
-                });
+                return abortAndRespond(
+                    session, res, 400, "PUNCH_OUT_REQUIRED",
+                    "Punch Out time is required"
+                );
             }
 
             const outTime = new Date(punchOut);
@@ -531,17 +649,15 @@ export const markAttendance = async (req, res) => {
             if (lastPunch) {
                 const gap = diffMinutes(new Date(lastPunch.punchOut), outTime);
                 if (gap < 3) {
-                    await session.abortTransaction();
-                    session.endSession();
-                    return res.status(429).json({
-                        success: false,
-                        errorCode: "PUNCH_TOO_FREQUENT",
-                        message: "Punch registered too soon. Please wait before trying again.",
-                        data: {
+                    return abortAndRespond(
+                        session, res, 429, "PUNCH_TOO_FREQUENT",
+                        "Punch registered too soon. Please wait 3 minutes before trying again.",
+                        {
                             lastPunchTime: lastPunch.punchOut,
-                            minimumGapMinutes: 3
+                            minimumGapMinutes: 3,
+                            currentGapMinutes: gap
                         }
-                    });
+                    );
                 }
             }
 
@@ -564,10 +680,6 @@ export const markAttendance = async (req, res) => {
 
             /* Recalculate all metrics */
             const inTime = new Date(attendance.punchIn);
-            const shiftStartTime = createDateTime(
-                dateString,
-                attendance.shift.startTime
-            );
             const shiftEndTime = createDateTime(
                 dateString,
                 attendance.shift.endTime
@@ -575,73 +687,94 @@ export const markAttendance = async (req, res) => {
             const shiftDurationMinutes = diffMinutes(shiftStartTime, shiftEndTime);
 
             let totalMinutes = diffMinutes(inTime, outTime);
-            const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
+            let isSuspicious = false;
 
-            /* Calculate late with grace period */
-            const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
-            const lateMinutes = applyGracePeriod(inTime, shiftStartTime, gracePeriodLate);
+            console.log(`  Punch Out: ${outTime.toISOString()}`);
+            console.log(`  Total Work Time: ${totalMinutes} mins`);
 
-            /* Calculate overtime */
-            let overtimeMinutes = 0;
-            if (outTime > shiftEndTime) {
-                overtimeMinutes = Math.max(
-                    0,
-                    diffMinutes(shiftEndTime, outTime) -
-                    (shiftData.gracePeriod?.earlyExit || 10)
+            /* ===== CHECK IF ATTENDANCE IS MARKED AS ABSENT ===== */
+            if (attendance.status === "absent") {
+                console.log(`  ⚠️  Attendance already marked as ABSENT`);
+                console.log(`  Punch-in was outside afterAbsentMark grace period`);
+                // Status remains "absent" even though punch-out is provided
+            } else {
+                /* ===== GRACE PERIOD FOR LATE ENTRY ===== */
+                const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
+                const lateMinutes = applyGracePeriod(inTime, shiftStartTime, gracePeriodLate);
+
+                console.log(`  Grace Period (Late Entry): ${gracePeriodLate} mins`);
+                console.log(`  Late Minutes (after grace): ${lateMinutes}`);
+
+                /* Calculate overtime with early exit grace */
+                let overtimeMinutes = 0;
+                if (outTime > shiftEndTime) {
+                    const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
+                    const rawOvertime = diffMinutes(shiftEndTime, outTime);
+                    overtimeMinutes = Math.max(0, rawOvertime - earlyExitGrace);
+
+                    console.log(`  Overtime: ${rawOvertime}mins - ${earlyExitGrace}mins grace = ${overtimeMinutes}mins`);
+
+                    // Check overtime limit
+                    const maxOvertimeMinutes = (shiftData.overtime?.maxHoursPerDay || 4) * 60;
+                    if (overtimeMinutes > maxOvertimeMinutes && !shiftData.overtime?.allowed) {
+                        isSuspicious = true;
+                        console.log(`  ⚠ Overtime suspicious: ${overtimeMinutes}mins exceeds ${maxOvertimeMinutes}mins`);
+                    }
+                }
+
+                /* Calculate early leave */
+                let earlyLeaveMinutes = 0;
+                if (outTime < shiftEndTime) {
+                    earlyLeaveMinutes = diffMinutes(outTime, shiftEndTime);
+                    console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
+                }
+
+                /* Calculate payable minutes */
+                const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
+                const finalStatus = determineStatus(
+                    payableMinutes,
+                    shiftDurationMinutes,
+                    attendance.status === "holiday"
                 );
 
-                // Check overtime limit
-                const maxOvertimeMinutes =
-                    (shiftData.overtime?.maxHoursPerDay || 4) * 60;
-                if (overtimeMinutes > maxOvertimeMinutes && !shiftData.overtime?.allowed) {
-                    suspicious = true;
+                console.log(`  Final Status: ${finalStatus}`);
+
+                /* Update attendance */
+                attendance.punchOut = outTime;
+                attendance.status = finalStatus;
+                attendance.workSummary = {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: Math.max(0, payableMinutes),
+                    overtimeMinutes: Math.max(0, overtimeMinutes),
+                    lateMinutes: Math.max(0, lateMinutes),
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                };
+                attendance.lateByMinutes = Math.max(0, lateMinutes);
+                attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+
+                /* Device fraud detection */
+                if (
+                    attendance.deviceInfo?.deviceId &&
+                    deviceInfo?.deviceId &&
+                    attendance.deviceInfo.deviceId !== deviceInfo.deviceId
+                ) {
+                    isSuspicious = true;
+                    console.log(`  ⚠ Device change detected: ${attendance.deviceInfo.deviceId} → ${deviceInfo.deviceId}`);
                 }
+
+                attendance.isSuspicious = isSuspicious;
             }
-
-            /* Calculate early leave */
-            let earlyLeaveMinutes = 0;
-            if (outTime < shiftEndTime) {
-                earlyLeaveMinutes = diffMinutes(outTime, shiftEndTime);
-            }
-
-            const finalStatus = determineStatus(
-                payableMinutes,
-                shiftDurationMinutes,
-                baseStatus === "holiday"
-            );
-
-            /* Update attendance */
-            attendance.punchOut = outTime;
-            attendance.status = finalStatus;
-            attendance.workSummary = {
-                totalMinutes: Math.max(0, totalMinutes),
-                payableMinutes: Math.max(0, payableMinutes),
-                overtimeMinutes: Math.max(0, overtimeMinutes),
-                lateMinutes: Math.max(0, lateMinutes),
-                earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
-            };
-            attendance.lateByMinutes = Math.max(0, lateMinutes);
-            attendance.totalworkinghars = Math.max(0, totalMinutes / 60);
-
-            /* Device fraud detection */
-            if (
-                attendance.deviceInfo?.deviceId &&
-                deviceInfo?.deviceId &&
-                attendance.deviceInfo.deviceId !== deviceInfo.deviceId
-            ) {
-                suspicious = true;
-            }
-
-            attendance.isSuspicious = suspicious;
         }
 
         /* ===========================
-           10. SAVE & COMMIT TRANSACTION
+           11. SAVE & COMMIT TRANSACTION
         =========================== */
 
         await attendance.save({ session });
         await session.commitTransaction();
         session.endSession();
+
+        console.log(`✓ Attendance marked successfully for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
 
         return res.status(201).json({
             success: true,
@@ -649,22 +782,36 @@ export const markAttendance = async (req, res) => {
             data: {
                 attendanceId: attendance._id,
                 employeeId: employee._id,
+                employeeCode: employee.empCode,
+                employeeName: employee.user_name,
                 date: attendanceDate,
                 status: attendance.status,
                 punchIn: attendance.punchIn,
                 punchOut: attendance.punchOut,
+                shift: {
+                    name: attendance.shift.name,
+                    startTime: attendance.shift.startTime,
+                    endTime: attendance.shift.endTime
+                },
                 workSummary: attendance.workSummary,
                 geoVerified: attendance.geoLocation?.verified,
-                isSuspicious: attendance.isSuspicious
+                isSuspicious: attendance.isSuspicious,
+                approvalStatus: attendance.approvalStatus,
+                remarks: attendance.remarks
             }
         });
 
     } catch (error) {
 
-        await session.abortTransaction();
-        session.endSession();
+        try {
+            await session.abortTransaction();
+        } catch (e) {
+            console.error("Error aborting transaction:", e);
+        } finally {
+            session.endSession();
+        }
 
-        console.error("Attendance Error:", error);
+        console.error("❌ Attendance Error:", error);
 
         return res.status(500).json({
             success: false,
@@ -674,7 +821,6 @@ export const markAttendance = async (req, res) => {
         });
     }
 };
-
 
 // ─── DTO helpers (defined once, reused) ──────────────────────────────────────
 
