@@ -78,15 +78,15 @@ const normalizeDateIST = (date) => {
 const createDateTimeIST = (dateString, timeString) => {
     if (!dateString || !timeString) return null;
     const [hours, minutes] = timeString.split(":").map(Number);
-    
+
     // Create date in IST
     const istDateStr = `${dateString}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
     const istDate = new Date(istDateStr);
-    
+
     // Convert to UTC for storage
     const istOffset = 5.5 * 60 * 60 * 1000;
     const utcDate = new Date(istDate.getTime() - istOffset);
-    
+
     return utcDate;
 };
 
@@ -200,7 +200,7 @@ const checkEarlyPunch = (punchTime, shiftStartTime, earlyPunchLimit = 60) => {
     return {
         isValid,
         minutesBeforeShift: minutesBefore,
-        message: isValid 
+        message: isValid
             ? `Early punch-in allowed (${minutesBefore} minutes before shift start)`
             : `Punch-in too early (${minutesBefore} minutes before shift start). Maximum allowed: ${earlyPunchLimit} minutes`
     };
@@ -423,12 +423,12 @@ export const markAttendance = async (req, res) => {
         =========================== */
 
         // Convert input date to IST midnight for consistent comparison
-        // const date = normalizeDateIST();
-        const dateString = date.toISOString().split("T")[0];
+        const attendanceDateIST = date;         
+        const dateString = attendanceDateIST.toISOString().split("T")[0];
 
         const holiday = await Holiday.findOne({
             companyId,
-            date:date
+            date: attendanceDateIST
         }).session(session);
 
         let baseStatus = holiday ? "holiday" : "present";
@@ -478,7 +478,7 @@ export const markAttendance = async (req, res) => {
         let attendance = await Attendance.findOne({
             companyId,
             employeeId: employee._id,
-            date: date
+            date: attendanceDateIST
         }).session(session);
 
         /* ===========================
@@ -521,11 +521,11 @@ export const markAttendance = async (req, res) => {
 
         if (punchInTimeIST) {
             const earlyPunchCheck = checkEarlyPunch(punchInTimeIST, shiftStartTimeIST, earlyPunchLimit);
-            
+
             console.log(`🔍 Early Punch Check:`);
             console.log(`   Minutes before shift: ${earlyPunchCheck.minutesBeforeShift}`);
             console.log(`   Is valid: ${earlyPunchCheck.isValid}`);
-            
+
             if (!earlyPunchCheck.isValid) {
                 return abortAndRespond(
                     session, res, 400, "EARLY_PUNCH_NOT_ALLOWED",
@@ -604,7 +604,7 @@ export const markAttendance = async (req, res) => {
                 attendance = new Attendance({
                     companyId,
                     employeeId: employee._id,
-                    date: date,
+                    date: attendanceDateIST,
                     punchIn: inTimeUTC,
                     punchOut: outTimeUTC,
                     shift: {
@@ -702,7 +702,7 @@ export const markAttendance = async (req, res) => {
                 attendance = new Attendance({
                     companyId,
                     employeeId: employee._id,
-                    date: date,
+                    date: attendanceDateIST,
                     punchIn: inTimeUTC,
                     punchOut: outTimeUTC,
                     shift: {
@@ -808,7 +808,7 @@ export const markAttendance = async (req, res) => {
             /* Recalculate all metrics using IST times */
             const inTimeUTC = new Date(attendance.punchIn);
             const inTimeIST = getPunchTimeIST(inTimeUTC);
-            
+
             let totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
             let isSuspicious = false;
 
@@ -911,7 +911,7 @@ export const markAttendance = async (req, res) => {
                 employeeId: employee._id,
                 employeeCode: employee.empCode,
                 employeeName: employee.user_name,
-                date: date,
+                date: attendanceDateIST,
                 status: attendance.status,
                 punchIn: punchInIST,
                 punchOut: punchOutIST,
