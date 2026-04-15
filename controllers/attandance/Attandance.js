@@ -423,7 +423,7 @@ export const markAttendance = async (req, res) => {
         =========================== */
 
         // Convert input date to IST midnight for consistent comparison
-        const attendanceDateIST = date;         
+        const attendanceDateIST = new Date(date);
         const dateString = attendanceDateIST.toISOString().split("T")[0];
 
         const holiday = await Holiday.findOne({
