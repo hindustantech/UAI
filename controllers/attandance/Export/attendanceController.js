@@ -826,7 +826,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
 
             let present = 0, absent = 0, leave = 0, weekOff = 0, halfDay = 0;
             let holiday = 0, late = 0, earlyExit = 0;
-            let totalWorkMin = 0, totalOTMin = 0, totalLateMin = 0, totalBreakMin = 0;
+            let totalWorkMin = 0, totalOTMin = 0, totalLateMin = 0;
 
             for (const date of dateRange) {
                 const dateKey = date.toISOString().split("T")[0];
@@ -857,11 +857,6 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                             totalWorkMin += att.workSummary?.totalMinutes || 0;
                             totalOTMin += att.workSummary?.overtimeMinutes || 0;
                             totalLateMin += att.workSummary?.lateMinutes || 0;
-                            // sum breaks
-                            (att.breaks || []).forEach((b) => {
-                                if (b.start && b.end)
-                                    totalBreakMin += Math.round((new Date(b.end) - new Date(b.start)) / 60000);
-                            });
                         }
                 }
             }
@@ -870,18 +865,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const attPct = presentableDays > 0 ? ((present / presentableDays) * 100) : 0;
             const avgHrs = present > 0 ? (totalWorkMin / present / 60) : 0;
 
-            // Salary calc inputs
-            const perDay = emp.salaryStructure?.perDay || 0;
-            const perHour = emp.salaryStructure?.perHour || 0;
-            const otRate = emp.salaryStructure?.overtimeRate || (perHour * 1.5);
-
-            // Payable days = present + halfDay * 0.5
-            const payableDays = present - halfDay + halfDay * 0.5;
-            const earnedSalary = payableDays * perDay;
-            const overtimeEarning = (totalOTMin / 60) * otRate;
-            const deductionAbsent = absent * perDay;
-            const deductionLate = totalLateMin > 0 ? ((totalLateMin / 60) * perHour) : 0;
-            const netPayable = earnedSalary + overtimeEarning - deductionAbsent - deductionLate;
+            // Convert late minutes to hours
+            const totalLateHrs = totalLateMin / 60;
 
             return {
                 empCode: emp.empCode || "—",
@@ -904,19 +889,17 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 totalWorkHrs: parseFloat((totalWorkMin / 60).toFixed(2)),
                 avgWorkHrs: parseFloat(avgHrs.toFixed(2)),
                 totalOTHrs: parseFloat((totalOTMin / 60).toFixed(2)),
-                totalLateMin,
-                totalBreakMin,
+                totalLateHrs: parseFloat(totalLateHrs.toFixed(2)),
                 attPct: parseFloat(attPct.toFixed(2)),
 
-                perDay,
-                perHour,
-                otRate,
-                payableDays: parseFloat(payableDays.toFixed(2)),
-                earnedSalary: parseFloat(earnedSalary.toFixed(2)),
-                otEarning: parseFloat(overtimeEarning.toFixed(2)),
-                deductAbsent: parseFloat(deductionAbsent.toFixed(2)),
-                deductLate: parseFloat(deductionLate.toFixed(2)),
-                netPayable: parseFloat(netPayable.toFixed(2)),
+                // Salary structure fields
+                basic: emp.salaryStructure?.basic || 0,
+                hra: emp.salaryStructure?.hra || 0,
+                da: emp.salaryStructure?.da || 0,
+                bonus: emp.salaryStructure?.bonus || 0,
+                perDay: emp.salaryStructure?.perDay || 0,
+                perHour: emp.salaryStructure?.perHour || 0,
+                overtimeRate: emp.salaryStructure?.overtimeRate || 0,
             };
         });
 
@@ -927,17 +910,17 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         wb.creator = "HR System";
 
         /* ──────────────────────────────
-           SHEET 1 — ATTENDANCE SUMMARY
+           SHEET 1 — ATTENDANCE SUMMARY (with Salary Structure)
         ────────────────────────────── */
         const wsSummary = wb.addWorksheet("Attendance Summary", {
             views: [{ state: "frozen", ySplit: 3 }],
         });
 
         // Title row
-        const sCols = 20;
+        const sCols = 25; // Increased columns count
         wsSummary.mergeCells(1, 1, 1, sCols);
         const sTitleCell = wsSummary.getCell(1, 1);
-        sTitleCell.value = `ATTENDANCE SUMMARY REPORT  |  ${startDate}  to  ${endDate}`;
+        sTitleCell.value = `ATTENDANCE SUMMARY REPORT WITH SALARY STRUCTURE  |  ${startDate}  to  ${endDate}`;
         sTitleCell.font = { name: "Arial", bold: true, size: 14, color: { argb: "FFFFFFFF" } };
         sTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
         sTitleCell.alignment = { horizontal: "center", vertical: "middle" };
@@ -948,9 +931,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         const groups = [
             { label: "EMPLOYEE INFO", start: 1, span: 5 },
             { label: "DATE BREAKDOWN", start: 6, span: 7 },
-            { label: "HOURS", start: 13, span: 5 },
-            { label: "ATTENDANCE", start: 18, span: 2 },
-            { label: "EXTRA", start: 20, span: 1 },
+            { label: "HOURS", start: 13, span: 4 },
+            { label: "ATTENDANCE", start: 17, span: 2 },
+            { label: "SALARY STRUCTURE (₹)", start: 19, span: 7 },
         ];
         groups.forEach(({ label, start, span }) => {
             if (span > 1) wsSummary.mergeCells(2, start, 2, start + span - 1);
@@ -962,9 +945,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         const sHeaders = [
             "#", "Emp Code", "Emp Name", "Department", "Designation",
             "Total Days", "Week Off", "Holiday", "Present", "Half Day", "Absent", "Leave", "Late Days",
-            "Total Hrs", "Avg Hrs/Day", "OT Hrs", "Late (min)", "Break (min)",
+            "Total Hrs", "Avg Hrs/Day", "OT Hrs", "Late (Hrs)",
             "Att %", "Att Grade",
-            "Remarks",
+            "Basic", "HRA", "DA", "Bonus", "Per Day", "Per Hour", "OT Rate"
         ];
         const sHeaderRow = wsSummary.getRow(3);
         sHeaders.forEach((h, i) => {
@@ -975,9 +958,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         wsSummary.columns = [
             { width: 5 }, { width: 12 }, { width: 22 }, { width: 18 }, { width: 18 },
             { width: 11 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 },
-            { width: 11 }, { width: 13 }, { width: 10 }, { width: 11 }, { width: 12 },
+            { width: 11 }, { width: 13 }, { width: 10 }, { width: 11 },
             { width: 10 }, { width: 12 },
-            { width: 20 },
+            { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }
         ];
 
         summaryRows.forEach((r, idx) => {
@@ -993,9 +976,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const vals = [
                 idx + 1, r.empCode, r.empName, r.department, r.designation,
                 r.totalDays, r.weekOff, r.holiday, r.present, r.halfDay, r.absent, r.leave, r.late,
-                r.totalWorkHrs, r.avgWorkHrs, r.totalOTHrs, r.totalLateMin, r.totalBreakMin,
+                r.totalWorkHrs, r.avgWorkHrs, r.totalOTHrs, r.totalLateHrs,
                 r.attPct, grade,
-                "",
+                r.basic, r.hra, r.da, r.bonus, r.perDay, r.perHour, r.overtimeRate
             ];
             vals.forEach((v, i) => {
                 const c = row.getCell(i + 1);
@@ -1004,19 +987,19 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     bg,
                     bold: i <= 1,
                     align: i === 2 || i === 3 || i === 4 ? "left" : "center",
-                    numFmt: isNum && i >= 13 && i <= 17 ? "0.00" : undefined,
+                    numFmt: isNum && (i >= 13 && i <= 16 || i >= 19) ? "0.00" : undefined,
                 });
             });
 
             // Att % cell
-            const attCell = row.getCell(19);
+            const attCell = row.getCell(18);
             attCell.value = r.attPct / 100;
             attCell.numFmt = "0.0%";
             attCell.font = { name: "Arial", size: 9, bold: true };
             attCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
 
             // Grade cell
-            const gradeCell = row.getCell(20);
+            const gradeCell = row.getCell(19);
             gradeCell.font = { name: "Arial", size: 9, bold: true, color: { argb: gradeColor } };
             gradeCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: gradeBg } };
 
@@ -1025,158 +1008,69 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 row.getCell(11).font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
                 row.getCell(11).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
             }
+
+            // Format salary columns with currency
+            for (let col = 20; col <= 26; col++) {
+                const cell = row.getCell(col);
+                if (cell.value && typeof cell.value === 'number') {
+                    cell.numFmt = "#,##0.00";
+                }
+            }
         });
 
         // Totals row
         const totRow = wsSummary.addRow([]);
         totRow.height = 18;
         const lastDataRow = 3 + summaryRows.length;
-        ["Total / Avg", "", "", "", "",
-            `=SUM(F4:F${lastDataRow})`, `=SUM(G4:G${lastDataRow})`, `=SUM(H4:H${lastDataRow})`,
-            `=SUM(I4:I${lastDataRow})`, `=SUM(J4:J${lastDataRow})`, `=SUM(K4:K${lastDataRow})`,
-            `=SUM(L4:L${lastDataRow})`, `=SUM(M4:M${lastDataRow})`,
-            `=AVERAGE(N4:N${lastDataRow})`, `=AVERAGE(O4:O${lastDataRow})`,
-            `=SUM(P4:P${lastDataRow})`, `=SUM(Q4:Q${lastDataRow})`, `=SUM(R4:R${lastDataRow})`,
-            `=AVERAGE(S4:S${lastDataRow})`, "", ""].forEach((v, i) => {
-                const c = totRow.getCell(i + 1);
-                c.value = v;
-                c.font = { name: "Arial", size: 9, bold: true };
-                c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
-                c.alignment = { horizontal: "center", vertical: "middle" };
-                if (i === 18) c.numFmt = "0.0%";
-            });
+        
+        // Create totals array with 25 columns
+        const totalsArray = [];
+        for (let i = 1; i <= 26; i++) {
+            if (i === 1) totalsArray.push("Total / Avg");
+            else if (i <= 5) totalsArray.push("");
+            else if (i === 6) totalsArray.push(`=SUM(F4:F${lastDataRow})`);
+            else if (i === 7) totalsArray.push(`=SUM(G4:G${lastDataRow})`);
+            else if (i === 8) totalsArray.push(`=SUM(H4:H${lastDataRow})`);
+            else if (i === 9) totalsArray.push(`=SUM(I4:I${lastDataRow})`);
+            else if (i === 10) totalsArray.push(`=SUM(J4:J${lastDataRow})`);
+            else if (i === 11) totalsArray.push(`=SUM(K4:K${lastDataRow})`);
+            else if (i === 12) totalsArray.push(`=SUM(L4:L${lastDataRow})`);
+            else if (i === 13) totalsArray.push(`=SUM(M4:M${lastDataRow})`);
+            else if (i === 14) totalsArray.push(`=AVERAGE(N4:N${lastDataRow})`);
+            else if (i === 15) totalsArray.push(`=AVERAGE(O4:O${lastDataRow})`);
+            else if (i === 16) totalsArray.push(`=SUM(P4:P${lastDataRow})`);
+            else if (i === 17) totalsArray.push(`=AVERAGE(Q4:Q${lastDataRow})`);
+            else if (i === 18) totalsArray.push(`=AVERAGE(R4:R${lastDataRow})`);
+            else if (i === 19) totalsArray.push("");
+            else if (i === 20) totalsArray.push(`=SUM(T4:T${lastDataRow})`);
+            else if (i === 21) totalsArray.push(`=SUM(U4:U${lastDataRow})`);
+            else if (i === 22) totalsArray.push(`=SUM(V4:V${lastDataRow})`);
+            else if (i === 23) totalsArray.push(`=SUM(W4:W${lastDataRow})`);
+            else if (i === 24) totalsArray.push(`=AVERAGE(X4:X${lastDataRow})`);
+            else if (i === 25) totalsArray.push(`=AVERAGE(Y4:Y${lastDataRow})`);
+            else if (i === 26) totalsArray.push(`=AVERAGE(Z4:Z${lastDataRow})`);
+            else totalsArray.push("");
+        }
+        
+        totalsArray.forEach((v, i) => {
+            const c = totRow.getCell(i + 1);
+            c.value = v;
+            c.font = { name: "Arial", size: 9, bold: true };
+            c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
+            c.alignment = { horizontal: "center", vertical: "middle" };
+            if (i === 17) c.numFmt = "0.0%";
+            if (i >= 19 && i <= 25) c.numFmt = "#,##0.00";
+        });
 
         wsSummary.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: sCols } };
 
         /* ──────────────────────────────
-           SHEET 2 — SALARY PIVOT
-        ────────────────────────────── */
-        const wsSalary = wb.addWorksheet("Salary Pivot");
-        wsSalary.views = [{ state: "frozen", ySplit: 3 }];
-
-        wsSalary.mergeCells(1, 1, 1, 16);
-        const salTitleCell = wsSalary.getCell(1, 1);
-        salTitleCell.value = `SALARY CALCULATION PIVOT  |  ${startDate}  to  ${endDate}`;
-        salTitleCell.font = { name: "Arial", bold: true, size: 14, color: { argb: "FFFFFFFF" } };
-        salTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
-        salTitleCell.alignment = { horizontal: "center", vertical: "middle" };
-        wsSalary.getRow(1).height = 28;
-
-        // Group header
-        const salGrpRow = wsSalary.getRow(2);
-        [
-            { label: "EMPLOYEE", start: 1, span: 4 },
-            { label: "ATTENDANCE INPUT", start: 5, span: 5 },
-            { label: "RATE CARD", start: 10, span: 3 },
-            { label: "EARNINGS", start: 13, span: 2 },
-            { label: "DEDUCTIONS", start: 15, span: 2 },
-            { label: "NET", start: 17, span: 1 },
-        ].forEach(({ label, start, span }) => {
-            if (span > 1) wsSalary.mergeCells(2, start, 2, start + span - 1);
-            const bgMap = {
-                "EMPLOYEE": "FF243F60", "ATTENDANCE INPUT": "FF274E13",
-                "RATE CARD": "FF7F6000", "EARNINGS": "FF1C4587",
-                "DEDUCTIONS": "FF4C1130", "NET": "FF20124D",
-            };
-            applyHeader(wsSalary.getCell(2, start), label, { bg: bgMap[label] || SUBHEAD_BG, size: 9 });
-        });
-        salGrpRow.height = 16;
-
-        const salHeaders = [
-            "#", "Emp Code", "Emp Name", "Department",
-            "Total Days", "Payable Days", "Present", "Half Days", "Absent", "OT Hrs",
-            "Per Day (₹)", "Per Hour (₹)", "OT Rate (₹/hr)",
-            "Earned Salary (₹)", "OT Earning (₹)",
-            "Absent Deduct (₹)", "Late Deduct (₹)",
-            "Net Payable (₹)",
-        ];
-        const salHdrRow = wsSalary.getRow(3);
-        salHeaders.forEach((h, i) => {
-            applyHeader(salHdrRow.getCell(i + 1), h);
-        });
-        salHdrRow.height = 18;
-
-        wsSalary.columns = [
-            { width: 5 }, { width: 12 }, { width: 22 }, { width: 18 },
-            { width: 11 }, { width: 13 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 },
-            { width: 13 }, { width: 13 }, { width: 15 },
-            { width: 18 }, { width: 15 },
-            { width: 18 }, { width: 15 },
-            { width: 16 },
-        ];
-
-        summaryRows.forEach((r, idx) => {
-            const row = wsSalary.addRow([]);
-            row.height = 16;
-            const isAlt = idx % 2 === 0;
-            const bg = isAlt ? ALT_ROW : "FFFFFFFF";
-            const rn = 3 + idx + 1; // excel row number
-
-            const vals = [
-                idx + 1, r.empCode, r.empName, r.department,
-                r.totalDays, r.payableDays, r.present, r.halfDay, r.absent, r.totalOTHrs,
-                r.perDay, r.perHour, r.otRate,
-                r.earnedSalary, r.otEarning,
-                r.deductAbsent, r.deductLate,
-                r.netPayable,
-            ];
-
-            vals.forEach((v, i) => {
-                const c = row.getCell(i + 1);
-                c.value = v;
-                c.font = { name: "Arial", size: 9, bold: i === 17 };
-                c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
-                c.alignment = { horizontal: i <= 1 || i === 3 ? "center" : i === 2 ? "left" : "right", vertical: "middle" };
-                if (i >= 10) c.numFmt = "#,##0.00";
-            });
-
-            // Net payable cell – green if > 0, else red
-            const netCell = row.getCell(18);
-            netCell.font = { name: "Arial", size: 9, bold: true, color: { argb: r.netPayable >= 0 ? "FF137333" : "FF9C0006" } };
-            netCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: r.netPayable >= 0 ? "FFB7E1CD" : "FFFFC7CE" } };
-            netCell.numFmt = "₹#,##0.00";
-
-            // Deduction cells – red tint
-            [16, 17].forEach((col) => {
-                const c = row.getCell(col);
-                c.font = { name: "Arial", size: 9, color: { argb: "FF9C0006" } };
-                c.numFmt = "₹#,##0.00";
-            });
-
-            // Earning cells – blue tint
-            [14, 15].forEach((col) => {
-                const c = row.getCell(col);
-                c.font = { name: "Arial", size: 9, color: { argb: "FF1C4587" } };
-                c.numFmt = "₹#,##0.00";
-            });
-        });
-
-        // Salary totals row
-        const salLastData = 3 + summaryRows.length;
-        const salTotRow = wsSalary.addRow([]);
-        salTotRow.height = 20;
-        ["TOTALS", "", "", ""].concat(
-            [5, 6, 7, 8, 9, 10].map((col) => `=SUM(${String.fromCharCode(64 + col)}4:${String.fromCharCode(64 + col)}${salLastData})`),
-            ["", "", ""],
-            [14, 15, 16, 17, 18].map((col) => `=SUM(${String.fromCharCode(64 + col)}4:${String.fromCharCode(64 + col)}${salLastData})`),
-        ).forEach((v, i) => {
-            const c = salTotRow.getCell(i + 1);
-            c.value = v;
-            c.font = { name: "Arial", size: 10, bold: true };
-            c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
-            c.alignment = { horizontal: "center", vertical: "middle" };
-            if (i >= 13) { c.numFmt = "₹#,##0.00"; }
-        });
-
-        wsSalary.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: 18 } };
-
-        /* ──────────────────────────────
-           SHEET 3 — DEPT PIVOT
+           SHEET 2 — DEPT PIVOT
         ────────────────────────────── */
         const wsDept = wb.addWorksheet("Dept Pivot");
         wsDept.views = [{ state: "frozen", ySplit: 2 }];
 
-        wsDept.mergeCells(1, 1, 1, 11);
+        wsDept.mergeCells(1, 1, 1, 10);
         const deptTitleCell = wsDept.getCell(1, 1);
         deptTitleCell.value = `DEPARTMENT-WISE PIVOT  |  ${startDate}  to  ${endDate}`;
         deptTitleCell.font = { name: "Arial", bold: true, size: 13, color: { argb: "FFFFFFFF" } };
@@ -1184,7 +1078,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         deptTitleCell.alignment = { horizontal: "center", vertical: "middle" };
         wsDept.getRow(1).height = 26;
 
-        const deptHdrs = ["Department", "Headcount", "Present Days", "Absent Days", "Leave Days", "Week Off", "Half Days", "Late Days", "Total OT Hrs", "Avg Att %", "Total Net Pay (₹)"];
+        const deptHdrs = ["Department", "Headcount", "Present Days", "Absent Days", "Leave Days", "Week Off", "Half Days", "Late Days", "Total OT Hrs", "Total Late Hrs", "Avg Att %"];
         const deptHdrRow = wsDept.getRow(2);
         deptHdrs.forEach((h, i) => { applyHeader(deptHdrRow.getCell(i + 1), h); });
         deptHdrRow.height = 18;
@@ -1194,7 +1088,10 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         summaryRows.forEach((r) => {
             const dept = r.department || "N/A";
             if (!deptMap.has(dept)) {
-                deptMap.set(dept, { headcount: 0, present: 0, absent: 0, leave: 0, weekOff: 0, halfDay: 0, late: 0, otHrs: 0, attPctSum: 0, netPay: 0 });
+                deptMap.set(dept, { 
+                    headcount: 0, present: 0, absent: 0, leave: 0, weekOff: 0, 
+                    halfDay: 0, late: 0, otHrs: 0, lateHrs: 0, attPctSum: 0
+                });
             }
             const d = deptMap.get(dept);
             d.headcount++;
@@ -1205,8 +1102,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             d.halfDay += r.halfDay;
             d.late += r.late;
             d.otHrs += r.totalOTHrs;
+            d.lateHrs += r.totalLateHrs;
             d.attPctSum += r.attPct;
-            d.netPay += r.netPayable;
         });
 
         [...deptMap.entries()].forEach(([dept, d], idx) => {
@@ -1215,19 +1112,23 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const bg = idx % 2 === 0 ? ALT_ROW : "FFFFFFFF";
             const avgAtt = d.headcount > 0 ? d.attPctSum / d.headcount : 0;
             [dept, d.headcount, d.present, d.absent, d.leave, d.weekOff, d.halfDay, d.late,
-                parseFloat(d.otHrs.toFixed(2)), parseFloat(avgAtt.toFixed(2)), parseFloat(d.netPay.toFixed(2))
+                parseFloat(d.otHrs.toFixed(2)), parseFloat(d.lateHrs.toFixed(2)), 
+                parseFloat(avgAtt.toFixed(2))
             ].forEach((v, i) => {
                 const c = row.getCell(i + 1);
-                c.value = i === 9 ? v / 100 : v;
-                c.font = { name: "Arial", size: 9, bold: i === 0 || i === 10 };
+                c.value = i === 10 ? v / 100 : v;
+                c.font = { name: "Arial", size: 9, bold: i === 0 };
                 c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
                 c.alignment = { horizontal: i === 0 ? "left" : "center", vertical: "middle" };
-                if (i === 9) c.numFmt = "0.0%";
-                if (i === 10) { c.numFmt = "₹#,##0.00"; c.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF137333" } }; }
+                if (i === 10) c.numFmt = "0.0%";
             });
         });
 
-        wsDept.columns = [{ width: 22 }, { width: 12 }, { width: 13 }, { width: 13 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 12 }, { width: 18 }];
+        wsDept.columns = [
+            { width: 22 }, { width: 12 }, { width: 13 }, { width: 13 }, { width: 12 }, 
+            { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 12 }, 
+            { width: 12 }
+        ];
 
         /* ── Send ── */
         res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -1240,6 +1141,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to generate summary report", error: err.message });
     }
 };
+
 // Helper function to format time from Date object
 export function formatTime(date) {
     if (!date) return "N/A";

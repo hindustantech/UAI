@@ -907,8 +907,8 @@ export const markAttendance = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: "Attendance processed successfully",
-            data: {
+            message: `Attendance ${punchInIST} processed ${attendance.status} successfully`,
+             data: {
                 attendanceId: attendance._id,
                 employeeId: employee._id,
                 employeeCode: employee.empCode,
