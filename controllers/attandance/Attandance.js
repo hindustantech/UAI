@@ -43,9 +43,67 @@ import Shift from "../../models/Attandance/Shift.js";
 /* ===========================
    UTILITY FUNCTIONS
 =========================== */
+/**
+ * Convert any date to Indian timezone (IST)
+ * @param {Date|string} date - Input date
+ * @returns {Date} Date object normalized to IST
+ */
+const convertToIST = (date) => {
+    const d = new Date(date);
+    // Get UTC time and add 5:30 for IST
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
+    const utcTime = d.getTime();
+    const istTime = new Date(utcTime + istOffset);
+    return istTime;
+};
 
 /**
- * Normalize date to UTC midnight (00:00:00)
+ * Normalize date to midnight in IST
+ */
+const normalizeDateIST = (date) => {
+    const istDate = convertToIST(date);
+    istDate.setUTCHours(0, 0, 0, 0);
+    // Adjust back to UTC for storage
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const utcMidnight = new Date(istDate.getTime() - istOffset);
+    return utcMidnight;
+};
+
+/**
+ * Create DateTime from date string and time string in IST
+ * @param {string} dateString - "2024-01-15"
+ * @param {string} timeString - "09:00" (IST)
+ * @returns {Date} Date object in UTC
+ */
+const createDateTimeIST = (dateString, timeString) => {
+    if (!dateString || !timeString) return null;
+    const [hours, minutes] = timeString.split(":").map(Number);
+    
+    // Create date in IST
+    const istDateStr = `${dateString}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+    const istDate = new Date(istDateStr);
+    
+    // Convert to UTC for storage
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const utcDate = new Date(istDate.getTime() - istOffset);
+    
+    return utcDate;
+};
+
+/**
+ * Convert punch time to IST for comparison
+ * @param {Date} punchTime - Punch time in UTC
+ * @returns {Date} Punch time in IST
+ */
+const getPunchTimeIST = (punchTime) => {
+    if (!punchTime) return null;
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const utcTime = new Date(punchTime).getTime();
+    return new Date(utcTime + istOffset);
+};
+
+/**
+ * Normalize date to UTC midnight (00:00:00) - Keep for backward compatibility
  */
 const normalizeDate = (date) => {
     const d = new Date(date);
@@ -78,22 +136,9 @@ const getDistance = (lat1, lng1, lat2, lng2) => {
 };
 
 /**
- * Create DateTime from date string and time string
- * @param {string} dateString - "2024-01-15"
- * @param {string} timeString - "09:00"
- */
-const createDateTime = (dateString, timeString) => {
-    if (!dateString || !timeString) return null;
-    const [hours, minutes] = timeString.split(":").map(Number);
-    const date = new Date(dateString);
-    date.setHours(hours, minutes, 0, 0);
-    return date;
-};
-
-/**
  * Apply grace period to determine actual late minutes
- * @param {Date} actualTime - Actual punch-in time
- * @param {Date} shiftStartTime - Shift start time
+ * @param {Date} actualTime - Actual punch-in time (IST)
+ * @param {Date} shiftStartTime - Shift start time (IST)
  * @param {number} gracePeriod - Grace period in minutes
  * @returns {number} Late minutes after grace period
  */
@@ -110,8 +155,8 @@ const applyGracePeriod = (actualTime, shiftStartTime, gracePeriod) => {
  * Check if punch is within afterAbsentMark grace period
  * Returns true if punch is within grace period after shift start
  * 
- * @param {Date} punchTime - Actual punch time
- * @param {Date} shiftStartTime - Shift start time
+ * @param {Date} punchTime - Actual punch time (IST)
+ * @param {Date} shiftStartTime - Shift start time (IST)
  * @param {number} afterAbsentMarkGrace - Grace period in minutes
  * @returns {object} { isWithinGrace: boolean, minutesAfterShiftStart: number }
  */
@@ -130,6 +175,34 @@ const checkAfterAbsentMarkGrace = (punchTime, shiftStartTime, afterAbsentMarkGra
     return {
         isWithinGrace,
         minutesAfterShiftStart: minutesAfter
+    };
+};
+
+/**
+ * Check if punch is too early before shift start
+ * @param {Date} punchTime - Actual punch time (IST)
+ * @param {Date} shiftStartTime - Shift start time (IST)
+ * @param {number} earlyPunchLimit - Maximum minutes allowed before shift (default: 60)
+ * @returns {object} { isValid: boolean, minutesBeforeShift: number, message: string }
+ */
+const checkEarlyPunch = (punchTime, shiftStartTime, earlyPunchLimit = 60) => {
+    if (punchTime >= shiftStartTime) {
+        return {
+            isValid: true,
+            minutesBeforeShift: 0,
+            message: null
+        };
+    }
+
+    const minutesBefore = diffMinutes(punchTime, shiftStartTime);
+    const isValid = minutesBefore <= earlyPunchLimit;
+
+    return {
+        isValid,
+        minutesBeforeShift: minutesBefore,
+        message: isValid 
+            ? `Early punch-in allowed (${minutesBefore} minutes before shift start)`
+            : `Punch-in too early (${minutesBefore} minutes before shift start). Maximum allowed: ${earlyPunchLimit} minutes`
     };
 };
 
@@ -349,12 +422,13 @@ export const markAttendance = async (req, res) => {
            5. NORMALIZE DATE & CHECK HOLIDAY
         =========================== */
 
-        const attendanceDate = normalizeDate(date);
-        const dateString = attendanceDate.toISOString().split("T")[0];
+        // Convert input date to IST midnight for consistent comparison
+        const attendanceDateIST = normalizeDateIST(date);
+        const dateString = attendanceDateIST.toISOString().split("T")[0];
 
         const holiday = await Holiday.findOne({
             companyId,
-            date: attendanceDate
+            date: attendanceDateIST
         }).session(session);
 
         let baseStatus = holiday ? "holiday" : "present";
@@ -404,24 +478,80 @@ export const markAttendance = async (req, res) => {
         let attendance = await Attendance.findOne({
             companyId,
             employeeId: employee._id,
-            date: attendanceDate
+            date: attendanceDateIST
         }).session(session);
 
         /* ===========================
-           8. CHECK FOR ABSENT MARKING
+           8. CONVERT PUNCH TIMES TO IST FOR COMPARISON
+        =========================== */
+
+        let punchInTimeIST = null;
+        let punchOutTimeIST = null;
+
+        if (punchIn) {
+            // Convert incoming punchIn (assumed to be IST string or UTC) to UTC for storage
+            const punchInUTC = new Date(punchIn);
+            punchInTimeIST = getPunchTimeIST(punchInUTC);
+            console.log(`🕐 Punch In Time (IST): ${punchInTimeIST.toISOString()}`);
+        }
+
+        if (punchOut) {
+            const punchOutUTC = new Date(punchOut);
+            punchOutTimeIST = getPunchTimeIST(punchOutUTC);
+            console.log(`🕑 Punch Out Time (IST): ${punchOutTimeIST.toISOString()}`);
+        }
+
+        /* ===========================
+           9. CREATE SHIFT TIMES IN IST
+        =========================== */
+
+        const shiftStartTimeIST = createDateTimeIST(dateString, shiftData.startTime);
+        const shiftEndTimeIST = createDateTimeIST(dateString, shiftData.endTime);
+        const shiftDurationMinutes = diffMinutes(shiftStartTimeIST, shiftEndTimeIST);
+
+        console.log(`📍 Shift Start Time (IST): ${shiftStartTimeIST.toISOString()}`);
+        console.log(`📍 Shift End Time (IST): ${shiftEndTimeIST.toISOString()}`);
+        console.log(`⏱️  Shift Duration: ${shiftDurationMinutes} minutes`);
+
+        /* ===========================
+           10. EARLY PUNCH-IN VALIDATION (NEW)
+        =========================== */
+
+        const earlyPunchLimit = shiftData.earlyPunchLimit || 60; // Default 60 minutes
+
+        if (punchInTimeIST) {
+            const earlyPunchCheck = checkEarlyPunch(punchInTimeIST, shiftStartTimeIST, earlyPunchLimit);
+            
+            console.log(`🔍 Early Punch Check:`);
+            console.log(`   Minutes before shift: ${earlyPunchCheck.minutesBeforeShift}`);
+            console.log(`   Is valid: ${earlyPunchCheck.isValid}`);
+            
+            if (!earlyPunchCheck.isValid) {
+                return abortAndRespond(
+                    session, res, 400, "EARLY_PUNCH_NOT_ALLOWED",
+                    earlyPunchCheck.message,
+                    {
+                        punchTime: punchInTimeIST,
+                        shiftStartTime: shiftStartTimeIST,
+                        minutesBeforeShift: earlyPunchCheck.minutesBeforeShift,
+                        allowedEarlyMinutes: earlyPunchLimit,
+                        suggestion: `Please punch in between ${shiftData.startTime} or maximum ${earlyPunchLimit} minutes before shift start`
+                    }
+                );
+            }
+        }
+
+        /* ===========================
+           11. CHECK FOR ABSENT MARKING (USING IST TIMES)
         =========================== */
 
         const afterAbsentMarkGrace = shiftData.gracePeriod?.afterAbsentMark || 30;
-        const shiftStartTime = createDateTime(dateString, shiftData.startTime);
 
-        console.log(`📍 Shift Start Time: ${shiftStartTime.toISOString()}`);
         console.log(`⏱️  After Absent Mark Grace: ${afterAbsentMarkGrace} mins`);
 
-        if (punchIn) {
-            const punchInTime = new Date(punchIn);
-            const graceCheck = checkAfterAbsentMarkGrace(punchInTime, shiftStartTime, afterAbsentMarkGrace);
+        if (punchInTimeIST) {
+            const graceCheck = checkAfterAbsentMarkGrace(punchInTimeIST, shiftStartTimeIST, afterAbsentMarkGrace);
 
-            console.log(`🕐 Punch In Time: ${punchInTime.toISOString()}`);
             console.log(`⏰ Minutes After Shift Start: ${graceCheck.minutesAfterShiftStart}`);
             console.log(`✅ Within Grace Period: ${graceCheck.isWithinGrace}`);
 
@@ -431,31 +561,28 @@ export const markAttendance = async (req, res) => {
         }
 
         /* ===========================
-           9. PUNCH IN (NEW ATTENDANCE)
+           12. PUNCH IN (NEW ATTENDANCE)
         =========================== */
 
         if (!attendance) {
             console.log(`→ Creating NEW attendance record for ${dateString}`);
 
-            if (!punchIn) {
+            if (!punchInTimeIST) {
                 return abortAndRespond(
                     session, res, 400, "PUNCH_IN_REQUIRED",
                     "Punch In time is required for new attendance record"
                 );
             }
 
-            const inTime = new Date(punchIn);
-            const outTime = punchOut ? new Date(punchOut) : null;
+            const inTimeUTC = new Date(punchIn); // Store original UTC time
+            const outTimeUTC = punchOut ? new Date(punchOut) : null;
 
-            const shiftEndTime = createDateTime(dateString, shiftData.endTime);
-            const shiftDurationMinutes = diffMinutes(shiftStartTime, shiftEndTime);
-
-            /* ===== GRACE PERIOD HANDLING ===== */
+            /* ===== GRACE PERIOD HANDLING (USING IST TIMES) ===== */
             const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
-            const lateMinutes = applyGracePeriod(inTime, shiftStartTime, gracePeriodLate);
+            const lateMinutes = applyGracePeriod(punchInTimeIST, shiftStartTimeIST, gracePeriodLate);
 
-            console.log(`  Punch In: ${inTime.toISOString()}`);
-            console.log(`  Shift Start: ${shiftStartTime.toISOString()}`);
+            console.log(`  Shift Start (IST): ${shiftStartTimeIST.toISOString()}`);
+            console.log(`  Punch In (IST): ${punchInTimeIST.toISOString()}`);
             console.log(`  Grace Period (Late Entry): ${gracePeriodLate} mins`);
             console.log(`  Late Minutes (after grace): ${lateMinutes}`);
 
@@ -467,20 +594,19 @@ export const markAttendance = async (req, res) => {
             let finalStatus = baseStatus;
 
             // Check for absent marking
-            const absentGraceCheck = checkAfterAbsentMarkGrace(inTime, shiftStartTime, afterAbsentMarkGrace);
+            const absentGraceCheck = checkAfterAbsentMarkGrace(punchInTimeIST, shiftStartTimeIST, afterAbsentMarkGrace);
 
             if (!absentGraceCheck.isWithinGrace) {
                 // Punch-in is AFTER the grace period → Mark as ABSENT
                 console.log(`❌ ABSENT MARKING: Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
                 finalStatus = "absent";
 
-                // Even if punch-out exists, mark as absent if punch-in was too late
                 attendance = new Attendance({
                     companyId,
                     employeeId: employee._id,
-                    date: attendanceDate,
-                    punchIn: inTime,
-                    punchOut: outTime,
+                    date: attendanceDateIST,
+                    punchIn: inTimeUTC,
+                    punchOut: outTimeUTC,
                     shift: {
                         name: shiftData.shiftName,
                         startTime: shiftData.startTime,
@@ -508,10 +634,10 @@ export const markAttendance = async (req, res) => {
                     totalWorkingHours: 0,
                     remarks: remarks || `Marked absent - Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift start (grace: ${afterAbsentMarkGrace}mins)`,
                     isSuspicious: false,
-                    punchHistory: outTime
+                    punchHistory: outTimeUTC
                         ? [
                             {
-                                punchOut: outTime,
+                                punchOut: outTimeUTC,
                                 geoLocation: {
                                     type: "Point",
                                     coordinates: geoLocation.coordinates,
@@ -524,22 +650,22 @@ export const markAttendance = async (req, res) => {
                             }
                         ]
                         : [],
-                    lastPunchAt: outTime || inTime,
+                    lastPunchAt: outTimeUTC || inTimeUTC,
                     approvalStatus: "pending"
                 });
             } else {
                 // Punch-in is WITHIN grace period → Calculate normal attendance
 
-                if (outTime) {
-                    totalMinutes = diffMinutes(inTime, outTime);
+                if (outTimeUTC) {
+                    totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
 
                     // Deduct breaks
                     const payableMinutes = calculatePayableMinutes(totalMinutes, breaks);
 
-                    // Calculate overtime
-                    if (outTime > shiftEndTime) {
+                    // Calculate overtime (using IST times)
+                    if (punchOutTimeIST > shiftEndTimeIST) {
                         const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
-                        const rawOvertime = diffMinutes(shiftEndTime, outTime);
+                        const rawOvertime = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
                         overtimeMinutes = Math.max(0, rawOvertime - earlyExitGrace);
 
                         console.log(`  Overtime: ${rawOvertime}mins - ${earlyExitGrace}mins grace = ${overtimeMinutes}mins`);
@@ -552,9 +678,9 @@ export const markAttendance = async (req, res) => {
                         }
                     }
 
-                    // Calculate early leave
-                    if (outTime < shiftEndTime) {
-                        earlyLeaveMinutes = diffMinutes(outTime, shiftEndTime);
+                    // Calculate early leave (using IST times)
+                    if (punchOutTimeIST < shiftEndTimeIST) {
+                        earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
                         console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
                     }
                 } else {
@@ -576,9 +702,9 @@ export const markAttendance = async (req, res) => {
                 attendance = new Attendance({
                     companyId,
                     employeeId: employee._id,
-                    date: attendanceDate,
-                    punchIn: inTime,
-                    punchOut: outTime,
+                    date: attendanceDateIST,
+                    punchIn: inTimeUTC,
+                    punchOut: outTimeUTC,
                     shift: {
                         name: shiftData.shiftName,
                         startTime: shiftData.startTime,
@@ -606,10 +732,10 @@ export const markAttendance = async (req, res) => {
                     totalWorkingHours: Math.max(0, totalMinutes / 60),
                     remarks,
                     isSuspicious,
-                    punchHistory: outTime
+                    punchHistory: outTimeUTC
                         ? [
                             {
-                                punchOut: outTime,
+                                punchOut: outTimeUTC,
                                 geoLocation: {
                                     type: "Point",
                                     coordinates: geoLocation.coordinates,
@@ -622,32 +748,33 @@ export const markAttendance = async (req, res) => {
                             }
                         ]
                         : [],
-                    lastPunchAt: outTime || inTime,
+                    lastPunchAt: outTimeUTC || inTimeUTC,
                     approvalStatus: "pending"
                 });
             }
         }
 
         /* ===========================
-           10. PUNCH OUT (EXISTING ATTENDANCE)
+           13. PUNCH OUT (EXISTING ATTENDANCE)
         =========================== */
 
         else {
             console.log(`→ Updating EXISTING attendance record for ${dateString}`);
 
-            if (!punchOut) {
+            if (!punchOutTimeIST) {
                 return abortAndRespond(
                     session, res, 400, "PUNCH_OUT_REQUIRED",
                     "Punch Out time is required"
                 );
             }
 
-            const outTime = new Date(punchOut);
+            const outTimeUTC = new Date(punchOut);
 
             /* Anti-spam check */
             const lastPunch = attendance.punchHistory?.[attendance.punchHistory.length - 1];
             if (lastPunch) {
-                const gap = diffMinutes(new Date(lastPunch.punchOut), outTime);
+                const lastPunchTimeIST = getPunchTimeIST(new Date(lastPunch.punchOut));
+                const gap = diffMinutes(lastPunchTimeIST, punchOutTimeIST);
                 if (gap < 3) {
                     return abortAndRespond(
                         session, res, 429, "PUNCH_TOO_FREQUENT",
@@ -663,7 +790,7 @@ export const markAttendance = async (req, res) => {
 
             /* Add to punch history */
             attendance.punchHistory.push({
-                punchOut: outTime,
+                punchOut: outTimeUTC,
                 geoLocation: {
                     type: "Point",
                     coordinates: geoLocation.coordinates,
@@ -676,20 +803,16 @@ export const markAttendance = async (req, res) => {
                 createdAt: new Date()
             });
 
-            attendance.lastPunchAt = outTime;
+            attendance.lastPunchAt = outTimeUTC;
 
-            /* Recalculate all metrics */
-            const inTime = new Date(attendance.punchIn);
-            const shiftEndTime = createDateTime(
-                dateString,
-                attendance.shift.endTime
-            );
-            const shiftDurationMinutes = diffMinutes(shiftStartTime, shiftEndTime);
-
-            let totalMinutes = diffMinutes(inTime, outTime);
+            /* Recalculate all metrics using IST times */
+            const inTimeUTC = new Date(attendance.punchIn);
+            const inTimeIST = getPunchTimeIST(inTimeUTC);
+            
+            let totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
             let isSuspicious = false;
 
-            console.log(`  Punch Out: ${outTime.toISOString()}`);
+            console.log(`  Punch Out (IST): ${punchOutTimeIST.toISOString()}`);
             console.log(`  Total Work Time: ${totalMinutes} mins`);
 
             /* ===== CHECK IF ATTENDANCE IS MARKED AS ABSENT ===== */
@@ -698,18 +821,18 @@ export const markAttendance = async (req, res) => {
                 console.log(`  Punch-in was outside afterAbsentMark grace period`);
                 // Status remains "absent" even though punch-out is provided
             } else {
-                /* ===== GRACE PERIOD FOR LATE ENTRY ===== */
+                /* ===== GRACE PERIOD FOR LATE ENTRY (USING IST) ===== */
                 const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
-                const lateMinutes = applyGracePeriod(inTime, shiftStartTime, gracePeriodLate);
+                const lateMinutes = applyGracePeriod(inTimeIST, shiftStartTimeIST, gracePeriodLate);
 
                 console.log(`  Grace Period (Late Entry): ${gracePeriodLate} mins`);
                 console.log(`  Late Minutes (after grace): ${lateMinutes}`);
 
-                /* Calculate overtime with early exit grace */
+                /* Calculate overtime with early exit grace (using IST) */
                 let overtimeMinutes = 0;
-                if (outTime > shiftEndTime) {
+                if (punchOutTimeIST > shiftEndTimeIST) {
                     const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
-                    const rawOvertime = diffMinutes(shiftEndTime, outTime);
+                    const rawOvertime = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
                     overtimeMinutes = Math.max(0, rawOvertime - earlyExitGrace);
 
                     console.log(`  Overtime: ${rawOvertime}mins - ${earlyExitGrace}mins grace = ${overtimeMinutes}mins`);
@@ -722,10 +845,10 @@ export const markAttendance = async (req, res) => {
                     }
                 }
 
-                /* Calculate early leave */
+                /* Calculate early leave (using IST) */
                 let earlyLeaveMinutes = 0;
-                if (outTime < shiftEndTime) {
-                    earlyLeaveMinutes = diffMinutes(outTime, shiftEndTime);
+                if (punchOutTimeIST < shiftEndTimeIST) {
+                    earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
                     console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
                 }
 
@@ -740,7 +863,7 @@ export const markAttendance = async (req, res) => {
                 console.log(`  Final Status: ${finalStatus}`);
 
                 /* Update attendance */
-                attendance.punchOut = outTime;
+                attendance.punchOut = outTimeUTC;
                 attendance.status = finalStatus;
                 attendance.workSummary = {
                     totalMinutes: Math.max(0, totalMinutes),
@@ -767,7 +890,7 @@ export const markAttendance = async (req, res) => {
         }
 
         /* ===========================
-           11. SAVE & COMMIT TRANSACTION
+           14. SAVE & COMMIT TRANSACTION
         =========================== */
 
         await attendance.save({ session });
@@ -775,6 +898,10 @@ export const markAttendance = async (req, res) => {
         session.endSession();
 
         console.log(`✓ Attendance marked successfully for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
+
+        // Convert response times to IST for display
+        const punchInIST = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
+        const punchOutIST = attendance.punchOut ? getPunchTimeIST(attendance.punchOut) : null;
 
         return res.status(201).json({
             success: true,
@@ -784,10 +911,10 @@ export const markAttendance = async (req, res) => {
                 employeeId: employee._id,
                 employeeCode: employee.empCode,
                 employeeName: employee.user_name,
-                date: attendanceDate,
+                date: attendanceDateIST,
                 status: attendance.status,
-                punchIn: attendance.punchIn,
-                punchOut: attendance.punchOut,
+                punchIn: punchInIST,
+                punchOut: punchOutIST,
                 shift: {
                     name: attendance.shift.name,
                     startTime: attendance.shift.startTime,
