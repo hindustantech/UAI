@@ -86,7 +86,7 @@ const createDateTimeIST = (dateString, timeString) => {
     // Convert to UTC for storage
     const istOffset = 5.5 * 60 * 60 * 1000;
     const utcDate = new Date(istDate.getTime() - istOffset);
-
+        console.log("89 line",utcDate)
     return utcDate;
 };
 
@@ -425,6 +425,7 @@ export const markAttendance = async (req, res) => {
         // Convert input date to IST midnight for consistent comparison
         const attendanceDateIST = new Date(date);
         const dateString = attendanceDateIST.toISOString().split("T")[0];
+        console.log(`📅 Attendance Date (IST): ${dateString}`);
 
         const holiday = await Holiday.findOne({
             companyId,
