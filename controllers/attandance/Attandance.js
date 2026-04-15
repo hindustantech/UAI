@@ -77,16 +77,17 @@ const normalizeDateIST = (date) => {
  */
 const createDateTimeIST = (dateString, timeString) => {
     if (!dateString || !timeString) return null;
+
     const [hours, minutes] = timeString.split(":").map(Number);
 
-    // Create date in IST
-    const istDateStr = `${dateString}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
-    const istDate = new Date(istDateStr);
+    // Create ISO string WITHOUT timezone conversion
+    const isoString = `${dateString}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
 
-    // Convert to UTC for storage
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const utcDate = new Date(istDate.getTime() - istOffset);
-        console.log("89 line",utcDate)
+    // Important: treat it as UTC directly to prevent shift
+    const utcDate = new Date(isoString + "Z");
+
+    console.log("Final Date (no shift):", utcDate);
+
     return utcDate;
 };
 
