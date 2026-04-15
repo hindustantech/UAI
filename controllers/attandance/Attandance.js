@@ -423,12 +423,12 @@ export const markAttendance = async (req, res) => {
         =========================== */
 
         // Convert input date to IST midnight for consistent comparison
-        const attendanceDateIST = normalizeDateIST(date);
-        const dateString = attendanceDateIST.toISOString().split("T")[0];
+        // const date = normalizeDateIST();
+        const dateString = date.toISOString().split("T")[0];
 
         const holiday = await Holiday.findOne({
             companyId,
-            date: attendanceDateIST
+            date:date
         }).session(session);
 
         let baseStatus = holiday ? "holiday" : "present";
@@ -478,7 +478,7 @@ export const markAttendance = async (req, res) => {
         let attendance = await Attendance.findOne({
             companyId,
             employeeId: employee._id,
-            date: attendanceDateIST
+            date: date
         }).session(session);
 
         /* ===========================
@@ -604,7 +604,7 @@ export const markAttendance = async (req, res) => {
                 attendance = new Attendance({
                     companyId,
                     employeeId: employee._id,
-                    date: attendanceDateIST,
+                    date: date,
                     punchIn: inTimeUTC,
                     punchOut: outTimeUTC,
                     shift: {
@@ -702,7 +702,7 @@ export const markAttendance = async (req, res) => {
                 attendance = new Attendance({
                     companyId,
                     employeeId: employee._id,
-                    date: attendanceDateIST,
+                    date: date,
                     punchIn: inTimeUTC,
                     punchOut: outTimeUTC,
                     shift: {
@@ -911,7 +911,7 @@ export const markAttendance = async (req, res) => {
                 employeeId: employee._id,
                 employeeCode: employee.empCode,
                 employeeName: employee.user_name,
-                date: attendanceDateIST,
+                date: date,
                 status: attendance.status,
                 punchIn: punchInIST,
                 punchOut: punchOutIST,
