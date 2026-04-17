@@ -396,7 +396,8 @@ export const createEmployee = async (req, res) => {
             weeklyOff,
             salaryStructure,
             bankDetails,
-            officeLocation
+            officeLocation,
+            referalCode
         } = req.body;
 
         if (!userId) throw new Error("userId is required");
@@ -471,6 +472,7 @@ export const createEmployee = async (req, res) => {
             userId,
             companyId,
             empCode,
+            referalCode,
             user_name,
             jobInfo,
             shift,
@@ -613,6 +615,8 @@ const normalizeDay = (day) => {
     return day.charAt(0).toUpperCase() + day.slice(1).toLowerCase();
 };
 
+
+
 export const updateEmployee = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -621,15 +625,12 @@ export const updateEmployee = async (req, res) => {
         /* ---------------------------------------------
            1. Authorization (Multi-Tenant Security)
         ---------------------------------------------- */
-
-        let companyId;
-        companyId = req.user?._id || req.user?.id;
+        let companyId = req.user?._id || req.user?.id;
         const userRole = req.user?.role || req.user?.type;
 
-        if (userRole === 'user') {
-            companyId = req.user?.companyId || req.user?.companyId;
+        if (userRole === "user") {
+            companyId = req.user?.companyId;
         }
-
 
         if (!companyId) {
             return res.status(401).json({
@@ -638,7 +639,7 @@ export const updateEmployee = async (req, res) => {
             });
         }
 
-        if (!['partner', 'admin', 'super_admin', 'user'].includes(userRole)) {
+        if (!["partner", "admin", "super_admin", "user"].includes(userRole)) {
             return res.status(403).json({
                 success: false,
                 message: "Access denied",
@@ -680,6 +681,7 @@ export const updateEmployee = async (req, res) => {
             bankDetails,
             shift,
             weeklyOff,
+            referalCode,
             officeLocation,
             employmentStatus
         } = req.body;
@@ -689,14 +691,47 @@ export const updateEmployee = async (req, res) => {
         /* ---------------------------------------------
            4. Basic Fields
         ---------------------------------------------- */
-        if (user_name !== undefined) updatePayload.user_name = user_name;
+        if (user_name !== undefined) {
+            updatePayload.user_name = user_name;
+        }
 
-        if (role && ['employee', 'manager', 'hr', 'admin', 'super_admin'].includes(role)) {
+        if (role && ["employee", "manager", "hr", "admin", "super_admin"].includes(role)) {
             updatePayload.role = role;
         }
 
         /* ---------------------------------------------
-           5. SHIFT (Critical Validation)
+           5. REFERAL CODE (🔥 FIXED)
+        ---------------------------------------------- */
+        if (referalCode !== undefined) {
+
+            if (typeof referalCode !== "string" || !referalCode.trim()) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid referalCode",
+                });
+            }
+
+            const normalizedCode = referalCode.trim().toUpperCase();
+
+            // 🔥 duplicate check (company scoped)
+            const duplicate = await Employee.findOne({
+                companyId,
+                referalCode: normalizedCode,
+                _id: { $ne: employeeId }
+            }).session(session);
+
+            if (duplicate) {
+                return res.status(409).json({
+                    success: false,
+                    message: "Referral code already in use",
+                });
+            }
+
+            updatePayload.referalCode = normalizedCode;
+        }
+
+        /* ---------------------------------------------
+           6. SHIFT VALIDATION
         ---------------------------------------------- */
         if (shift !== undefined) {
             if (!mongoose.Types.ObjectId.isValid(shift)) {
@@ -722,7 +757,7 @@ export const updateEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           6. WEEKLY OFF (Strict Enum Validation)
+           7. WEEKLY OFF VALIDATION
         ---------------------------------------------- */
         if (weeklyOff !== undefined) {
             if (!Array.isArray(weeklyOff)) {
@@ -732,7 +767,11 @@ export const updateEmployee = async (req, res) => {
                 });
             }
 
-            const normalizedDays = weeklyOff.map(normalizeDay);
+            const VALID_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+            const normalizedDays = weeklyOff.map(day => {
+                return day.charAt(0).toUpperCase() + day.slice(1).toLowerCase();
+            });
 
             const invalidDays = normalizedDays.filter(day => !VALID_DAYS.includes(day));
 
@@ -743,36 +782,35 @@ export const updateEmployee = async (req, res) => {
                 });
             }
 
-            // remove duplicates
             updatePayload.weeklyOff = [...new Set(normalizedDays)];
         }
 
         /* ---------------------------------------------
-           7. Nested Structures (Safe Merge)
+           8. Nested Objects Merge
         ---------------------------------------------- */
         if (jobInfo) {
             updatePayload.jobInfo = {
-                ...existingEmployee.jobInfo.toObject(),
+                ...existingEmployee.jobInfo?.toObject(),
                 ...jobInfo
             };
         }
 
         if (salaryStructure) {
             updatePayload.salaryStructure = {
-                ...existingEmployee.salaryStructure.toObject(),
+                ...existingEmployee.salaryStructure?.toObject(),
                 ...salaryStructure
             };
         }
 
         if (bankDetails) {
             updatePayload.bankDetails = {
-                ...existingEmployee.bankDetails.toObject(),
+                ...existingEmployee.bankDetails?.toObject(),
                 ...bankDetails
             };
         }
 
         /* ---------------------------------------------
-           8. GEO LOCATION
+           9. GEO LOCATION
         ---------------------------------------------- */
         if (officeLocation?.coordinates) {
             if (!Array.isArray(officeLocation.coordinates) || officeLocation.coordinates.length !== 2) {
@@ -784,19 +822,22 @@ export const updateEmployee = async (req, res) => {
 
             updatePayload.officeLocation = {
                 type: "Point",
-                coordinates: officeLocation.coordinates || existingEmployee.officeLocation?.coordinates,
-                radius: officeLocation.radius || existingEmployee.officeLocation?.radius || 100,
-                manual: officeLocation.manual || existingEmployee.officeLocation?.manual || 'IND',
-                locationtype: officeLocation.locationtype || existingEmployee.officeLocation?.locationtype || 'IND',
+                coordinates: officeLocation.coordinates,
+                radius: officeLocation.radius || 100,
+                manual: officeLocation.manual || "IND",
+                locationtype: officeLocation.locationtype || "employee",
             };
         }
 
+        /* ---------------------------------------------
+           10. Employment Status
+        ---------------------------------------------- */
         if (employmentStatus) {
             updatePayload.employmentStatus = employmentStatus;
         }
 
         /* ---------------------------------------------
-           9. Atomic Update
+           11. Atomic Update
         ---------------------------------------------- */
         const updatedEmployee = await Employee.findOneAndUpdate(
             { _id: employeeId, companyId },
@@ -809,7 +850,7 @@ export const updateEmployee = async (req, res) => {
         );
 
         /* ---------------------------------------------
-           10. Commit
+           12. Commit Transaction
         ---------------------------------------------- */
         await session.commitTransaction();
         session.endSession();
@@ -824,14 +865,15 @@ export const updateEmployee = async (req, res) => {
         await session.abortTransaction();
         session.endSession();
 
-        console.error("UpdateEmployee Error:", error);
-
+        // Handle duplicate index error (DB level safety)
         if (error.code === 11000) {
             return res.status(409).json({
                 success: false,
-                message: "Duplicate constraint violation",
+                message: "Duplicate value (referalCode may already exist)",
             });
         }
+
+        console.error("UpdateEmployee Error:", error);
 
         return res.status(500).json({
             success: false,
