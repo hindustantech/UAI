@@ -221,6 +221,22 @@ const salesSessionSchema = new Schema(
       ref: "User"
     },
 
+    assignedTo: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      index: true
+    },
+
+    assignedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User"
+    },
+
+    assignedAt: {
+      type: Date,
+      default: Date.now
+    },
+    
     internalNotes: String
   },
   {
