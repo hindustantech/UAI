@@ -24,7 +24,8 @@ import './models/Attandance/Holiydaycron.js'
 import ExportRoutes from './routes/Attandance/Export/attendanceRoutes.js'
 import permissionRoutes from './routes/permissionRoutes.js';
 import subscriptionsdata from './routes/Attandance/subscription.routes.js';
-import './cron/subscription.js'; 
+import SalesRoute from './routes/Attandance/Sales/Sales.routes.js';
+import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 dotenv.config();
 await connectDB();
@@ -56,6 +57,7 @@ app.use('/api/usermanagement', usermanagement);
 app.use('/api/permissionRoutes', permissionRoutes);
 
 app.use('/api/holiday', holiday);
+app.use('/api/v1/SalesRoute', SalesRoute);
 app.use('/api/attendance', attandance);
 app.use('/api/employee', employee);
 app.use('/api/categoryAdvertisment', categoryAdvertisment);
