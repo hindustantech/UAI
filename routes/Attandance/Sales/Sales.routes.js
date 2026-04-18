@@ -1,52 +1,70 @@
-// ============================================
-// ROUTES
-// ============================================
-
+// routes/salesRoutes.js
 import express from "express";
+
 import {
   punchIn,
+  completeSalesForm,
   punchOut,
-  getSessions,
-  getSessionById,
-  updateSession,
-  deleteSession,
-  getSessionsNearby,
-  getGeofenceViolations,
-  getSalesPersonMetrics,
-  getCompanyAnalytics,
-  createPayment,
-  approvePayment,
-  getPayments
+  getFullSessionDetails,
+  updateSessionData,
+  // getSessions
 } from "../../../controllers/attandance/Sales/Sales.js";
+
+// Import auth middleware (adjust based on your auth setup)
 import authMiddleware from "../../../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
+// ============================================
+// SESSION MANAGEMENT ROUTES
+// ============================================
+
+/**
+ * @route   POST /api/sales/punch-in
+ * @desc    Punch in to start a sales session
+ * @access  Private (Sales Person)
+ * @body    { salesPersonId, companyId, contactId, location, officeLocation, geofenceRadius, deviceInfo, punchInPhoto }
+ */
+router.post("/punch-in", authMiddleware, punchIn);
+
+/**
+ * @route   POST /api/sales/session/:sessionId/complete-form
+ * @desc    Complete the sales form after punch in
+ * @access  Private
+ * @body    { salesDetails, visitOutcome, remark, salesStatus, productsSold, payment, nextMeeting, attachments, signature, contactUpdates }
+ */
+router.post("/session/:sessionId/complete-form", authMiddleware, completeSalesForm);
+
+/**
+ * @route   POST /api/sales/punch-out
+ * @desc    Punch out to end a sales session
+ * @access  Private
+ * @body    { sessionId, location, officeLocation, geofenceRadius, punchOutPhoto, deviceInfo }
+ */
+router.post("/punch-out", authMiddleware, punchOut);
 
 
-router.use(authMiddleware);
+/**
+ * @route   GET /api/sales/session/:sessionId/full
+ * @desc    Get full session details with timeline, payments, next meeting
+ * @access  Private
+ */
+router.get("/session/:sessionId/full", authMiddleware, getFullSessionDetails);
 
-// ========== PUNCH IN / OUT ==========
-router.post("/punch-in", punchIn);
-router.post("/punch-out", punchOut);
+/**
+ * @route   PATCH /api/sales/session/:sessionId
+ * @desc    Update session with additional data (sales details, products, etc.)
+ * @access  Private
+ */
+router.patch("/session/:sessionId", authMiddleware, updateSessionData);
 
-// ========== SESSION CRUD ==========
-router.get("/sessions", getSessions);
-router.get("/sessions/:sessionId", getSessionById);
-router.put("/sessions/:sessionId", updateSession);
-router.delete("/sessions/:sessionId", deleteSession);
+/** 
+ * @route   GET /api/sales/sessions
+ *  @desc    Get paginated list of sales sessions with filters    
+ *  @access  Private  
+ * @query   { salesPersonId, companyId, status, startDate, endDate, page, limit }
+ * */
+// router.get("/sessions", authMiddleware, getSessions);
 
-// ========== GEOLOCATION ==========
-router.get("/sessions/nearby", getSessionsNearby);
-router.get("/geofence-violations", getGeofenceViolations);
-
-// ========== ANALYTICS ==========
-router.get("/metrics/sales-person", getSalesPersonMetrics);
-router.get("/analytics/company", getCompanyAnalytics);
-
-// ========== PAYMENTS ==========
-router.post("/payments", createPayment);
-router.put("/payments/:paymentId/approve", approvePayment);
-router.get("/payments", getPayments);
 
 export default router;
