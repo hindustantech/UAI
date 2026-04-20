@@ -77,7 +77,7 @@ const salesSessionSchema = new Schema({
     paymentMode: { type: String, enum: ["Cash", "Card", "Bank Transfer", "UPI"] },
     paymentDate: Date
   },
-  SalesStatus: { type: String, enum: ["open", "close"] },
+  SalesStatus: { type: String, enum: ["open", "close",'suspened'] },
   // ========== NEXT MEETING (from form) ==========
   nextMeeting: {
     decided: { type: Boolean, default: false },
