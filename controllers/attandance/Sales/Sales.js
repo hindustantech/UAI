@@ -9,22 +9,6 @@ import { fileTypeFromBuffer } from "file-type";
 const generateSessionId = (salesPersonId) => {
   return `${salesPersonId}-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
 };
-// ===== GEO SANITIZER (CRITICAL LAYER) =====
-const safeGeo = (geo) => {
-  if (!geo) return null;
-
-  if (
-    geo.type !== "Point" ||
-    !Array.isArray(geo.coordinates) ||
-    geo.coordinates.length !== 2 ||
-    typeof geo.coordinates[0] !== "number" ||
-    typeof geo.coordinates[1] !== "number"
-  ) {
-    return null;
-  }
-
-  return geo;
-};
 
 // Calculate distance between two points using Haversine formula (in meters)
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -40,37 +24,28 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-// ========== CRITICAL: Create PURE GeoJSON Point ==========
-// This returns a PLAIN OBJECT with NO schema wrappers
-const createGeoPoint = (lng, lat) => {
-  // Convert to primitives
-  let longitude = Number(typeof lng === 'object' && lng.valueOf ? lng.valueOf() : lng);
-  let latitude = Number(typeof lat === 'object' && lat.valueOf ? lat.valueOf() : lat);
+// ========== FIXED: Strict GeoJSON Point creator - ensures PRIMITIVE numbers only ==========
+export const createGeoPoint = (lng, lat) => {
+  const longitude = Number(lng);
+  const latitude = Number(lat);
 
-  // Validate
   if (!isFinite(longitude) || !isFinite(latitude)) {
-    throw new Error(`Invalid coordinates: lng=${longitude}, lat=${latitude}`);
-  }
-  if (longitude < -180 || longitude > 180) {
-    throw new Error(`Longitude out of range: ${longitude}`);
-  }
-  if (latitude < -90 || latitude > 90) {
-    throw new Error(`Latitude out of range: ${latitude}`);
+    throw new Error("Invalid coordinates");
   }
 
-  // Return PLAIN object - NOT a Mongoose document
   return {
     type: "Point",
-    coordinates: [longitude, latitude]
+    coordinates: [longitude, latitude] // always new array
   };
 };
 
-// Validate and sanitize location
+// ========== FIXED: Validate and sanitize location ==========
 const validateLocation = (location) => {
   if (!location) throw new Error("Location is required");
 
   let parsedLocation = location;
 
+  // Parse JSON if needed
   if (typeof location === "string") {
     try {
       parsedLocation = JSON.parse(location);
@@ -79,6 +54,7 @@ const validateLocation = (location) => {
     }
   }
 
+  // Step 1: Extract and convert to primitives
   let lat = Number(typeof parsedLocation.lat === 'object' && parsedLocation.lat.valueOf
     ? parsedLocation.lat.valueOf()
     : parsedLocation.lat);
@@ -87,10 +63,15 @@ const validateLocation = (location) => {
     ? parsedLocation.lng.valueOf()
     : parsedLocation.lng);
 
+  // Step 2: Validate conversion was successful
   if (!isFinite(lat) || !isFinite(lng)) {
-    throw new Error(`Invalid location coordinates: lat=${parsedLocation.lat}, lng=${parsedLocation.lng}`);
+    throw new Error(
+      `Invalid location coordinates: lat=${parsedLocation.lat} (${typeof parsedLocation.lat}), ` +
+      `lng=${parsedLocation.lng} (${typeof parsedLocation.lng}). Both must be valid numbers.`
+    );
   }
 
+  // Step 3: Return primitive values only
   return {
     lat: lat,
     lng: lng,
@@ -119,106 +100,147 @@ export const punchIn = async (req, res) => {
   session.startTransaction();
 
   try {
-    const { salesPersonId, companyId, location } = req.body;
+    const {
+      salesPersonId,
+      companyId,
+      location,
+      deviceInfo
+    } = req.body;
 
+    console.log("Raw location received:", location);
+    console.log("Location type:", typeof location);
+
+    // Validate and parse location
     const validatedLocation = validateLocation(location);
+    console.log("Validated location:", validatedLocation);
+    console.log("Coordinate types:", typeof validatedLocation.lng, typeof validatedLocation.lat);
 
+    const parsedDeviceInfo = typeof deviceInfo === 'string' ? JSON.parse(deviceInfo) : deviceInfo;
+
+    // Validate required fields
     if (!salesPersonId || !companyId) {
-      await session.abortTransaction();
-      return res.status(400).json({ error: "Missing required fields" });
+      return res.status(400).json({
+        error: "Missing required fields: salesPersonId, companyId"
+      });
     }
 
+    // Check for active session
     const activeSession = await SalesSession.findOne({
       salesPersonId,
       status: "in_progress"
     });
 
     if (activeSession) {
-      await session.abortTransaction();
       return res.status(400).json({
-        error: "Already active session exists"
+        error: "You have an active session. Please punch out first.",
+        sessionId: activeSession.sessionId,
+        punchInTime: activeSession.punchInTime
       });
     }
 
-    const punchInLocation = createGeoPoint(
-      validatedLocation.lng,
-      validatedLocation.lat
+    // Upload punch-in photo if provided
+    let punchInPhoto = null;
+    if (req.file) {
+      punchInPhoto = await uploadImage(req.file, 'sales/punch-in');
+    }
+
+    const sessionId = generateSessionId(salesPersonId);
+
+    // ========== CRITICAL: Create GeoJSON with strict validation ==========
+    // IMPORTANT: type MUST be "Point" (capital P) - not "point"
+    const safeLocation = JSON.parse(JSON.stringify(validatedLocation));
+
+    const punchInLocationGeo = createGeoPoint(
+      safeLocation.lng,
+      safeLocation.lat
     );
+    console.log("Created punchInLocation GeoPoint:", JSON.stringify(punchInLocationGeo));
+    console.log("Coordinate types in GeoPoint:", typeof punchInLocationGeo.coordinates[0], typeof punchInLocationGeo.coordinates[1]);
+    console.log("GeoPoint type field:", punchInLocationGeo.type);
 
+    // Verify coordinates are primitives before proceeding
+    if (typeof punchInLocationGeo.coordinates[0] !== 'number' ||
+      typeof punchInLocationGeo.coordinates[1] !== 'number') {
+      throw new Error(`GeoPoint coordinates failed type check: [${typeof punchInLocationGeo.coordinates[0]}, ${typeof punchInLocationGeo.coordinates[1]}]`);
+    }
+
+    // Verify type is correct case
+    if (punchInLocationGeo.type !== 'Point') {
+      throw new Error(`GeoPoint type must be "Point" (capital P), got "${punchInLocationGeo.type}"`);
+    }
+
+    // Create route point with same strict validation
     const routePoint = {
-      location: punchInLocation,
+      location: createGeoPoint(
+        Number(safeLocation.lng),
+        Number(safeLocation.lat)
+      ),
       timestamp: new Date(),
-      accuracy: validatedLocation.accuracy,
+      accuracy: Number(safeLocation.accuracy) || 0,
       speed: 0,
-      heading: validatedLocation.heading
+      heading: Number(safeLocation.heading) || 0
     };
-
+    // Create session document with explicit primitive values
     const sessionData = {
-      sessionId: generateSessionId(salesPersonId),
-      salesPersonId,
-      companyId,
+      sessionId,
+      salesPersonId: new mongoose.Types.ObjectId(salesPersonId),
+      companyId: new mongoose.Types.ObjectId(companyId),
       status: "in_progress",
       punchInTime: new Date(),
-
-      // ✅ SAFE GEO
-      punchInLocation: safeGeo(punchInLocation),
-
-      // ❌ REMOVE THIS COMPLETELY (IMPORTANT)
-      // punchOutLocation: null,  ← do NOT even include field
-
+      punchInLocation: punchInLocationGeo,
+      // Only include photo if it exists
+      ...(punchInPhoto && { punchInPhoto }),
       punchInAddress: validatedLocation.address || "",
-
+      punchOutAddress: "",
       routePath: [routePoint],
       totalDistance: 0,
       duration: 0,
-
       customer: {
         companyName: "",
         contactName: "",
         phoneNumber: "",
         address: "",
         landmark: ""
-        // ❌ DO NOT ADD location here
       },
-
       sales: {
         dealStatus: "Negotiation",
         paymentCollected: false,
         amount: 0
       },
-
       SalesStatus: "open",
-
       nextMeeting: {
         decided: false,
         time: "",
         notes: ""
       },
-
       evideinceVisite: {
         visitNotes: ""
       },
-
-      createdBy: salesPersonId
+      createdBy: new mongoose.Types.ObjectId(salesPersonId)
     };
 
-    // 🔥 FINAL SANITIZATION (LAST DEFENSE)
-    if (!sessionData.punchInLocation) {
-      throw new Error("Invalid GeoJSON");
-    }
+    console.log("Session data coordinates:", JSON.stringify(sessionData.punchInLocation, null, 2));
 
-    const newSession = await SalesSession.create([sessionData]);
+    // IMPORTANT: Use create() instead of insertOne() to use Mongoose serialization
+    const newSession = await SalesSession.create([sessionData], { session });
 
     await session.commitTransaction();
 
     res.status(201).json({
       success: true,
-      session: newSession[0]
+      message: "Punched in successfully",
+      sessionId,
+      session: newSession[0],
+      requiresFormCompletion: true
     });
 
   } catch (error) {
     await session.abortTransaction();
-    res.status(500).json({ error: error.message });
+    console.error('PunchIn error:', error);
+    res.status(500).json({
+      error: error.message,
+      details: error.stack
+    });
   } finally {
     session.endSession();
   }
@@ -259,7 +281,7 @@ export const updateRoute = async (req, res) => {
 
     const speed = timeDiff > 0 ? distance / timeDiff : 0;
 
-    // Create new route point with strict GeoJSON
+    // Create new route point with strict GeoJSON validation
     const routePoint = {
       location: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
       timestamp: now,
@@ -333,7 +355,7 @@ export const completeSalesForm = async (req, res) => {
     }
 
     // Prepare customer location with strict validation
-    let customerLocation = undefined;
+    let customerLocation = salesSession.customer?.location;
     if (parsedCustomer?.location && parsedCustomer.location.lat && parsedCustomer.location.lng) {
       try {
         customerLocation = createGeoPoint(
@@ -342,10 +364,11 @@ export const completeSalesForm = async (req, res) => {
         );
       } catch (error) {
         console.error('Error creating customer location:', error);
+        customerLocation = undefined;
       }
     }
 
-    // Prepare update data
+    // Prepare update data with sanitized values
     const updateData = {
       customer: {
         companyName: parsedCustomer?.companyName || salesSession.customer?.companyName || "",
@@ -403,42 +426,154 @@ export const completeSalesForm = async (req, res) => {
 
 // ========== PUNCH OUT ==========
 export const punchOut = async (req, res) => {
+  const dbSession = await mongoose.startSession();
+  dbSession.startTransaction();
+
   try {
     const { sessionId, location } = req.body;
 
-    const validatedLocation = validateLocation(location);
-
-    const geo = safeGeo(
-      createGeoPoint(validatedLocation.lng, validatedLocation.lat)
-    );
-
-    if (!geo) {
-      return res.status(400).json({ error: "Invalid geo" });
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
     }
 
-    const session = await SalesSession.findOne({ sessionId });
+    // ===== STEP 1: VALIDATE & CLONE LOCATION =====
+    const validatedLocation = validateLocation(location);
 
-    if (!session) {
+    // Deep clone to avoid reference issues
+    const safeLocation = JSON.parse(JSON.stringify(validatedLocation));
+
+    const lat = Number(safeLocation.lat);
+    const lng = Number(safeLocation.lng);
+
+    if (!isFinite(lat) || !isFinite(lng)) {
+      throw new Error("Invalid latitude/longitude values");
+    }
+
+    // ===== STEP 2: FETCH SESSION =====
+    const salesSession = await SalesSession.findOne({ sessionId }).session(dbSession);
+
+    if (!salesSession) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const update = {
-      status: "completed",
-      punchOutTime: new Date(),
-      punchOutLocation: geo,
-      punchOutAddress: validatedLocation.address
-    };
+    if (salesSession.status !== "in_progress") {
+      return res.status(400).json({ error: "Session already completed" });
+    }
 
-    const updated = await SalesSession.findOneAndUpdate(
-      { sessionId },
-      { $set: update },
-      { new: true }
+    // ===== STEP 3: HANDLE PHOTO =====
+    let punchOutPhoto = null;
+    if (req.file) {
+      punchOutPhoto = await uploadImage(req.file, "sales/punch-out");
+    }
+
+    // ===== STEP 4: DISTANCE CALCULATION (SAFE) =====
+    let finalDistance = 0;
+
+    if (salesSession.routePath.length > 0) {
+      const lastPoint = salesSession.routePath[salesSession.routePath.length - 1];
+
+      if (lastPoint?.location?.coordinates) {
+        const [prevLng, prevLat] = lastPoint.location.coordinates;
+
+        finalDistance = calculateDistance(
+          prevLat,
+          prevLng,
+          lat,
+          lng
+        );
+      }
+    }
+
+    // ===== STEP 5: TIME CALCULATION =====
+    const punchOutTime = new Date();
+    const durationSeconds = Math.max(
+      0,
+      Math.round((punchOutTime - salesSession.punchInTime) / 1000)
     );
 
-    res.json(updated);
+    // ===== STEP 6: CREATE GEOJSON (IMMUTABLE) =====
+    const punchOutGeo = createGeoPoint(lng, lat);
 
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const finalRoutePoint = {
+      location: createGeoPoint(lng, lat),
+      timestamp: punchOutTime,
+      accuracy: Number(safeLocation.accuracy) || 0,
+      speed: 0,
+      heading: Number(safeLocation.heading) || 0
+    };
+
+    // ===== STEP 7: BUILD UPDATE OBJECT =====
+    const updateObject = {
+      status: "completed",
+      punchOutTime,
+      punchOutLocation: punchOutGeo,
+      punchOutAddress: safeLocation.address || "",
+      duration: durationSeconds
+    };
+
+    if (punchOutPhoto) {
+      updateObject.punchOutPhoto = punchOutPhoto;
+    }
+
+    // ===== STEP 8: ATOMIC UPDATE =====
+    const updatedSession = await SalesSession.findOneAndUpdate(
+      { sessionId, status: "in_progress" }, // prevents double punchOut
+      {
+        $set: updateObject,
+        $push: { routePath: finalRoutePoint },
+        $inc: { totalDistance: finalDistance }
+      },
+      {
+        new: true,
+        session: dbSession
+      }
+    );
+
+    if (!updatedSession) {
+      throw new Error("Session update failed (possibly already completed)");
+    }
+
+    await dbSession.commitTransaction();
+
+    // ===== STEP 9: RESPONSE =====
+    const durationMinutes = Math.round(durationSeconds / 60);
+
+    res.status(200).json({
+      success: true,
+      message: "Punch-out successful",
+      sessionId,
+      summary: {
+        duration: {
+          seconds: durationSeconds,
+          minutes: durationMinutes,
+          formatted:
+            durationMinutes >= 60
+              ? `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`
+              : `${durationMinutes}m`
+        },
+        totalDistance: {
+          meters: Math.round(updatedSession.totalDistance),
+          kilometers: (updatedSession.totalDistance / 1000).toFixed(2),
+          formatted:
+            updatedSession.totalDistance > 1000
+              ? `${(updatedSession.totalDistance / 1000).toFixed(2)} km`
+              : `${Math.round(updatedSession.totalDistance)} m`
+        },
+        routePoints: updatedSession.routePath.length
+      },
+      session: updatedSession
+    });
+
+  } catch (error) {
+    await dbSession.abortTransaction();
+    console.error("PunchOut error:", error);
+
+    res.status(500).json({
+      error: error.message
+    });
+
+  } finally {
+    dbSession.endSession();
   }
 };
 
