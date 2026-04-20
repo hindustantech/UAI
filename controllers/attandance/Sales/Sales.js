@@ -1,10 +1,17 @@
-// controllers/SalesController.js
-import { SalesPunchEvent, SalesSession, SalesPayment, Contact, NextMeeting } from "../../../models/Attandance/Salses/Salses.js";
+import { SalesSession } from "../../../models/Attandance/Salses/Salses.js";
+import { uploadToCloudinary } from "../../../utils/Cloudinary.js";
 import mongoose from "mongoose";
 
-// Helper: Calculate distance between two geo points (Haversine formula)
+// ========== HELPER FUNCTIONS ==========
+
+// Generate unique session ID
+const generateSessionId = (salesPersonId) => {
+  return `${salesPersonId}-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+};
+
+// Calculate distance between two points using Haversine formula (in meters)
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371000;
+  const R = 6371000; // Earth's radius in meters
   const φ1 = (lat1 * Math.PI) / 180;
   const φ2 = (lat2 * Math.PI) / 180;
   const Δφ = ((lat2 - lat1) * Math.PI) / 180;
@@ -16,12 +23,24 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-// Helper: Generate unique session ID
-const generateSessionId = (salesPersonId) => {
-  return `${salesPersonId}-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+// Upload image to Cloudinary
+const uploadImage = async (file, folder) => {
+  if (!file || !file.buffer) return null;
+
+  try {
+    const result = await uploadToCloudinary(file.buffer, folder);
+    return {
+      url: result.secure_url,
+      fileName: file.originalname,
+      uploadedAt: new Date()
+    };
+  } catch (error) {
+    console.error('Cloudinary upload error:', error);
+    return null;
+  }
 };
 
-// ========== PUNCH IN WITH FORM ==========
+// ========== PUNCH IN ==========
 export const punchIn = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -30,88 +49,76 @@ export const punchIn = async (req, res) => {
     const {
       salesPersonId,
       companyId,
-      contactId,
-      location,
-      officeLocation,
-      geofenceRadius,
-      deviceInfo,
-      punchInPhoto
+      location,  // { lat, lng, address }
+      deviceInfo // optional device info
     } = req.body;
 
+    // Parse JSON strings if needed
+    const parsedLocation = typeof location === 'string' ? JSON.parse(location) : location;
+    const parsedDeviceInfo = typeof deviceInfo === 'string' ? JSON.parse(deviceInfo) : deviceInfo;
+
     // Validate required fields
-    if (!salesPersonId || !companyId || !contactId || !location || !officeLocation) {
-      return res.status(400).json({ error: "Missing required fields" });
+    if (!salesPersonId || !companyId || !parsedLocation) {
+      return res.status(400).json({
+        error: "Missing required fields: salesPersonId, companyId, location"
+      });
     }
 
-    // Check if there's an active session
+    if (!parsedLocation.lat || !parsedLocation.lng) {
+      return res.status(400).json({
+        error: "Location must have lat and lng coordinates"
+      });
+    }
+
+    // Check for active session
     const activeSession = await SalesSession.findOne({
       salesPersonId,
-      status: "in_progress",
-      isDeleted: false
+      status: "in_progress"
     });
 
     if (activeSession) {
       return res.status(400).json({
-        error: "You already have an active session. Please punch out first.",
-        activeSessionId: activeSession.sessionId
+        error: "You have an active session. Please punch out first.",
+        sessionId: activeSession.sessionId,
+        punchInTime: activeSession.punchInTime
       });
     }
 
-    // Calculate distance from office
-    const distance = calculateDistance(
-      officeLocation.latitude,
-      officeLocation.longitude,
-      location.latitude,
-      location.longitude
-    );
+    // Upload punch-in photo if provided
+    let punchInPhoto = null;
+    if (req.file) {
+      punchInPhoto = await uploadImage(req.file, 'sales/punch-in');
+    }
 
-    const isWithinRadius = distance <= geofenceRadius;
     const sessionId = generateSessionId(salesPersonId);
 
-    // Fetch contact info
-    const contact = await Contact.findById(contactId).lean();
-
-    // Create punch-in event
-    const punchEvent = await SalesPunchEvent.create([{
-      eventType: "punch_in",
-      sessionId,
-      salesPersonId,
-      companyId,
-      eventTime: new Date(),
+    // Create route point for punch in
+    const routePoint = {
       location: {
         type: "Point",
-        coordinates: [location.longitude, location.latitude]
+        coordinates: [parsedLocation.lng, parsedLocation.lat] // [longitude, latitude]
       },
-      isWithinRadius,
-      distanceFromOffice: Math.round(distance),
-      rejectionReason: isWithinRadius ? null : "Outside geofence",
-      deviceInfo,
-      photoAttachment: punchInPhoto
-    }], { session });
+      timestamp: new Date(),
+      accuracy: parsedLocation.accuracy || 0,
+      speed: 0,
+      heading: 0
+    };
 
-    // Create session
+    // Create new session
     const newSession = await SalesSession.create([{
       sessionId,
       salesPersonId,
       companyId,
-      contactId,
-      contactName: contact?.name,
-      contactPhone: contact?.phone,
-      contactEmail: contact?.email,
-      contactDesignation: contact?.designation,
-      contactPhoto: contact?.photo,
       status: "in_progress",
-      isWithinRadius,
-      distanceFromOffice: Math.round(distance),
-      startTime: new Date(),
-      routePath: [{
+      punchInTime: new Date(),
+      punchInLocation: {
         type: "Point",
-        coordinates: [location.longitude, location.latitude],
-        timestamp: new Date(),
-        accuracy: location.accuracy
-      }],
-      createdBy: salesPersonId,
-      punchInPhoto
+        coordinates: [parsedLocation.lng, parsedLocation.lat]
+      },
+      punchInPhoto,
+      punchInAddress: parsedLocation.address || "",
+      routePath: [routePoint],
+      createdBy: salesPersonId
     }], { session });
 
     await session.commitTransaction();
@@ -121,137 +128,175 @@ export const punchIn = async (req, res) => {
       message: "Punched in successfully",
       sessionId,
       session: newSession[0],
-      punchEvent: punchEvent[0],
-      isWithinRadius,
-      distance: Math.round(distance),
       requiresFormCompletion: true
     });
 
   } catch (error) {
     await session.abortTransaction();
+    console.error('PunchIn error:', error);
     res.status(500).json({ error: error.message });
   } finally {
     session.endSession();
   }
 };
 
-// ========== COMPLETE SALES FORM (After Punch In) ==========
+// ========== UPDATE ROUTE (Optional - for real-time tracking) ==========
+export const updateRoute = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { location, deviceInfo } = req.body;
+
+    const parsedLocation = typeof location === 'string' ? JSON.parse(location) : location;
+
+    if (!sessionId || !parsedLocation || !parsedLocation.lat || !parsedLocation.lng) {
+      return res.status(400).json({ error: "Missing required fields: sessionId, location" });
+    }
+
+    // Find session
+    const salesSession = await SalesSession.findOne({ sessionId, status: "in_progress" });
+    if (!salesSession) {
+      return res.status(404).json({ error: "Session not found or already completed" });
+    }
+
+    // Get last route point
+    const lastPoint = salesSession.routePath[salesSession.routePath.length - 1];
+
+    // Calculate time difference
+    const now = new Date();
+    const timeDiff = (now - lastPoint.timestamp) / 1000; // seconds
+
+    // Calculate distance from last point
+    const distance = calculateDistance(
+      lastPoint.location.coordinates[1],
+      lastPoint.location.coordinates[0],
+      parsedLocation.lat,
+      parsedLocation.lng
+    );
+
+    // Calculate speed (m/s)
+    const speed = timeDiff > 0 ? distance / timeDiff : 0;
+
+    // Create new route point
+    const routePoint = {
+      location: {
+        type: "Point",
+        coordinates: [parsedLocation.lng, parsedLocation.lat]
+      },
+      timestamp: now,
+      accuracy: parsedLocation.accuracy || 0,
+      speed: speed,
+      heading: parsedLocation.heading || 0
+    };
+
+    // Update session
+    const updatedSession = await SalesSession.findOneAndUpdate(
+      { sessionId },
+      {
+        $push: { routePath: routePoint },
+        $inc: { totalDistance: distance }
+      },
+      { new: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Route updated",
+      distanceAdded: Math.round(distance),
+      totalDistance: Math.round(updatedSession.totalDistance),
+      speed: Math.round(speed * 3.6) // Convert to km/h for response
+    });
+
+  } catch (error) {
+    console.error('UpdateRoute error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ========== COMPLETE SALES FORM ==========
 export const completeSalesForm = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const {
-      // Sales Details
-      salesDetails,
-      visitOutcome,
-      remark,
-      salesStatus,
-      closureProbability,
-      
- 
-      // Payment
-      payment,
-      
-      // Next Meeting
+      customer,
+      sales,
       nextMeeting,
-      
-      // Attachments
-      attachments,
-      signature,
-      
-      // Contact Updates
-      contactUpdates
+      evideinceVisite,
+      SalesStatus
     } = req.body;
 
+    // Parse JSON strings if needed
+    const parsedCustomer = typeof customer === 'string' ? JSON.parse(customer) : customer;
+    const parsedSales = typeof sales === 'string' ? JSON.parse(sales) : sales;
+    const parsedNextMeeting = typeof nextMeeting === 'string' ? JSON.parse(nextMeeting) : nextMeeting;
+    const parsedEvidence = typeof evideinceVisite === 'string' ? JSON.parse(evideinceVisite) : evideinceVisite;
+
     // Find session
-    const session = await SalesSession.findOne({ sessionId });
-    if (!session) {
+    const salesSession = await SalesSession.findOne({ sessionId });
+    if (!salesSession) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    if (session.status !== "in_progress") {
+    if (salesSession.status !== "in_progress") {
       return res.status(400).json({ error: "Session is not in progress" });
     }
 
-    // Update contact info if provided
-    if (contactUpdates && session.contactId) {
-      await Contact.findByIdAndUpdate(session.contactId, {
-        $set: {
-          ...contactUpdates,
-          lastVisitDate: new Date()
-        },
-        $inc: { totalVisits: 1 }
-      });
+    // Upload shop photo if provided
+    let shopPhoto = null;
+    if (req.files && req.files.shopPhoto) {
+      shopPhoto = await uploadImage(req.files.shopPhoto[0], 'sales/shop-photos');
     }
 
-   
-
-    // Create payment if provided
-    let paymentDoc = null;
-    if (payment && payment.amount > 0) {
-      paymentDoc = await SalesPayment.create({
-        sessionId: session._id,
-        amount: payment.amount,
-        currency: payment.currency || "INR",
-        paymentMode: payment.paymentMode,
-        transactionId: payment.transactionId,
-        paymentDate: payment.paymentDate || new Date(),
-        status: payment.status || "pending",
-        notes: payment.notes,
-        partialPayment: payment.amount < totalAmount,
-        installments: payment.installments
-      });
+    // Upload visit photo if provided
+    let visitPhoto = null;
+    if (req.files && req.files.visitPhoto) {
+      visitPhoto = await uploadImage(req.files.visitPhoto[0], 'sales/visit-photos');
     }
 
-    // Create next meeting if decided
-    let nextMeetingDoc = null;
-    if (nextMeeting && nextMeeting.isDecided) {
-      nextMeetingDoc = await NextMeeting.create({
-        sessionId: session._id,
-        isDecided: true,
-        meetingDate: nextMeeting.meetingDate,
-        meetingTime: nextMeeting.meetingTime,
-        agenda: nextMeeting.agenda,
-        location: nextMeeting.location,
-        meetingType: nextMeeting.meetingType,
-        meetingLink: nextMeeting.meetingLink,
-        notes: nextMeeting.notes,
-        createdBy: session.salesPersonId
-      });
-    } else if (nextMeeting && !nextMeeting.isDecided) {
-      nextMeetingDoc = await NextMeeting.create({
-        sessionId: session._id,
-        isDecided: false,
-        notes: nextMeeting.notes || "Next meeting not decided",
-        createdBy: session.salesPersonId
-      });
-    }
-
-    // Update session with all data
+    // Prepare update data
     const updateData = {
-      salesDetails,
-      visitOutcome,
-      remark,
-      salesStatus,
-      closureProbability,
-      attachments,
-      signature,
-      totalAmount,
-      amountReceived: payment?.amount || 0,
-      pendingAmount: totalAmount - (payment?.amount || 0),
-      lastModifiedBy: req.userId
+      // Customer details
+      customer: {
+        companyName: parsedCustomer?.companyName || salesSession.customer?.companyName,
+        contactName: parsedCustomer?.contactName || salesSession.customer?.contactName,
+        phoneNumber: parsedCustomer?.phoneNumber || salesSession.customer?.phoneNumber,
+        address: parsedCustomer?.address || salesSession.customer?.address,
+        landmark: parsedCustomer?.landmark || salesSession.customer?.landmark,
+        location: parsedCustomer?.location ? {
+          type: "Point",
+          coordinates: [parsedCustomer.location.lng, parsedCustomer.location.lat]
+        } : salesSession.customer?.location,
+        shopPhoto: shopPhoto || salesSession.customer?.shopPhoto
+      },
+
+      // Sales details
+      sales: {
+        dealStatus: parsedSales?.dealStatus || "Negotiation",
+        paymentCollected: parsedSales?.paymentCollected || false,
+        amount: parsedSales?.amount || 0,
+        paymentMode: parsedSales?.paymentMode,
+        paymentDate: parsedSales?.paymentDate
+      },
+
+      SalesStatus: SalesStatus || "open",
+
+      // Next meeting
+      nextMeeting: {
+        decided: parsedNextMeeting?.decided || false,
+        date: parsedNextMeeting?.date,
+        time: parsedNextMeeting?.time,
+        notes: parsedNextMeeting?.notes
+      },
+
+      // Evidence/Visit notes
+      evideinceVisite: {
+        visitNotes: parsedEvidence?.visitNotes,
+        visitPhoto: visitPhoto || salesSession.evideinceVisite?.visitPhoto
+      },
+
+      updatedBy: req.userId
     };
 
-    if (paymentDoc) {
-      updateData.paymentIds = [paymentDoc._id];
-    }
-
-    if (nextMeetingDoc) {
-      updateData.nextMeetingId = nextMeetingDoc._id;
-      if (nextMeeting?.meetingDate) {
-        updateData.nextMeetingDate = nextMeeting.meetingDate;
-      }
-    }
-
+    // Update session
     const updatedSession = await SalesSession.findOneAndUpdate(
       { sessionId },
       { $set: updateData },
@@ -261,250 +306,326 @@ export const completeSalesForm = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Sales form completed successfully",
-      session: updatedSession,
-      payment: paymentDoc,
-      nextMeeting: nextMeetingDoc
+      session: updatedSession
     });
 
   } catch (error) {
+    console.error('CompleteForm error:', error);
     res.status(500).json({ error: error.message });
   }
 };
 
 // ========== PUNCH OUT ==========
 export const punchOut = async (req, res) => {
-  const dbSession = await mongoose.startSession();
-  dbSession.startTransaction();
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
-    const {
-      sessionId,
-      location,
-      officeLocation,
-      geofenceRadius,
-      punchOutPhoto,
-      deviceInfo
-    } = req.body;
+    const { sessionId, location } = req.body;
 
-    if (!sessionId || !location || !officeLocation) {
-      return res.status(400).json({ error: "Missing required fields" });
+    // Parse location if sent as JSON string
+    const parsedLocation = typeof location === 'string' ? JSON.parse(location) : location;
+
+    if (!sessionId || !parsedLocation || !parsedLocation.lat || !parsedLocation.lng) {
+      return res.status(400).json({ error: "Missing required fields: sessionId, location" });
     }
 
     // Find session
-    const session = await SalesSession.findOne({ sessionId });
-    if (!session) {
+    const salesSession = await SalesSession.findOne({ sessionId });
+    if (!salesSession) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    if (session.status !== "in_progress") {
+    if (salesSession.status !== "in_progress") {
       return res.status(400).json({ error: "Session is not in progress" });
     }
 
-    // Calculate distance
-    const distance = calculateDistance(
-      officeLocation.latitude,
-      officeLocation.longitude,
-      location.latitude,
-      location.longitude
+    // Upload punch-out photo if provided
+    let punchOutPhoto = null;
+    if (req.file) {
+      punchOutPhoto = await uploadImage(req.file, 'sales/punch-out');
+    }
+
+    // Get last route point
+    const lastPoint = salesSession.routePath[salesSession.routePath.length - 1];
+
+    // Calculate distance from last point to punch out location
+    const finalDistance = calculateDistance(
+      lastPoint.location.coordinates[1],
+      lastPoint.location.coordinates[0],
+      parsedLocation.lat,
+      parsedLocation.lng
     );
 
-    const isWithinRadius = distance <= geofenceRadius;
+    // Calculate total duration in seconds
+    const punchOutTime = new Date();
+    const durationSeconds = Math.round((punchOutTime - salesSession.punchInTime) / 1000);
+    const durationMinutes = Math.round(durationSeconds / 60);
 
-    // Create punch-out event
-    const punchEvent = await SalesPunchEvent.create([{
-      eventType: "punch_out",
-      sessionId,
-      salesPersonId: session.salesPersonId,
-      companyId: session.companyId,
-      eventTime: new Date(),
+    // Create final route point
+    const finalRoutePoint = {
       location: {
         type: "Point",
-        coordinates: [location.longitude, location.latitude]
+        coordinates: [parsedLocation.lng, parsedLocation.lat]
       },
-      isWithinRadius,
-      distanceFromOffice: Math.round(distance),
-      rejectionReason: isWithinRadius ? null : "Outside geofence",
-      deviceInfo,
-      photoAttachment: punchOutPhoto
-    }], { session: dbSession });
-
-    // Calculate duration
-    const endTime = new Date();
-    const durationMs = endTime - session.startTime;
-    const durationMinutes = Math.round(durationMs / 1000 / 60);
-
-    // Calculate total distance from route
-    let totalDistance = 0;
-    const routePath = session.routePath || [];
-
-    for (let i = 0; i < routePath.length - 1; i++) {
-      const dist = calculateDistance(
-        routePath[i].coordinates[1],
-        routePath[i].coordinates[0],
-        routePath[i + 1].coordinates[1],
-        routePath[i + 1].coordinates[0]
-      );
-      totalDistance += dist;
-    }
-
-    // Add final distance
-    if (routePath.length > 0) {
-      const lastPoint = routePath[routePath.length - 1];
-      const finalDist = calculateDistance(
-        lastPoint.coordinates[1],
-        lastPoint.coordinates[0],
-        location.latitude,
-        location.longitude
-      );
-      totalDistance += finalDist;
-    }
+      timestamp: punchOutTime,
+      accuracy: parsedLocation.accuracy || 0,
+      speed: 0,
+      heading: 0
+    };
 
     // Update session
     const updatedSession = await SalesSession.findOneAndUpdate(
       { sessionId },
       {
         status: "completed",
-        endTime,
-        duration: durationMinutes,
-        isWithinRadius,
-        distanceFromOffice: Math.round(distance),
-        totalDistance: Math.round(totalDistance),
+        punchOutTime,
+        punchOutLocation: {
+          type: "Point",
+          coordinates: [parsedLocation.lng, parsedLocation.lat]
+        },
         punchOutPhoto,
-        $push: {
-          routePath: {
-            type: "Point",
-            coordinates: [location.longitude, location.latitude],
-            timestamp: endTime,
-            accuracy: location.accuracy
-          }
-        }
+        punchOutAddress: parsedLocation.address || "",
+        $push: { routePath: finalRoutePoint },
+        $inc: { totalDistance: finalDistance },
+        duration: durationSeconds
       },
-      { new: true, session: dbSession }
+      { new: true, session }
     );
 
-    await dbSession.commitTransaction();
+    await session.commitTransaction();
 
-    res.status(200).json({
+    // Prepare response
+    const response = {
       success: true,
       message: "Punched out successfully",
       sessionId,
       session: updatedSession,
-      punchEvent: punchEvent[0],
-      duration: durationMinutes,
-      totalDistance: Math.round(totalDistance)
-    });
+      summary: {
+        duration: {
+          seconds: durationSeconds,
+          minutes: durationMinutes,
+          formatted: durationMinutes >= 60 ?
+            `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m` :
+            `${durationMinutes}m`
+        },
+        totalDistance: {
+          meters: Math.round(updatedSession.totalDistance),
+          kilometers: (updatedSession.totalDistance / 1000).toFixed(2),
+          formatted: updatedSession.totalDistance > 1000 ?
+            `${(updatedSession.totalDistance / 1000).toFixed(2)} km` :
+            `${Math.round(updatedSession.totalDistance)} m`
+        },
+        routePoints: updatedSession.routePath.length
+      }
+    };
+
+    res.status(200).json(response);
 
   } catch (error) {
-    await dbSession.abortTransaction();
+    await session.abortTransaction();
+    console.error('PunchOut error:', error);
     res.status(500).json({ error: error.message });
   } finally {
-    dbSession.endSession();
+    session.endSession();
   }
 };
 
-// ========== GET SESSION WITH ALL DETAILS ==========
-export const getFullSessionDetails = async (req, res) => {
+// ========== GET SESSION DETAILS ==========
+export const getSessionDetails = async (req, res) => {
   try {
     const { sessionId } = req.params;
 
     const session = await SalesSession.findOne({ sessionId })
-      .populate("salesPersonId", "name email phone profilePic")
-      .populate("companyId", "name location")
-      .populate("contactId")
-      .populate("paymentIds")
-      .populate("nextMeetingId");
+      .populate("salesPersonId", "name email phone")
+      .populate("companyId", "name address");
 
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    const punchEvents = await SalesPunchEvent.find({ sessionId }).sort({ eventTime: 1 });
+    // Calculate additional stats
+    const stats = {
+      duration: {
+        seconds: session.duration,
+        minutes: Math.round(session.duration / 60),
+        formatted: session.duration >= 3600 ?
+          `${Math.floor(session.duration / 3600)}h ${Math.floor((session.duration % 3600) / 60)}m` :
+          `${Math.round(session.duration / 60)}m`
+      },
+      distance: {
+        meters: session.totalDistance,
+        kilometers: (session.totalDistance / 1000).toFixed(2),
+        formatted: session.totalDistance > 1000 ?
+          `${(session.totalDistance / 1000).toFixed(2)} km` :
+          `${Math.round(session.totalDistance)} m`
+      },
+      routePoints: session.routePath.length,
+      hasCustomerData: !!session.customer?.contactName,
+      hasPayment: session.sales?.paymentCollected,
+      hasNextMeeting: session.nextMeeting?.decided
+    };
 
     res.status(200).json({
       success: true,
       session,
-      punchEvents,
-      timeline: {
-        start: session.startTime,
-        end: session.endTime,
-        duration: session.duration,
-        events: punchEvents
-      }
+      stats
     });
 
   } catch (error) {
+    console.error('GetSession error:', error);
     res.status(500).json({ error: error.message });
   }
 };
 
-
-const getSessions = async (req, res) => {
-    // Implementation from your original code
-    try {
-      const { salesPersonId, companyId, status, startDate, endDate, page = 1, limit = 10 } = req.query;
-      const query = { isDeleted: false };
-      if (salesPersonId) query.salesPersonId = salesPersonId;
-      if (companyId) query.companyId = companyId;
-      if (status) query.status = status;
-      if (startDate || endDate) {
-        query.startTime = {};
-        if (startDate) query.startTime.$gte = new Date(startDate);
-        if (endDate) query.startTime.$lte = new Date(endDate);
-      }
-      const skip = (page - 1) * limit;
-      const sessions = await SalesSession.find(query)
-        .populate("salesPersonId", "name email")
-        .populate("companyId", "name")
-        .populate("contactId", "name phone")
-        .sort({ startTime: -1 })
-        .skip(skip)
-        .limit(parseInt(limit));
-      const total = await SalesSession.countDocuments(query);
-      res.status(200).json({ success: true, data: sessions, pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / limit) } });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  }
-
-// ========== UPDATE SESSION WITH ADDITIONAL DATA ==========
-export const updateSessionData = async (req, res) => {
+// ========== GET ALL SESSIONS ==========
+export const getSessions = async (req, res) => {
   try {
-    const { sessionId } = req.params;
-    const updateData = req.body;
+    const {
+      salesPersonId,
+      companyId,
+      status,
+      startDate,
+      endDate,
+      page = 1,
+      limit = 10
+    } = req.query;
 
-    const allowedUpdates = [
-      "salesDetails", "visitOutcome", "remark", "salesStatus",
-      "closureProbability", "attachments", "signature",
-      "internalNotes", "nextMeetingDate"
-    ];
+    const query = {};
 
-    const filteredUpdate = {};
-    allowedUpdates.forEach(field => {
-      if (updateData[field] !== undefined) {
-        filteredUpdate[field] = updateData[field];
-      }
-    });
+    if (salesPersonId) query.salesPersonId = salesPersonId;
+    if (companyId) query.companyId = companyId;
+    if (status) query.status = status;
 
-    filteredUpdate.lastModifiedBy = req.userId;
-
-    const updatedSession = await SalesSession.findOneAndUpdate(
-      { sessionId },
-      { $set: filteredUpdate },
-      { new: true }
-    );
-
-    if (!updatedSession) {
-      return res.status(404).json({ error: "Session not found" });
+    // Date range filter
+    if (startDate || endDate) {
+      query.punchInTime = {};
+      if (startDate) query.punchInTime.$gte = new Date(startDate);
+      if (endDate) query.punchInTime.$lte = new Date(endDate);
     }
+
+    const skip = (page - 1) * limit;
+
+    const sessions = await SalesSession.find(query)
+      .populate("salesPersonId", "name email")
+      .populate("companyId", "name")
+      .sort({ punchInTime: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await SalesSession.countDocuments(query);
+
+    // Summary stats
+    const summary = {
+      totalSessions: total,
+      totalDistance: sessions.reduce((sum, s) => sum + (s.totalDistance || 0), 0),
+      totalDuration: sessions.reduce((sum, s) => sum + (s.duration || 0), 0),
+      totalSales: sessions.reduce((sum, s) => sum + (s.sales?.amount || 0), 0),
+      completedVisits: sessions.filter(s => s.status === "completed").length,
+      paymentsCollected: sessions.filter(s => s.sales?.paymentCollected).length
+    };
 
     res.status(200).json({
       success: true,
-      message: "Session updated successfully",
-      session: updatedSession
+      data: sessions,
+      summary,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit)
+      }
     });
 
   } catch (error) {
+    console.error('GetSessions error:', error);
     res.status(500).json({ error: error.message });
   }
 };
 
+// ========== GET TODAY'S SESSIONS ==========
+export const getTodaySessions = async (req, res) => {
+  try {
+    const { salesPersonId } = req.query;
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const query = {
+      punchInTime: { $gte: startOfDay, $lte: endOfDay }
+    };
+
+    if (salesPersonId) query.salesPersonId = salesPersonId;
+
+    const sessions = await SalesSession.find(query)
+      .populate("salesPersonId", "name email")
+      .sort({ punchInTime: -1 });
+
+    const stats = {
+      totalVisits: sessions.length,
+      completedVisits: sessions.filter(s => s.status === "completed").length,
+      inProgressVisits: sessions.filter(s => s.status === "in_progress").length,
+      totalDistance: sessions.reduce((sum, s) => sum + (s.totalDistance || 0), 0),
+      totalSales: sessions.reduce((sum, s) => sum + (s.sales?.amount || 0), 0),
+      paymentsCollected: sessions.filter(s => s.sales?.paymentCollected).length
+    };
+
+    res.status(200).json({
+      success: true,
+      date: startOfDay,
+      stats,
+      data: sessions
+    });
+
+  } catch (error) {
+    console.error('GetTodaySessions error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ========== GET SESSION ROUTE MAP ==========
+export const getSessionRoute = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await SalesSession.findOne({ sessionId });
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const route = {
+      sessionId: session.sessionId,
+      salesPersonId: session.salesPersonId,
+      punchIn: {
+        time: session.punchInTime,
+        location: session.punchInLocation,
+        address: session.punchInAddress,
+        photo: session.punchInPhoto
+      },
+      punchOut: session.punchOutTime ? {
+        time: session.punchOutTime,
+        location: session.punchOutLocation,
+        address: session.punchOutAddress,
+        photo: session.punchOutPhoto
+      } : null,
+      routePath: session.routePath,
+      stats: {
+        totalDistance: session.totalDistance,
+        duration: session.duration,
+        numberOfPoints: session.routePath.length
+      }
+    };
+
+    res.status(200).json({
+      success: true,
+      route
+    });
+
+  } catch (error) {
+    console.error('GetSessionRoute error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
