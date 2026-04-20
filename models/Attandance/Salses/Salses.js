@@ -2,7 +2,33 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
-// Simple attachment
+// ================= GEO SCHEMA =================
+const geoSchema = new Schema(
+  {
+    type: {
+      type: String,
+      enum: ["Point"]
+    },
+    coordinates: {
+      type: [Number],
+      validate: {
+        validator: function (v) {
+          if (!v) return true; // allow undefined
+          return (
+            Array.isArray(v) &&
+            v.length === 2 &&
+            typeof v[0] === "number" &&
+            typeof v[1] === "number"
+          );
+        },
+        message: "Coordinates must be [lng, lat]"
+      }
+    }
+  },
+  { _id: false }
+);
+
+// ================= ATTACHMENT =================
 const attachmentSchema = new Schema(
   {
     url: String,
@@ -12,16 +38,12 @@ const attachmentSchema = new Schema(
   { _id: false }
 );
 
-// Simple route point
+// ================= ROUTE POINT =================
 const routePointSchema = new Schema(
   {
     location: {
-      type: {
-        type: String,
-        enum: ["Point"],
-        default: "Point"
-      },
-      coordinates: [Number]
+      type: geoSchema,
+      required: true
     },
     timestamp: { type: Date, default: Date.now },
     accuracy: { type: Number, default: 0 },
@@ -31,78 +53,53 @@ const routePointSchema = new Schema(
   { _id: true }
 );
 
-// Main sales session schema
+// ================= MAIN SCHEMA =================
 const salesSessionSchema = new Schema(
   {
     sessionId: { type: String, required: true, unique: true, index: true },
-    salesPersonId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    companyId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    salesPersonId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    companyId: { type: Schema.Types.ObjectId, ref: "User", required: true },
 
-    // Punch in
-    punchInTime: { type: Date, required: true, index: true },
+    // ===== Punch In =====
+    punchInTime: { type: Date, required: true },
     punchInLocation: {
-      type: {
-        type: String,
-        enum: ["Point"],
-        required: true,
-        default: "Point"
-      },
-      coordinates: {
-        type: [Number],
-        required: true,
-        validate: {
-          validator: function (value) {
-            return (
-              Array.isArray(value) &&
-              value.length === 2 &&
-              typeof value[0] === "number" &&
-              typeof value[1] === "number"
-            );
-          },
-          message: "Coordinates must be [longitude, latitude]"
-        }
-      }
+      type: geoSchema,
+      required: true
     },
     punchInPhoto: attachmentSchema,
     punchInAddress: { type: String, default: "" },
 
-    // Punch out
+    // ===== Punch Out =====
     punchOutTime: Date,
     punchOutLocation: {
-      type: {
-        type: String,
-        enum: ["Point"],
-        default: "Point"
-      },
-      coordinates: [Number]
+      type: geoSchema,
+      default: null   // ✅ IMPORTANT
     },
     punchOutPhoto: attachmentSchema,
     punchOutAddress: { type: String, default: "" },
 
-    // Route
+    // ===== Route =====
     routePath: [routePointSchema],
     totalDistance: { type: Number, default: 0 },
     duration: { type: Number, default: 0 },
 
-    // Customer
+    // ===== Customer =====
     customer: {
       companyName: String,
       contactName: String,
       phoneNumber: String,
       address: String,
       landmark: String,
+
       location: {
-        type: {
-          type: String,
-          enum: ["Point"],
-          default: "Point"
-        },
-        coordinates: [Number]
+        type: geoSchema,
+        default: null   // ✅ IMPORTANT
       },
+
       shopPhoto: attachmentSchema
     },
 
-    // Sales
+    // ===== Sales =====
     sales: {
       dealStatus: {
         type: String,
@@ -115,9 +112,12 @@ const salesSessionSchema = new Schema(
       paymentDate: Date
     },
 
-    SalesStatus: { type: String, enum: ["open", "close", "suspened"], default: "open", index: true },
+    SalesStatus: {
+      type: String,
+      enum: ["open", "close", "suspened"],
+      default: "open"
+    },
 
-    // Next meeting
     nextMeeting: {
       decided: { type: Boolean, default: false },
       date: Date,
@@ -125,63 +125,27 @@ const salesSessionSchema = new Schema(
       notes: String
     },
 
-    // Evidence
     evideinceVisite: {
       visitNotes: String,
       visitPhoto: attachmentSchema
     },
 
-    // Status
-    status: { type: String, enum: ["in_progress", "completed"], default: "in_progress", index: true },
+    status: {
+      type: String,
+      enum: ["in_progress", "completed"],
+      default: "in_progress"
+    },
+
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User" }
   },
   { timestamps: true }
 );
 
-// Pre-save middleware to ensure coordinates are primitives
-salesSessionSchema.pre("save", function (next) {
-  try {
-    // punchInLocation
-    if (this.punchInLocation && Array.isArray(this.punchInLocation.coordinates)) {
-      this.punchInLocation.type = "Point";
-      this.punchInLocation.coordinates = this.punchInLocation.coordinates.map(c => Number(c));
-    }
-
-    // punchOutLocation
-    if (this.punchOutLocation && Array.isArray(this.punchOutLocation.coordinates)) {
-      this.punchOutLocation.type = "Point";
-      this.punchOutLocation.coordinates = this.punchOutLocation.coordinates.map(c => Number(c));
-    }
-
-    // customer location
-    if (this.customer?.location && Array.isArray(this.customer.location.coordinates)) {
-      this.customer.location.type = "Point";
-      this.customer.location.coordinates = this.customer.location.coordinates.map(c => Number(c));
-    }
-
-    // routePath locations
-    if (Array.isArray(this.routePath)) {
-      this.routePath.forEach(point => {
-        if (point.location && Array.isArray(point.location.coordinates)) {
-          point.location.type = "Point";
-          point.location.coordinates = point.location.coordinates.map(c => Number(c));
-        }
-      });
-    }
-
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Geospatial indexes
+// ================= GEO INDEX =================
 salesSessionSchema.index({ punchInLocation: "2dsphere" });
+salesSessionSchema.index({ punchOutLocation: "2dsphere" });
 salesSessionSchema.index({ "customer.location": "2dsphere" });
 salesSessionSchema.index({ "routePath.location": "2dsphere" });
-salesSessionSchema.index({ salesPersonId: 1, punchInTime: -1 });
-salesSessionSchema.index({ companyId: 1, punchInTime: -1 });
-salesSessionSchema.index({ status: 1, punchInTime: -1 });
 
 export const SalesSession = mongoose.model("SalesSession", salesSessionSchema);
