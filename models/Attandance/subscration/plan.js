@@ -35,6 +35,23 @@ const planSchema = new mongoose.Schema({
     finalPrice: {
         type: Number,
     },
+    features: {
+        UAI_Pro: {
+            type: Boolean,
+            default: false,
+        },
+        UAI_Basic: {
+            type: Boolean,
+            default: true,
+        },
+        UAI_Sales: {
+            type: Boolean,
+            default: false,
+        },
+    },
+
+
+
     validityDays: {
         type: Number,
         required: true,
@@ -55,7 +72,7 @@ const planSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
-    
+
     features: [featureSchema],
     isActive: {
         type: Boolean,

@@ -171,18 +171,7 @@ const salesSessionSchema = new Schema(
     attachments: [attachmentSchema],
     signature: attachmentSchema,
 
-    // Products/Services
-    productsSold: [
-      {
-        productId: { type: Schema.Types.ObjectId, ref: "Product" },
-        productName: String,
-        quantity: Number,
-        unitPrice: Number,
-        discount: Number,
-        totalPrice: Number,
-        gst: Number
-      }
-    ],
+  
 
     // Payments
     paymentIds: [{ type: Schema.Types.ObjectId, ref: "SalesPayment" }],

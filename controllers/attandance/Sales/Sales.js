@@ -147,9 +147,7 @@ export const completeSalesForm = async (req, res) => {
       salesStatus,
       closureProbability,
       
-      // Products
-      productsSold,
-      
+ 
       // Payment
       payment,
       
@@ -185,11 +183,7 @@ export const completeSalesForm = async (req, res) => {
       });
     }
 
-    // Calculate totals
-    let totalAmount = 0;
-    if (productsSold && productsSold.length > 0) {
-      totalAmount = productsSold.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-    }
+   
 
     // Create payment if provided
     let paymentDoc = null;
@@ -239,7 +233,6 @@ export const completeSalesForm = async (req, res) => {
       remark,
       salesStatus,
       closureProbability,
-      productsSold,
       attachments,
       signature,
       totalAmount,
@@ -481,7 +474,7 @@ export const updateSessionData = async (req, res) => {
 
     const allowedUpdates = [
       "salesDetails", "visitOutcome", "remark", "salesStatus",
-      "closureProbability", "productsSold", "attachments", "signature",
+      "closureProbability", "attachments", "signature",
       "internalNotes", "nextMeetingDate"
     ];
 
