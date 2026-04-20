@@ -112,7 +112,7 @@ export const punchIn = async (req, res) => {
       });
     }
     console.log("PunchIn request body:", req.body);
-    
+
     // Normalize input early
     if (typeof location === "string") {
       location = JSON.parse(location);
@@ -120,7 +120,7 @@ export const punchIn = async (req, res) => {
 
     const validatedLocation = validateLocation(location);
     console.log("Validated Location:", validatedLocation);
-    
+
     const parsedDeviceInfo =
       typeof deviceInfo === "string" ? JSON.parse(deviceInfo) : deviceInfo;
 
@@ -715,6 +715,62 @@ export const getSessionRoute = async (req, res) => {
 
   } catch (error) {
     console.error('GetSessionRoute error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+
+//--========= get Active  ==========
+
+export const getActiveSessionAgg = async (req, res) => {
+  try {
+    const { salesPersonId } = req.query;
+
+    const pipeline = [
+      {
+        $match: {
+          salesPersonId: new mongoose.Types.ObjectId(salesPersonId),
+          $or: [
+            { punchOutTime: null },
+            { status: "in_progress" }
+          ]
+        }
+      },
+      { $sort: { punchInTime: -1 } },
+      { $limit: 1 },
+
+      // optional join
+      {
+        $lookup: {
+          from: "users",
+          localField: "salesPersonId",
+          foreignField: "_id",
+          as: "salesPerson"
+        }
+      },
+      { $unwind: { path: "$salesPerson", preserveNullAndEmptyArrays: true } },
+
+      {
+        $project: {
+          sessionId: 1,
+          punchInTime: 1,
+          location: 1,
+          status: 1,
+          "salesPerson.name": 1,
+          "salesPerson.email": 1
+        }
+      }
+    ];
+
+    const result = await SalesSession.aggregate(pipeline);
+
+    res.status(200).json({
+      success: true,
+      data: result[0] || null
+    });
+
+  } catch (error) {
+    console.error("getActiveSessionAgg error:", error);
     res.status(500).json({ error: error.message });
   }
 };

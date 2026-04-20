@@ -9,7 +9,8 @@ import {
   getSessionDetails,
   getTodaySessions,
   updateRoute,
-  getSessionRoute
+  getSessionRoute,
+  getActiveSessionAgg
 } from "../../../controllers/attandance/Sales/Sales.js";
 
 import authMiddleware from "../../../middlewares/authMiddleware.js";
@@ -120,6 +121,11 @@ router.get(
   "/today",
   authMiddleware,
   getTodaySessions
+);
+router.get(
+  "/getActiveSessionAgg",
+  authMiddleware,
+  getActiveSessionAgg
 );
 
 export default router;
