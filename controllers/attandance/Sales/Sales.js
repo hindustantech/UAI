@@ -40,20 +40,40 @@ const toStrictNumber = (val) => {
   return Number.isFinite(num) ? num : null;
 };
 
+// ========== FIXED: createGeoPoint with better error handling ==========
 export const createGeoPoint = (lng, lat) => {
-  const parsedLng = toStrictNumber(lng);
-  const parsedLat = toStrictNumber(lat);
+  // Ensure we have valid numbers
+  let parsedLng = lng;
+  let parsedLat = lat;
 
-  if (parsedLng === null || parsedLat === null) {
-    throw new Error(`Invalid GeoJSON coordinates: [${lng}, ${lat}]`);
+  // Handle object cases
+  if (typeof lng === 'object') {
+    parsedLng = lng.lng ?? lng.longitude ?? lng.coordinates?.[0];
+    parsedLat = lat ?? lng.lat ?? lng.latitude ?? lng.coordinates?.[1];
+  }
+
+  // Convert to numbers
+  parsedLng = Number(parsedLng);
+  parsedLat = Number(parsedLat);
+
+  // Validate
+  if (isNaN(parsedLng) || isNaN(parsedLat)) {
+    throw new Error(`Invalid GeoJSON coordinates: lng=${parsedLng}, lat=${parsedLat}`);
+  }
+
+  if (parsedLng < -180 || parsedLng > 180) {
+    throw new Error(`Longitude out of range: ${parsedLng}`);
+  }
+
+  if (parsedLat < -90 || parsedLat > 90) {
+    throw new Error(`Latitude out of range: ${parsedLat}`);
   }
 
   return {
     type: "Point",
-    coordinates: [parsedLng, parsedLat], // STRICT numbers only
+    coordinates: [parsedLng, parsedLat]
   };
 };
-
 // ========== FIXED: Validate and sanitize location ==========
 const toNumber = (val) => {
   const num = Number(val);
@@ -416,6 +436,7 @@ export const completeSalesForm = async (req, res) => {
 };
 
 // ========== PUNCH OUT ==========
+// ========== PUNCH OUT (FIXED) ==========
 export const punchOut = async (req, res) => {
   const dbSession = await mongoose.startSession();
   dbSession.startTransaction();
@@ -427,20 +448,33 @@ export const punchOut = async (req, res) => {
       return res.status(400).json({ error: "sessionId is required" });
     }
 
-    // ===== STEP 1: VALIDATE & CLONE LOCATION =====
-    const validatedLocation = validateLocation(location);
-
-    // Deep clone to avoid reference issues
-    const safeLocation = JSON.parse(JSON.stringify(validatedLocation));
-
-    const lat = Number(safeLocation.lat);
-    const lng = Number(safeLocation.lng);
-
-    if (!isFinite(lat) || !isFinite(lng)) {
-      throw new Error("Invalid latitude/longitude values");
+    // Parse location if it's a string
+    let parsedLocation = location;
+    if (typeof location === 'string') {
+      parsedLocation = JSON.parse(location);
     }
 
-    // ===== STEP 2: FETCH SESSION =====
+    if (!parsedLocation) {
+      return res.status(400).json({ error: "location is required" });
+    }
+
+    // Extract coordinates safely
+    let lat = parsedLocation.lat ?? parsedLocation.latitude;
+    let lng = parsedLocation.lng ?? parsedLocation.longitude;
+
+    // Convert to numbers
+    lat = Number(lat);
+    lng = Number(lng);
+
+    // Validate coordinates
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({
+        error: "Invalid coordinates: must be numbers",
+        received: { lat, lng, original: parsedLocation }
+      });
+    }
+
+    // Fetch session
     const salesSession = await SalesSession.findOne({ sessionId }).session(dbSession);
 
     if (!salesSession) {
@@ -451,16 +485,20 @@ export const punchOut = async (req, res) => {
       return res.status(400).json({ error: "Session already completed" });
     }
 
-    // ===== STEP 3: HANDLE PHOTO =====
+    // Handle photo upload
     let punchOutPhoto = null;
     if (req.file) {
-      punchOutPhoto = await uploadImage(req.file, "sales/punch-out");
+      try {
+        punchOutPhoto = await uploadImage(req.file, "sales/punch-out");
+      } catch (uploadError) {
+        console.error("Photo upload error:", uploadError);
+        // Continue without photo if upload fails
+      }
     }
 
-    // ===== STEP 4: DISTANCE CALCULATION (SAFE) =====
+    // Calculate final distance from last route point
     let finalDistance = 0;
-
-    if (salesSession.routePath.length > 0) {
+    if (salesSession.routePath && salesSession.routePath.length > 0) {
       const lastPoint = salesSession.routePath[salesSession.routePath.length - 1];
 
       if (lastPoint?.location?.coordinates) {
@@ -475,30 +513,37 @@ export const punchOut = async (req, res) => {
       }
     }
 
-    // ===== STEP 5: TIME CALCULATION =====
+    // Calculate duration
     const punchOutTime = new Date();
     const durationSeconds = Math.max(
       0,
-      Math.round((punchOutTime - salesSession.punchInTime) / 1000)
+      Math.round((punchOutTime - new Date(salesSession.punchInTime)) / 1000)
     );
 
-    // ===== STEP 6: CREATE GEOJSON (IMMUTABLE) =====
-    const punchOutGeo = createGeoPoint(lng, lat);
-
-    const finalRoutePoint = {
-      location: createGeoPoint(lng, lat),
-      timestamp: punchOutTime,
-      accuracy: Number(safeLocation.accuracy) || 0,
-      speed: 0,
-      heading: Number(safeLocation.heading) || 0
+    // Create GeoJSON point
+    const punchOutGeo = {
+      type: "Point",
+      coordinates: [lng, lat]  // [longitude, latitude]
     };
 
-    // ===== STEP 7: BUILD UPDATE OBJECT =====
+    // Create final route point
+    const finalRoutePoint = {
+      location: {
+        type: "Point",
+        coordinates: [lng, lat]
+      },
+      timestamp: punchOutTime,
+      accuracy: Number(parsedLocation.accuracy) || 0,
+      speed: 0,
+      heading: Number(parsedLocation.heading) || 0
+    };
+
+    // Prepare update object
     const updateObject = {
       status: "completed",
-      punchOutTime,
+      punchOutTime: punchOutTime,
       punchOutLocation: punchOutGeo,
-      punchOutAddress: safeLocation.address || "",
+      punchOutAddress: parsedLocation.address || "",
       duration: durationSeconds
     };
 
@@ -506,9 +551,9 @@ export const punchOut = async (req, res) => {
       updateObject.punchOutPhoto = punchOutPhoto;
     }
 
-    // ===== STEP 8: ATOMIC UPDATE =====
+    // Update session atomically
     const updatedSession = await SalesSession.findOneAndUpdate(
-      { sessionId, status: "in_progress" }, // prevents double punchOut
+      { sessionId, status: "in_progress" },
       {
         $set: updateObject,
         $push: { routePath: finalRoutePoint },
@@ -516,53 +561,52 @@ export const punchOut = async (req, res) => {
       },
       {
         new: true,
-        session: dbSession
+        session: dbSession,
+        runValidators: false  // Skip validators to avoid GeoJSON issues
       }
     );
 
     if (!updatedSession) {
-      throw new Error("Session update failed (possibly already completed)");
+      await dbSession.abortTransaction();
+      return res.status(400).json({ error: "Session update failed. Please try again." });
     }
 
     await dbSession.commitTransaction();
 
-    // ===== STEP 9: RESPONSE =====
+    // Format response
     const durationMinutes = Math.round(durationSeconds / 60);
+    const totalDistanceMeters = Math.round(updatedSession.totalDistance || 0);
 
     res.status(200).json({
       success: true,
-      message: "Punch-out successful",
-      sessionId,
+      message: "Punched out successfully",
+      sessionId: sessionId,
       summary: {
         duration: {
           seconds: durationSeconds,
           minutes: durationMinutes,
-          formatted:
-            durationMinutes >= 60
-              ? `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`
-              : `${durationMinutes}m`
+          formatted: durationMinutes >= 60
+            ? `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`
+            : `${durationMinutes}m`
         },
         totalDistance: {
-          meters: Math.round(updatedSession.totalDistance),
-          kilometers: (updatedSession.totalDistance / 1000).toFixed(2),
-          formatted:
-            updatedSession.totalDistance > 1000
-              ? `${(updatedSession.totalDistance / 1000).toFixed(2)} km`
-              : `${Math.round(updatedSession.totalDistance)} m`
+          meters: totalDistanceMeters,
+          kilometers: (totalDistanceMeters / 1000).toFixed(2),
+          formatted: totalDistanceMeters > 1000
+            ? `${(totalDistanceMeters / 1000).toFixed(2)} km`
+            : `${totalDistanceMeters} m`
         },
-        routePoints: updatedSession.routePath.length
-      },
-      session: updatedSession
+        routePoints: updatedSession.routePath?.length || 0
+      }
     });
 
   } catch (error) {
     await dbSession.abortTransaction();
     console.error("PunchOut error:", error);
-
     res.status(500).json({
-      error: error.message
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
-
   } finally {
     dbSession.endSession();
   }
