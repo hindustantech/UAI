@@ -44,9 +44,24 @@ const salesSessionSchema = new Schema(
       type: {
         type: String,
         enum: ["Point"],
+        required: true,
         default: "Point"
       },
-      coordinates: [Number]
+      coordinates: {
+        type: [Number],
+        required: true,
+        validate: {
+          validator: function (value) {
+            return (
+              Array.isArray(value) &&
+              value.length === 2 &&
+              typeof value[0] === "number" &&
+              typeof value[1] === "number"
+            );
+          },
+          message: "Coordinates must be [longitude, latitude]"
+        }
+      }
     },
     punchInPhoto: attachmentSchema,
     punchInAddress: { type: String, default: "" },
