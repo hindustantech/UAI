@@ -9,6 +9,22 @@ import { fileTypeFromBuffer } from "file-type";
 const generateSessionId = (salesPersonId) => {
   return `${salesPersonId}-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
 };
+// ===== GEO SANITIZER (CRITICAL LAYER) =====
+const safeGeo = (geo) => {
+  if (!geo) return null;
+
+  if (
+    geo.type !== "Point" ||
+    !Array.isArray(geo.coordinates) ||
+    geo.coordinates.length !== 2 ||
+    typeof geo.coordinates[0] !== "number" ||
+    typeof geo.coordinates[1] !== "number"
+  ) {
+    return null;
+  }
+
+  return geo;
+};
 
 // Calculate distance between two points using Haversine formula (in meters)
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -52,9 +68,9 @@ const createGeoPoint = (lng, lat) => {
 // Validate and sanitize location
 const validateLocation = (location) => {
   if (!location) throw new Error("Location is required");
-  
+
   let parsedLocation = location;
-  
+
   if (typeof location === "string") {
     try {
       parsedLocation = JSON.parse(location);
@@ -63,12 +79,12 @@ const validateLocation = (location) => {
     }
   }
 
-  let lat = Number(typeof parsedLocation.lat === 'object' && parsedLocation.lat.valueOf 
-    ? parsedLocation.lat.valueOf() 
+  let lat = Number(typeof parsedLocation.lat === 'object' && parsedLocation.lat.valueOf
+    ? parsedLocation.lat.valueOf()
     : parsedLocation.lat);
-    
-  let lng = Number(typeof parsedLocation.lng === 'object' && parsedLocation.lng.valueOf 
-    ? parsedLocation.lng.valueOf() 
+
+  let lng = Number(typeof parsedLocation.lng === 'object' && parsedLocation.lng.valueOf
+    ? parsedLocation.lng.valueOf()
     : parsedLocation.lng);
 
   if (!isFinite(lat) || !isFinite(lng)) {
@@ -99,37 +115,19 @@ const uploadImage = async (file, folder) => {
 
 // ========== PUNCH IN ==========
 export const punchIn = async (req, res) => {
-  // NOTE: Using session.startTransaction() but NOT using session param in create()
-  // This is the KEY FIX - Mongoose doesn't properly serialize nested schemas with transactions
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const {
-      salesPersonId,
-      companyId,
-      location,
-      deviceInfo
-    } = req.body;
+    const { salesPersonId, companyId, location } = req.body;
 
-    console.log("=== PUNCH IN START ===");
-    console.log("Raw location:", location);
-    
-    // Validate location
     const validatedLocation = validateLocation(location);
-    console.log("Validated location:", validatedLocation);
-    
-    const parsedDeviceInfo = typeof deviceInfo === 'string' ? JSON.parse(deviceInfo) : deviceInfo;
 
-    // Validate required fields
     if (!salesPersonId || !companyId) {
       await session.abortTransaction();
-      return res.status(400).json({
-        error: "Missing required fields: salesPersonId, companyId"
-      });
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Check for active session
     const activeSession = await SalesSession.findOne({
       salesPersonId,
       status: "in_progress"
@@ -138,100 +136,89 @@ export const punchIn = async (req, res) => {
     if (activeSession) {
       await session.abortTransaction();
       return res.status(400).json({
-        error: "You have an active session. Please punch out first.",
-        sessionId: activeSession.sessionId,
-        punchInTime: activeSession.punchInTime
+        error: "Already active session exists"
       });
     }
 
-    // Upload punch-in photo if provided
-    let punchInPhoto = null;
-    if (req.file) {
-      punchInPhoto = await uploadImage(req.file, 'sales/punch-in');
-    }
+    const punchInLocation = createGeoPoint(
+      validatedLocation.lng,
+      validatedLocation.lat
+    );
 
-    const sessionId = generateSessionId(salesPersonId);
-    
-    // Create GeoJSON points - these are PURE objects
-    const punchInLocationGeo = createGeoPoint(validatedLocation.lng, validatedLocation.lat);
-    console.log("PunchIn GeoPoint:", JSON.stringify(punchInLocationGeo));
-
-    const routePointLocation = createGeoPoint(validatedLocation.lng, validatedLocation.lat);
-    console.log("RoutePoint GeoPoint:", JSON.stringify(routePointLocation));
-
-    // Create route point
     const routePoint = {
-      location: routePointLocation,
+      location: punchInLocation,
       timestamp: new Date(),
       accuracy: validatedLocation.accuracy,
       speed: 0,
       heading: validatedLocation.heading
     };
 
-    // Build session data - PLAIN OBJECTS ONLY
     const sessionData = {
-      sessionId,
-      salesPersonId: new mongoose.Types.ObjectId(salesPersonId),
-      companyId: new mongoose.Types.ObjectId(companyId),
+      sessionId: generateSessionId(salesPersonId),
+      salesPersonId,
+      companyId,
       status: "in_progress",
       punchInTime: new Date(),
-      punchInLocation: punchInLocationGeo,  // Plain object
-      ...(punchInPhoto && { punchInPhoto }),
+
+      // ✅ SAFE GEO
+      punchInLocation: safeGeo(punchInLocation),
+
+      // ❌ REMOVE THIS COMPLETELY (IMPORTANT)
+      // punchOutLocation: null,  ← do NOT even include field
+
       punchInAddress: validatedLocation.address || "",
-      punchOutAddress: "",
+
       routePath: [routePoint],
       totalDistance: 0,
       duration: 0,
+
       customer: {
         companyName: "",
         contactName: "",
         phoneNumber: "",
         address: "",
         landmark: ""
+        // ❌ DO NOT ADD location here
       },
+
       sales: {
         dealStatus: "Negotiation",
         paymentCollected: false,
         amount: 0
       },
+
       SalesStatus: "open",
+
       nextMeeting: {
         decided: false,
         time: "",
         notes: ""
       },
+
       evideinceVisite: {
         visitNotes: ""
       },
-      createdBy: new mongoose.Types.ObjectId(salesPersonId)
+
+      createdBy: salesPersonId
     };
 
-    console.log("Session data to save:", JSON.stringify(sessionData, null, 2));
+    // 🔥 FINAL SANITIZATION (LAST DEFENSE)
+    if (!sessionData.punchInLocation) {
+      throw new Error("Invalid GeoJSON");
+    }
 
-    // CRITICAL FIX: Don't pass session to create() - it breaks GeoJSON serialization
-    // The transaction is already started above, but Mongoose can't serialize properly with it
     const newSession = await SalesSession.create([sessionData]);
 
-    // Manually commit using the session
     await session.commitTransaction();
-
-    console.log("✓ Session created successfully");
 
     res.status(201).json({
       success: true,
-      message: "Punched in successfully",
-      sessionId,
-      session: newSession[0],
-      requiresFormCompletion: true
+      session: newSession[0]
     });
 
   } catch (error) {
     await session.abortTransaction();
-    console.error('PunchIn error:', error);
-    res.status(500).json({ 
-      error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    res.status(500).json({ error: error.message });
   } finally {
     session.endSession();
   }
@@ -416,120 +403,42 @@ export const completeSalesForm = async (req, res) => {
 
 // ========== PUNCH OUT ==========
 export const punchOut = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const { sessionId, location } = req.body;
 
     const validatedLocation = validateLocation(location);
-    
-    if (!sessionId) {
-      await session.abortTransaction();
-      return res.status(400).json({ error: "Missing required fields: sessionId" });
+
+    const geo = safeGeo(
+      createGeoPoint(validatedLocation.lng, validatedLocation.lat)
+    );
+
+    if (!geo) {
+      return res.status(400).json({ error: "Invalid geo" });
     }
 
-    // Find session
-    const salesSession = await SalesSession.findOne({ sessionId });
-    if (!salesSession) {
-      await session.abortTransaction();
+    const session = await SalesSession.findOne({ sessionId });
+
+    if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    if (salesSession.status !== "in_progress") {
-      await session.abortTransaction();
-      return res.status(400).json({ error: "Session is not in progress" });
-    }
-
-    // Upload punch-out photo if provided
-    let punchOutPhoto = null;
-    if (req.file) {
-      punchOutPhoto = await uploadImage(req.file, 'sales/punch-out');
-    }
-
-    // Get last route point
-    const lastPoint = salesSession.routePath[salesSession.routePath.length - 1];
-
-    // Calculate distance
-    const finalDistance = calculateDistance(
-      lastPoint.location.coordinates[1],
-      lastPoint.location.coordinates[0],
-      validatedLocation.lat,
-      validatedLocation.lng
-    );
-
-    // Calculate total duration
-    const punchOutTime = new Date();
-    const durationSeconds = Math.round((punchOutTime - salesSession.punchInTime) / 1000);
-
-    // Create final route point
-    const finalRoutePoint = {
-      location: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
-      timestamp: punchOutTime,
-      accuracy: validatedLocation.accuracy,
-      speed: 0,
-      heading: validatedLocation.heading
-    };
-
-    // Prepare update object
-    const updateObject = {
+    const update = {
       status: "completed",
-      punchOutTime,
-      punchOutLocation: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
-      punchOutAddress: validatedLocation.address || "",
-      duration: durationSeconds
+      punchOutTime: new Date(),
+      punchOutLocation: geo,
+      punchOutAddress: validatedLocation.address
     };
 
-    if (punchOutPhoto) {
-      updateObject.punchOutPhoto = punchOutPhoto;
-    }
-
-    // Update session - DON'T pass session to findOneAndUpdate
-    const updatedSession = await SalesSession.findOneAndUpdate(
+    const updated = await SalesSession.findOneAndUpdate(
       { sessionId },
-      {
-        $set: updateObject,
-        $push: { routePath: finalRoutePoint },
-        $inc: { totalDistance: finalDistance }
-      },
+      { $set: update },
       { new: true }
     );
 
-    // Manually commit
-    await session.commitTransaction();
+    res.json(updated);
 
-    const durationMinutes = Math.round(durationSeconds / 60);
-
-    res.status(200).json({
-      success: true,
-      message: "Punched out successfully",
-      sessionId,
-      session: updatedSession,
-      summary: {
-        duration: {
-          seconds: durationSeconds,
-          minutes: durationMinutes,
-          formatted: durationMinutes >= 60 ?
-            `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m` :
-            `${durationMinutes}m`
-        },
-        totalDistance: {
-          meters: Math.round(updatedSession.totalDistance),
-          kilometers: (updatedSession.totalDistance / 1000).toFixed(2),
-          formatted: updatedSession.totalDistance > 1000 ?
-            `${(updatedSession.totalDistance / 1000).toFixed(2)} km` :
-            `${Math.round(updatedSession.totalDistance)} m`
-        },
-        routePoints: updatedSession.routePath.length
-      }
-    });
-
-  } catch (error) {
-    await session.abortTransaction();
-    console.error('PunchOut error:', error);
-    res.status(500).json({ error: error.message });
-  } finally {
-    session.endSession();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 
