@@ -2,6 +2,7 @@ import { SalesSession } from "../../../models/Attandance/Salses/Salses.js";
 import { uploadToCloudinary } from "../../../utils/Cloudinary.js";
 import mongoose from "mongoose";
 import { fileTypeFromBuffer } from "file-type";
+
 // ========== HELPER FUNCTIONS ==========
 
 // Generate unique session ID
@@ -23,9 +24,53 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
+// Helper function to create and validate GeoJSON Point
+const createGeoPoint = (lng, lat) => {
+  // Convert to numbers and validate
+  const longitude = Number(lng);
+  const latitude = Number(lat);
+  
+  if (isNaN(longitude) || isNaN(latitude)) {
+    throw new Error("Invalid coordinates: longitude and latitude must be numbers");
+  }
+  
+  if (longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) {
+    throw new Error("Invalid coordinates: out of range");
+  }
+  
+  return {
+    type: "Point",
+    coordinates: [longitude, latitude]
+  };
+};
+
+// Validate and sanitize location object
+const validateLocation = (location) => {
+  if (!location) throw new Error("Location is required");
+  
+  let parsedLocation = location;
+  if (typeof location === "string") {
+    try {
+      parsedLocation = JSON.parse(location);
+    } catch (error) {
+      throw new Error("Invalid location JSON format");
+    }
+  }
+  
+  if (!parsedLocation.lat || !parsedLocation.lng) {
+    throw new Error("Location must have lat and lng coordinates");
+  }
+  
+  return {
+    lat: Number(parsedLocation.lat),
+    lng: Number(parsedLocation.lng),
+    address: parsedLocation.address || "",
+    accuracy: Number(parsedLocation.accuracy) || 0,
+    heading: Number(parsedLocation.heading) || 0
+  };
+};
+
 // Upload image to Cloudinary
-
-
 const uploadImage = async (file, folder) => {
   if (!file || !file.buffer) return null;
 
@@ -48,33 +93,18 @@ export const punchIn = async (req, res) => {
     const {
       salesPersonId,
       companyId,
-      location,  // { lat, lng, address }
-      deviceInfo // optional device info
+      location,
+      deviceInfo
     } = req.body;
 
-    // Parse JSON strings if needed
-    let parsedLocation;
-
-    try {
-      parsedLocation = typeof location === "string"
-        ? JSON.parse(location)
-        : location;
-    } catch (error) {
-      return res.status(400).json({
-        error: "Invalid location JSON format"
-      });
-    } const parsedDeviceInfo = typeof deviceInfo === 'string' ? JSON.parse(deviceInfo) : deviceInfo;
+    // Validate and parse location
+    const validatedLocation = validateLocation(location);
+    const parsedDeviceInfo = typeof deviceInfo === 'string' ? JSON.parse(deviceInfo) : deviceInfo;
 
     // Validate required fields
-    if (!salesPersonId || !companyId || !parsedLocation) {
+    if (!salesPersonId || !companyId) {
       return res.status(400).json({
-        error: "Missing required fields: salesPersonId, companyId, location"
-      });
-    }
-
-    if (!parsedLocation.lat || !parsedLocation.lng) {
-      return res.status(400).json({
-        error: "Location must have lat and lng coordinates"
+        error: "Missing required fields: salesPersonId, companyId"
       });
     }
 
@@ -102,14 +132,11 @@ export const punchIn = async (req, res) => {
 
     // Create route point for punch in
     const routePoint = {
-      location: {
-        type: "Point",
-        coordinates: [parsedLocation.lng, parsedLocation.lat] // [longitude, latitude]
-      },
+      location: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
       timestamp: new Date(),
-      accuracy: parsedLocation.accuracy || 0,
+      accuracy: validatedLocation.accuracy,
       speed: 0,
-      heading: 0
+      heading: validatedLocation.heading
     };
 
     // Create new session
@@ -119,13 +146,12 @@ export const punchIn = async (req, res) => {
       companyId,
       status: "in_progress",
       punchInTime: new Date(),
-      punchInLocation: {
-        type: "Point",
-        coordinates: [parsedLocation.lng, parsedLocation.lat]
-      },
+      punchInLocation: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
       punchInPhoto,
-      punchInAddress: parsedLocation.address || "",
+      punchInAddress: validatedLocation.address,
       routePath: [routePoint],
+      totalDistance: 0,
+      duration: 0,
       createdBy: salesPersonId
     }], { session });
 
@@ -154,20 +180,10 @@ export const updateRoute = async (req, res) => {
     const { sessionId } = req.params;
     const { location, deviceInfo } = req.body;
 
-    let parsedLocation;
+    const validatedLocation = validateLocation(location);
 
-    try {
-      parsedLocation = typeof location === "string"
-        ? JSON.parse(location)
-        : location;
-    } catch (error) {
-      return res.status(400).json({
-        error: "Invalid location JSON format"
-      });
-    }
-
-    if (!sessionId || !parsedLocation || !parsedLocation.lat || !parsedLocation.lng) {
-      return res.status(400).json({ error: "Missing required fields: sessionId, location" });
+    if (!sessionId) {
+      return res.status(400).json({ error: "Missing required fields: sessionId" });
     }
 
     // Find session
@@ -187,8 +203,8 @@ export const updateRoute = async (req, res) => {
     const distance = calculateDistance(
       lastPoint.location.coordinates[1],
       lastPoint.location.coordinates[0],
-      parsedLocation.lat,
-      parsedLocation.lng
+      validatedLocation.lat,
+      validatedLocation.lng
     );
 
     // Calculate speed (m/s)
@@ -196,14 +212,11 @@ export const updateRoute = async (req, res) => {
 
     // Create new route point
     const routePoint = {
-      location: {
-        type: "Point",
-        coordinates: [parsedLocation.lng, parsedLocation.lat]
-      },
+      location: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
       timestamp: now,
-      accuracy: parsedLocation.accuracy || 0,
+      accuracy: validatedLocation.accuracy,
       speed: speed,
-      heading: parsedLocation.heading || 0
+      heading: validatedLocation.heading
     };
 
     // Update session
@@ -270,6 +283,21 @@ export const completeSalesForm = async (req, res) => {
       visitPhoto = await uploadImage(req.files.visitPhoto[0], 'sales/visit-photos');
     }
 
+    // Prepare customer location with validation
+    let customerLocation = salesSession.customer?.location;
+    if (parsedCustomer?.location) {
+      try {
+        // Ensure coordinates are numbers
+        const lng = Number(parsedCustomer.location.lng);
+        const lat = Number(parsedCustomer.location.lat);
+        if (!isNaN(lng) && !isNaN(lat)) {
+          customerLocation = createGeoPoint(lng, lat);
+        }
+      } catch (error) {
+        console.error('Error creating customer location:', error);
+      }
+    }
+
     // Prepare update data
     const updateData = {
       // Customer details
@@ -279,10 +307,7 @@ export const completeSalesForm = async (req, res) => {
         phoneNumber: parsedCustomer?.phoneNumber || salesSession.customer?.phoneNumber,
         address: parsedCustomer?.address || salesSession.customer?.address,
         landmark: parsedCustomer?.landmark || salesSession.customer?.landmark,
-        location: parsedCustomer?.location ? {
-          type: "Point",
-          coordinates: [parsedCustomer.location.lng, parsedCustomer.location.lat]
-        } : salesSession.customer?.location,
+        location: customerLocation,
         shopPhoto: shopPhoto || salesSession.customer?.shopPhoto
       },
 
@@ -290,9 +315,9 @@ export const completeSalesForm = async (req, res) => {
       sales: {
         dealStatus: parsedSales?.dealStatus || "Negotiation",
         paymentCollected: parsedSales?.paymentCollected || false,
-        amount: parsedSales?.amount || 0,
+        amount: Number(parsedSales?.amount) || 0,
         paymentMode: parsedSales?.paymentMode,
-        paymentDate: parsedSales?.paymentDate
+        paymentDate: parsedSales?.paymentDate ? new Date(parsedSales.paymentDate) : undefined
       },
 
       SalesStatus: SalesStatus || "open",
@@ -300,7 +325,7 @@ export const completeSalesForm = async (req, res) => {
       // Next meeting
       nextMeeting: {
         decided: parsedNextMeeting?.decided || false,
-        date: parsedNextMeeting?.date,
+        date: parsedNextMeeting?.date ? new Date(parsedNextMeeting.date) : undefined,
         time: parsedNextMeeting?.time,
         notes: parsedNextMeeting?.notes
       },
@@ -318,7 +343,7 @@ export const completeSalesForm = async (req, res) => {
     const updatedSession = await SalesSession.findOneAndUpdate(
       { sessionId },
       { $set: updateData },
-      { new: true }
+      { new: true, runValidators: true }
     );
 
     res.status(200).json({
@@ -341,20 +366,10 @@ export const punchOut = async (req, res) => {
   try {
     const { sessionId, location } = req.body;
 
-    // Parse location if sent as JSON string
-    let parsedLocation;
-
-    try {
-      parsedLocation = typeof location === "string"
-        ? JSON.parse(location)
-        : location;
-    } catch (error) {
-      return res.status(400).json({
-        error: "Invalid location JSON format"
-      });
-    }
-    if (!sessionId || !parsedLocation || !parsedLocation.lat || !parsedLocation.lng) {
-      return res.status(400).json({ error: "Missing required fields: sessionId, location" });
+    const validatedLocation = validateLocation(location);
+    
+    if (!sessionId) {
+      return res.status(400).json({ error: "Missing required fields: sessionId" });
     }
 
     // Find session
@@ -380,8 +395,8 @@ export const punchOut = async (req, res) => {
     const finalDistance = calculateDistance(
       lastPoint.location.coordinates[1],
       lastPoint.location.coordinates[0],
-      parsedLocation.lat,
-      parsedLocation.lng
+      validatedLocation.lat,
+      validatedLocation.lng
     );
 
     // Calculate total duration in seconds
@@ -391,14 +406,11 @@ export const punchOut = async (req, res) => {
 
     // Create final route point
     const finalRoutePoint = {
-      location: {
-        type: "Point",
-        coordinates: [parsedLocation.lng, parsedLocation.lat]
-      },
+      location: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
       timestamp: punchOutTime,
-      accuracy: parsedLocation.accuracy || 0,
+      accuracy: validatedLocation.accuracy,
       speed: 0,
-      heading: 0
+      heading: validatedLocation.heading
     };
 
     // Update session
@@ -407,12 +419,9 @@ export const punchOut = async (req, res) => {
       {
         status: "completed",
         punchOutTime,
-        punchOutLocation: {
-          type: "Point",
-          coordinates: [parsedLocation.lng, parsedLocation.lat]
-        },
+        punchOutLocation: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
         punchOutPhoto,
-        punchOutAddress: parsedLocation.address || "",
+        punchOutAddress: validatedLocation.address,
         $push: { routePath: finalRoutePoint },
         $inc: { totalDistance: finalDistance },
         duration: durationSeconds
