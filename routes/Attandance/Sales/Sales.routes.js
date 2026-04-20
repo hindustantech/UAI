@@ -22,18 +22,26 @@ const storage = multer.memoryStorage();
 
 // ✅ Improved file validation
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = [
+  const allowedMimeTypes = [
     "image/jpeg",
     "image/png",
     "image/webp",
-    "image/jpg"
+    "image/jpg",
+    "application/octet-stream" // ✅ TEMP allow
   ];
 
-  if (!allowedTypes.includes(file.mimetype)) {
-    return cb(new Error(`INVALID_FILE_TYPE: ${file.mimetype}`), false);
+  const allowedExtensions = [".jpg", ".jpeg", ".png", ".webp"];
+
+  const ext = file.originalname.toLowerCase().match(/\.[0-9a-z]+$/)?.[0];
+
+  if (
+    allowedMimeTypes.includes(file.mimetype) &&
+    allowedExtensions.includes(ext)
+  ) {
+    return cb(null, true);
   }
 
-  cb(null, true);
+  return cb(new Error(`INVALID_FILE_TYPE: ${file.mimetype}`), false);
 };
 
 // ✅ Limits

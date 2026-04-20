@@ -1,7 +1,7 @@
 import { SalesSession } from "../../../models/Attandance/Salses/Salses.js";
 import { uploadToCloudinary } from "../../../utils/Cloudinary.js";
 import mongoose from "mongoose";
-
+import { fileTypeFromBuffer } from "file-type";
 // ========== HELPER FUNCTIONS ==========
 
 // Generate unique session ID
@@ -24,20 +24,19 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 // Upload image to Cloudinary
+
+
 const uploadImage = async (file, folder) => {
   if (!file || !file.buffer) return null;
 
-  try {
-    const result = await uploadToCloudinary(file.buffer, folder);
-    return {
-      url: result.secure_url,
-      fileName: file.originalname,
-      uploadedAt: new Date()
-    };
-  } catch (error) {
-    console.error('Cloudinary upload error:', error);
-    return null;
+  // 🔍 Detect real file type
+  const type = await fileTypeFromBuffer(file.buffer);
+
+  if (!type || !["image/jpeg", "image/png", "image/webp"].includes(type.mime)) {
+    throw new Error("INVALID_FILE_SIGNATURE");
   }
+
+  return await uploadToCloudinary(file.buffer, folder);
 };
 
 // ========== PUNCH IN ==========
