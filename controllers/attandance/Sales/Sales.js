@@ -53,6 +53,7 @@ export const createGeoPoint = (lng, lat) => {
     coordinates: [parsedLng, parsedLat], // STRICT numbers only
   };
 };
+
 // ========== FIXED: Validate and sanitize location ==========
 const toNumber = (val) => {
   const num = Number(val);
@@ -72,9 +73,15 @@ export const validateLocation = (location) => {
     throw new Error("Invalid coordinates: must be numbers");
   }
 
+  // Return both the GeoJSON object AND separate lat/lng for convenience
   return {
     type: "Point",
     coordinates: [lng, lat], // MongoDB expects [lng, lat]
+    lat: lat,  // ADDED: expose lat
+    lng: lng,  // ADDED: expose lng
+    address: location.address,
+    accuracy: location.accuracy,
+    heading: location.heading
   };
 };
 
@@ -113,6 +120,7 @@ export const punchIn = async (req, res) => {
 
     const validatedLocation = validateLocation(location);
     console.log("Validated Location:", validatedLocation);
+    
     const parsedDeviceInfo =
       typeof deviceInfo === "string" ? JSON.parse(deviceInfo) : deviceInfo;
 
@@ -136,16 +144,16 @@ export const punchIn = async (req, res) => {
 
     const sessionId = generateSessionId(salesPersonId);
 
-    // ✅ STRICT GEO CREATION
+    // ✅ FIXED: Use validatedLocation.lng and validatedLocation.lat directly
     const punchInLocationGeo = createGeoPoint(
-      validatedLocation.lng,
-      validatedLocation.lat
+      validatedLocation.lng,  // Now this exists
+      validatedLocation.lat   // Now this exists
     );
 
     const routePoint = {
       location: createGeoPoint(
-        validatedLocation.lng,
-        validatedLocation.lat
+        validatedLocation.lng,  // Now this exists
+        validatedLocation.lat   // Now this exists
       ),
       timestamp: new Date(),
       accuracy: validatedLocation.accuracy,
