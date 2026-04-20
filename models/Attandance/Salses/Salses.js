@@ -7,9 +7,9 @@ const { Schema } = mongoose;
 const geoPointSchema = new Schema({
   type: {
     type: String,
-    enum: ["Point"],
+    enum: ["Point"],  // Must be exactly "Point" with capital P
     default: "Point",
-    lowercase: true
+    required: true
   },
   coordinates: {
     type: [Number],  // [longitude, latitude]

@@ -60,15 +60,19 @@ const createGeoPoint = (lng, lat) => {
   }
 
   // Step 5: Return PLAIN object with primitive numbers
-  // Using Object.create(null) ensures no prototype chain interference
+  // CRITICAL: type MUST be "Point" (uppercase P) - MongoDB GeoJSON standard requires this
   const point = {
-    type: "Point",
+    type: "Point",  // Must be exactly "Point" with capital P - enum requires this
     coordinates: [longitude, latitude]
   };
 
   // Verify it's correct before returning
   if (typeof point.coordinates[0] !== 'number' || typeof point.coordinates[1] !== 'number') {
     throw new Error(`GeoPoint coordinates are not primitives: [${typeof point.coordinates[0]}, ${typeof point.coordinates[1]}]`);
+  }
+
+  if (point.type !== "Point") {
+    throw new Error(`GeoPoint type must be "Point" (capital P), got "${point.type}"`);
   }
 
   return point;
@@ -182,14 +186,21 @@ export const punchIn = async (req, res) => {
     const sessionId = generateSessionId(salesPersonId);
     
     // ========== CRITICAL: Create GeoJSON with strict validation ==========
+    // IMPORTANT: type MUST be "Point" (capital P) - not "point"
     const punchInLocationGeo = createGeoPoint(validatedLocation.lng, validatedLocation.lat);
     console.log("Created punchInLocation GeoPoint:", JSON.stringify(punchInLocationGeo));
     console.log("Coordinate types in GeoPoint:", typeof punchInLocationGeo.coordinates[0], typeof punchInLocationGeo.coordinates[1]);
+    console.log("GeoPoint type field:", punchInLocationGeo.type);
 
     // Verify coordinates are primitives before proceeding
     if (typeof punchInLocationGeo.coordinates[0] !== 'number' || 
         typeof punchInLocationGeo.coordinates[1] !== 'number') {
       throw new Error(`GeoPoint coordinates failed type check: [${typeof punchInLocationGeo.coordinates[0]}, ${typeof punchInLocationGeo.coordinates[1]}]`);
+    }
+
+    // Verify type is correct case
+    if (punchInLocationGeo.type !== 'Point') {
+      throw new Error(`GeoPoint type must be "Point" (capital P), got "${punchInLocationGeo.type}"`);
     }
 
     // Create route point with same strict validation
