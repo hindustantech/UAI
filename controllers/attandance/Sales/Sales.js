@@ -53,8 +53,17 @@ export const punchIn = async (req, res) => {
     } = req.body;
 
     // Parse JSON strings if needed
-    const parsedLocation = typeof location === 'string' ? JSON.parse(location) : location;
-    const parsedDeviceInfo = typeof deviceInfo === 'string' ? JSON.parse(deviceInfo) : deviceInfo;
+    let parsedLocation;
+
+    try {
+      parsedLocation = typeof location === "string"
+        ? JSON.parse(location)
+        : location;
+    } catch (error) {
+      return res.status(400).json({
+        error: "Invalid location JSON format"
+      });
+    } const parsedDeviceInfo = typeof deviceInfo === 'string' ? JSON.parse(deviceInfo) : deviceInfo;
 
     // Validate required fields
     if (!salesPersonId || !companyId || !parsedLocation) {
@@ -145,7 +154,17 @@ export const updateRoute = async (req, res) => {
     const { sessionId } = req.params;
     const { location, deviceInfo } = req.body;
 
-    const parsedLocation = typeof location === 'string' ? JSON.parse(location) : location;
+    let parsedLocation;
+
+    try {
+      parsedLocation = typeof location === "string"
+        ? JSON.parse(location)
+        : location;
+    } catch (error) {
+      return res.status(400).json({
+        error: "Invalid location JSON format"
+      });
+    }
 
     if (!sessionId || !parsedLocation || !parsedLocation.lat || !parsedLocation.lng) {
       return res.status(400).json({ error: "Missing required fields: sessionId, location" });
@@ -323,8 +342,17 @@ export const punchOut = async (req, res) => {
     const { sessionId, location } = req.body;
 
     // Parse location if sent as JSON string
-    const parsedLocation = typeof location === 'string' ? JSON.parse(location) : location;
+    let parsedLocation;
 
+    try {
+      parsedLocation = typeof location === "string"
+        ? JSON.parse(location)
+        : location;
+    } catch (error) {
+      return res.status(400).json({
+        error: "Invalid location JSON format"
+      });
+    }
     if (!sessionId || !parsedLocation || !parsedLocation.lat || !parsedLocation.lng) {
       return res.status(400).json({ error: "Missing required fields: sessionId, location" });
     }
