@@ -2,96 +2,19 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
-// ========== GEOJSON POINT SCHEMA (MongoDB Standard) ==========
-// CRITICAL: This schema ensures coordinates are stored as primitive numbers
-const geoPointSchema = new Schema({
+// ========== SIMPLE GEOJSON POINT DEFINITION ==========
+// MongoDB 2dsphere requires coordinates as [longitude, latitude] with NO nested schema
+const geoPointShape = {
   type: {
     type: String,
-    enum: ["Point"],  // Must be exactly "Point" with capital P
-    default: "Point",
-    required: true
+    enum: ["Point"],
+    default: "Point"
   },
   coordinates: {
-    type: [Number],  // [longitude, latitude]
-    required: true,
-    validate: {
-      validator: function(coords) {
-        // Validate structure
-        if (!Array.isArray(coords)) {
-          return false;
-        }
-        if (coords.length !== 2) {
-          return false;
-        }
-        // CRITICAL: Ensure coordinates are PRIMITIVE numbers, not objects
-        return coords.every(coord => {
-          const num = Number(coord);
-          return typeof num === 'number' && isFinite(num);
-        });
-      },
-      message: 'Coordinates must be an array of exactly two finite numbers'
-    },
-    set: function(coords) {
-      // CRITICAL: Force conversion to primitives on assignment
-      if (!Array.isArray(coords)) {
-        throw new Error('Coordinates must be an array');
-      }
-      
-      if (coords.length !== 2) {
-        throw new Error('Coordinates array must have exactly 2 elements');
-      }
-      
-      // Convert each coordinate to primitive number
-      const primitiveCoords = coords.map((c, index) => {
-        let num;
-        
-        // Handle Mongoose wrapper objects
-        if (typeof c === 'object' && c !== null && typeof c.valueOf === 'function') {
-          num = Number(c.valueOf());
-        } else {
-          num = Number(c);
-        }
-        
-        if (!isFinite(num)) {
-          throw new Error(`Coordinate at index ${index} is not a finite number: ${c} (${typeof c})`);
-        }
-        
-        return num;
-      });
-      
-      return primitiveCoords;
-    }
+    type: [Number],  // MUST be primitive numbers, not nested type definition
+    required: true
   }
-}, { _id: false, strict: true });
-
-// ========== ROUTE POINT SCHEMA ==========
-const routePointSchema = new Schema({
-  location: { 
-    type: geoPointSchema, 
-    required: true 
-  },
-  timestamp: { 
-    type: Date, 
-    required: true,
-    default: Date.now
-  },
-  accuracy: { 
-    type: Number, 
-    default: 0,
-    min: 0
-  },
-  speed: { 
-    type: Number, 
-    default: 0,
-    min: 0
-  },
-  heading: { 
-    type: Number, 
-    default: 0,
-    min: 0,
-    max: 360
-  }
-}, { _id: true }); // Keep _id for route point tracking
+};
 
 // ========== ATTACHMENT SCHEMA ==========
 const attachmentSchema = new Schema({
@@ -107,6 +30,54 @@ const attachmentSchema = new Schema({
     default: Date.now 
   }
 }, { _id: false });
+
+// ========== CUSTOMER SCHEMA ==========
+const customerSchema = new Schema({
+  companyName: { type: String, default: "" },
+  contactName: { type: String, default: "" },
+  phoneNumber: { type: String, default: "" },
+  address: { type: String, default: "" },
+  landmark: { type: String, default: "" },
+  location: geoPointShape,  // Simple object, not nested Schema
+  shopPhoto: attachmentSchema
+}, { _id: false });
+
+// ========== SALES SCHEMA ==========
+const salesSchema = new Schema({
+  dealStatus: {
+    type: String,
+    enum: ["Negotiation", "Closed Won", "Closed Lost", "Follow Up"],
+    default: "Negotiation"
+  },
+  paymentCollected: { type: Boolean, default: false },
+  amount: { type: Number, default: 0, min: 0 },
+  paymentMode: { type: String, enum: [null, "Cash", "Card", "Bank Transfer", "UPI"], default: null },
+  paymentDate: { type: Date, default: null }
+}, { _id: false });
+
+// ========== NEXT MEETING SCHEMA ==========
+const nextMeetingSchema = new Schema({
+  decided: { type: Boolean, default: false },
+  date: { type: Date, default: null },
+  time: { type: String, default: "" },
+  notes: { type: String, default: "" }
+}, { _id: false });
+
+// ========== EVIDENCE VISITE SCHEMA ==========
+const evidenceSchema = new Schema({
+  visitNotes: { type: String, default: "" },
+  visitPhoto: attachmentSchema
+}, { _id: false });
+
+// ========== ROUTE POINT SCHEMA ==========
+// CRITICAL: Don't use nested geoPointSchema, use simple object
+const routePointSchema = new Schema({
+  location: geoPointShape,  // Simple object shape, NOT Schema
+  timestamp: { type: Date, required: true, default: Date.now },
+  accuracy: { type: Number, default: 0, min: 0 },
+  speed: { type: Number, default: 0, min: 0 },
+  heading: { type: Number, default: 0, min: 0, max: 360 }
+}, { _id: true });
 
 // ========== MAIN SALES SESSION SCHEMA ==========
 const salesSessionSchema = new Schema({
@@ -135,14 +106,11 @@ const salesSessionSchema = new Schema({
     required: true,
     index: true
   },
-  punchInLocation: { 
-    type: geoPointSchema, 
+  punchInLocation: {
+    type: geoPointShape,
     required: true
   },
-  punchInPhoto: {
-    type: attachmentSchema,
-    default: undefined
-  },
+  punchInPhoto: attachmentSchema,
   punchInAddress: { 
     type: String, 
     default: "" 
@@ -154,13 +122,10 @@ const salesSessionSchema = new Schema({
     default: null
   },
   punchOutLocation: {
-    type: geoPointSchema,
-    default: undefined
+    type: geoPointShape,
+    default: null
   },
-  punchOutPhoto: {
-    type: attachmentSchema,
-    default: undefined
-  },
+  punchOutPhoto: attachmentSchema,
   punchOutAddress: { 
     type: String, 
     default: "" 
@@ -175,70 +140,23 @@ const salesSessionSchema = new Schema({
     type: Number, 
     default: 0,
     min: 0
-  }, // meters
+  },
   duration: { 
     type: Number, 
     default: 0,
     min: 0
-  }, // seconds
-
-  // ========== CUSTOMER DETAILS (from form) ==========
-  customer: {
-    companyName: { 
-      type: String, 
-      default: "" 
-    },
-    contactName: { 
-      type: String, 
-      default: "" 
-    },
-    phoneNumber: { 
-      type: String, 
-      default: "" 
-    },
-    address: { 
-      type: String, 
-      default: "" 
-    },
-    landmark: { 
-      type: String, 
-      default: "" 
-    },
-    location: {
-      type: geoPointSchema,
-      default: undefined
-    },
-    shopPhoto: {
-      type: attachmentSchema,
-      default: undefined
-    }
   },
 
-  // ========== SALES DETAILS (from form) ==========
+  // ========== CUSTOMER DETAILS ==========
+  customer: {
+    type: customerSchema,
+    default: () => ({})
+  },
+
+  // ========== SALES DETAILS ==========
   sales: {
-    dealStatus: {
-      type: String,
-      enum: ["Negotiation", "Closed Won", "Closed Lost", "Follow Up"],
-      default: "Negotiation"
-    },
-    paymentCollected: { 
-      type: Boolean, 
-      default: false 
-    },
-    amount: { 
-      type: Number, 
-      default: 0,
-      min: 0
-    },
-    paymentMode: { 
-      type: String, 
-      enum: [null, "Cash", "Card", "Bank Transfer", "UPI"],
-      default: null
-    },
-    paymentDate: {
-      type: Date,
-      default: null
-    }
+    type: salesSchema,
+    default: () => ({})
   },
   
   SalesStatus: { 
@@ -248,36 +166,16 @@ const salesSessionSchema = new Schema({
     index: true
   },
   
-  // ========== NEXT MEETING (from form) ==========
+  // ========== NEXT MEETING ==========
   nextMeeting: {
-    decided: { 
-      type: Boolean, 
-      default: false 
-    },
-    date: {
-      type: Date,
-      default: null
-    },
-    time: { 
-      type: String, 
-      default: "" 
-    },
-    notes: { 
-      type: String, 
-      default: "" 
-    }
+    type: nextMeetingSchema,
+    default: () => ({})
   },
 
   // ========== VISIT NOTES ==========
   evideinceVisite: {
-    visitNotes: { 
-      type: String, 
-      default: "" 
-    },
-    visitPhoto: {
-      type: attachmentSchema,
-      default: undefined
-    }
+    type: evidenceSchema,
+    default: () => ({})
   },
 
   // Status
@@ -299,100 +197,78 @@ const salesSessionSchema = new Schema({
   
 }, { timestamps: true });
 
-// ========== PRE-SAVE VALIDATION MIDDLEWARE ==========
+// ========== PRE-SAVE MIDDLEWARE ==========
 salesSessionSchema.pre('save', function(next) {
   try {
-    // Validate punchInLocation coordinates
-    if (this.punchInLocation && this.punchInLocation.coordinates) {
-      validateGeoPointCoordinates(this.punchInLocation.coordinates, 'punchInLocation');
+    // Ensure punchInLocation has correct structure
+    if (this.punchInLocation) {
+      if (!this.punchInLocation.type) {
+        this.punchInLocation.type = "Point";
+      }
+      if (!Array.isArray(this.punchInLocation.coordinates) || this.punchInLocation.coordinates.length !== 2) {
+        throw new Error('punchInLocation.coordinates must be [longitude, latitude]');
+      }
+      // Force coordinates to primitives
+      this.punchInLocation.coordinates = this.punchInLocation.coordinates.map(c => {
+        const num = Number(c?.valueOf ? c.valueOf() : c);
+        if (!isFinite(num)) throw new Error(`Invalid coordinate: ${c}`);
+        return num;
+      });
     }
-    
-    // Validate punchOutLocation if present
-    if (this.punchOutLocation && this.punchOutLocation.coordinates) {
-      validateGeoPointCoordinates(this.punchOutLocation.coordinates, 'punchOutLocation');
+
+    // Ensure punchOutLocation has correct structure if present
+    if (this.punchOutLocation && Object.keys(this.punchOutLocation).length > 0) {
+      if (!this.punchOutLocation.type) {
+        this.punchOutLocation.type = "Point";
+      }
+      if (Array.isArray(this.punchOutLocation.coordinates) && this.punchOutLocation.coordinates.length === 2) {
+        this.punchOutLocation.coordinates = this.punchOutLocation.coordinates.map(c => {
+          const num = Number(c?.valueOf ? c.valueOf() : c);
+          if (!isFinite(num)) throw new Error(`Invalid coordinate: ${c}`);
+          return num;
+        });
+      }
     }
-    
-    // Validate customer location if present
-    if (this.customer && this.customer.location && this.customer.location.coordinates) {
-      validateGeoPointCoordinates(this.customer.location.coordinates, 'customer.location');
+
+    // Ensure customer location has correct structure if present
+    if (this.customer && this.customer.location && Object.keys(this.customer.location).length > 0) {
+      if (!this.customer.location.type) {
+        this.customer.location.type = "Point";
+      }
+      if (Array.isArray(this.customer.location.coordinates) && this.customer.location.coordinates.length === 2) {
+        this.customer.location.coordinates = this.customer.location.coordinates.map(c => {
+          const num = Number(c?.valueOf ? c.valueOf() : c);
+          if (!isFinite(num)) throw new Error(`Invalid coordinate: ${c}`);
+          return num;
+        });
+      }
     }
-    
-    // Validate routePath locations
-    if (this.routePath && this.routePath.length > 0) {
+
+    // Ensure routePath locations have correct structure
+    if (this.routePath && Array.isArray(this.routePath)) {
       this.routePath.forEach((point, index) => {
-        if (point.location && point.location.coordinates) {
-          validateGeoPointCoordinates(point.location.coordinates, `routePath[${index}].location`);
+        if (point.location) {
+          if (!point.location.type) {
+            point.location.type = "Point";
+          }
+          if (Array.isArray(point.location.coordinates) && point.location.coordinates.length === 2) {
+            point.location.coordinates = point.location.coordinates.map(c => {
+              const num = Number(c?.valueOf ? c.valueOf() : c);
+              if (!isFinite(num)) throw new Error(`Invalid coordinate at routePath[${index}]: ${c}`);
+              return num;
+            });
+          }
         }
       });
     }
-    
+
     next();
   } catch (error) {
     next(error);
   }
 });
-
-// ========== PRE-FINDONEANDUPDATE VALIDATION ==========
-salesSessionSchema.pre('findOneAndUpdate', function(next) {
-  try {
-    const update = this.getUpdate();
-    
-    // Check if update contains location data that needs validation
-    if (update.$set) {
-      // Validate punchInLocation
-      if (update.$set.punchInLocation && update.$set.punchInLocation.coordinates) {
-        validateGeoPointCoordinates(update.$set.punchInLocation.coordinates, 'punchInLocation in $set');
-      }
-      
-      // Validate punchOutLocation
-      if (update.$set.punchOutLocation && update.$set.punchOutLocation.coordinates) {
-        validateGeoPointCoordinates(update.$set.punchOutLocation.coordinates, 'punchOutLocation in $set');
-      }
-      
-      // Validate customer location
-      if (update.$set.customer && update.$set.customer.location && update.$set.customer.location.coordinates) {
-        validateGeoPointCoordinates(update.$set.customer.location.coordinates, 'customer.location in $set');
-      }
-    }
-    
-    // Validate $push operations for routePath
-    if (update.$push && update.$push.routePath) {
-      const routePoint = update.$push.routePath;
-      if (routePoint.location && routePoint.location.coordinates) {
-        validateGeoPointCoordinates(routePoint.location.coordinates, 'routePath in $push');
-      }
-    }
-    
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
-
-// ========== HELPER: Validate coordinates are primitive numbers ==========
-function validateGeoPointCoordinates(coords, location) {
-  if (!Array.isArray(coords)) {
-    throw new Error(`${location}: Coordinates must be an array`);
-  }
-  
-  if (coords.length !== 2) {
-    throw new Error(`${location}: Coordinates array must have exactly 2 elements, got ${coords.length}`);
-  }
-  
-  coords.forEach((coord, index) => {
-    // CRITICAL: Check type is PRIMITIVE number
-    if (typeof coord !== 'number') {
-      throw new Error(`${location}[${index}]: Coordinate must be a primitive number, got ${typeof coord} (value: ${coord})`);
-    }
-    
-    if (!isFinite(coord)) {
-      throw new Error(`${location}[${index}]: Coordinate must be finite, got ${coord}`);
-    }
-  });
-}
 
 // ========== GEOSPATIAL INDEXES ==========
-// Create 2dsphere indexes for geospatial queries
 salesSessionSchema.index({ punchInLocation: "2dsphere" });
 salesSessionSchema.index({ "customer.location": "2dsphere" });
 salesSessionSchema.index({ "routePath.location": "2dsphere" });
@@ -403,13 +279,5 @@ salesSessionSchema.index({ companyId: 1, punchInTime: -1 });
 salesSessionSchema.index({ status: 1, punchInTime: -1 });
 salesSessionSchema.index({ salesPersonId: 1, status: 1 });
 
-// ========== POST-SAVE LOGGING (DEBUG) ==========
-// Remove in production
-salesSessionSchema.post('save', function() {
-  if (process.env.DEBUG_GEOJSON === 'true') {
-    console.log('✓ Session saved with punchInLocation coordinates:', this.punchInLocation.coordinates);
-    console.log('  Coordinate types:', typeof this.punchInLocation.coordinates[0], typeof this.punchInLocation.coordinates[1]);
-  }
-});
-
+// ========== EXPORT ==========
 export const SalesSession = mongoose.model("SalesSession", salesSessionSchema);
