@@ -435,8 +435,39 @@ export const completeSalesForm = async (req, res) => {
   }
 };
 
-// ========== PUNCH OUT ==========
-// ========== PUNCH OUT (FIXED) ==========
+
+// ================= GEO BUILDER =================
+const buildGeoPoint = (location) => {
+  if (!location) return null;
+
+  let lat = location.lat ?? location.latitude;
+  let lng = location.lng ?? location.longitude;
+
+  lat = Number(lat);
+  lng = Number(lng);
+
+  // Strict validation
+  if (
+    typeof lat !== "number" ||
+    typeof lng !== "number" ||
+    isNaN(lat) ||
+    isNaN(lng)
+  ) {
+    return null;
+  }
+
+  // Range validation (important)
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return null;
+  }
+
+  return {
+    type: "Point",
+    coordinates: [lng, lat] // MongoDB format
+  };
+};
+
+// ================= CONTROLLER =================
 export const punchOut = async (req, res) => {
   const dbSession = await mongoose.startSession();
   dbSession.startTransaction();
@@ -444,104 +475,104 @@ export const punchOut = async (req, res) => {
   try {
     const { sessionId, location } = req.body;
 
+    // ===== VALIDATION =====
     if (!sessionId) {
       return res.status(400).json({ error: "sessionId is required" });
     }
 
-    // Parse location if it's a string
     let parsedLocation = location;
-    if (typeof location === 'string') {
-      parsedLocation = JSON.parse(location);
+
+    if (typeof location === "string") {
+      try {
+        parsedLocation = JSON.parse(location);
+      } catch {
+        return res.status(400).json({ error: "Invalid location JSON" });
+      }
     }
 
     if (!parsedLocation) {
       return res.status(400).json({ error: "location is required" });
     }
 
-    // Extract coordinates safely
-    let lat = parsedLocation.lat ?? parsedLocation.latitude;
-    let lng = parsedLocation.lng ?? parsedLocation.longitude;
+    // ===== BUILD SAFE GEO =====
+    const punchOutGeo = buildGeoPoint(parsedLocation);
 
-    // Convert to numbers
-    lat = Number(lat);
-    lng = Number(lng);
-
-    // Validate coordinates
-    if (isNaN(lat) || isNaN(lng)) {
+    if (!punchOutGeo) {
       return res.status(400).json({
-        error: "Invalid coordinates: must be numbers",
-        received: { lat, lng, original: parsedLocation }
+        error: "Invalid geo coordinates",
+        received: parsedLocation
       });
     }
 
-    // Fetch session
-    const salesSession = await SalesSession.findOne({ sessionId }).session(dbSession);
+    const [lng, lat] = punchOutGeo.coordinates;
+
+    // ===== FETCH SESSION =====
+    const salesSession = await SalesSession.findOne({
+      sessionId,
+      status: "in_progress"
+    }).session(dbSession);
 
     if (!salesSession) {
-      return res.status(404).json({ error: "Session not found" });
+      return res.status(404).json({
+        error: "Session not found or already completed"
+      });
     }
 
-    if (salesSession.status !== "in_progress") {
-      return res.status(400).json({ error: "Session already completed" });
-    }
-
-    // Handle photo upload
+    // ===== FILE UPLOAD =====
     let punchOutPhoto = null;
     if (req.file) {
       try {
         punchOutPhoto = await uploadImage(req.file, "sales/punch-out");
-      } catch (uploadError) {
-        console.error("Photo upload error:", uploadError);
-        // Continue without photo if upload fails
+      } catch (err) {
+        console.error("Upload failed:", err);
       }
     }
 
-    // Calculate final distance from last route point
+    // ===== DISTANCE CALC =====
     let finalDistance = 0;
-    if (salesSession.routePath && salesSession.routePath.length > 0) {
-      const lastPoint = salesSession.routePath[salesSession.routePath.length - 1];
 
-      if (lastPoint?.location?.coordinates) {
-        const [prevLng, prevLat] = lastPoint.location.coordinates;
+    if (salesSession.routePath?.length > 0) {
+      const lastPoint = salesSession.routePath.at(-1);
 
-        finalDistance = calculateDistance(
-          prevLat,
-          prevLng,
-          lat,
-          lng
-        );
+      const coords = lastPoint?.location?.coordinates;
+
+      if (Array.isArray(coords) && coords.length === 2) {
+        const [prevLng, prevLat] = coords;
+
+        if (!isNaN(prevLat) && !isNaN(prevLng)) {
+          finalDistance = calculateDistance(
+            prevLat,
+            prevLng,
+            lat,
+            lng
+          );
+        }
       }
     }
 
-    // Calculate duration
+    // ===== TIME CALC =====
     const punchOutTime = new Date();
+
     const durationSeconds = Math.max(
       0,
-      Math.round((punchOutTime - new Date(salesSession.punchInTime)) / 1000)
+      Math.floor(
+        (punchOutTime - new Date(salesSession.punchInTime)) / 1000
+      )
     );
 
-    // Create GeoJSON point
-    const punchOutGeo = {
-      type: "Point",
-      coordinates: [lng, lat]  // [longitude, latitude]
-    };
-
-    // Create final route point
+    // ===== ROUTE POINT =====
     const finalRoutePoint = {
-      location: {
-        type: "Point",
-        coordinates: [lng, lat]
-      },
+      location: punchOutGeo, // reuse validated object
       timestamp: punchOutTime,
       accuracy: Number(parsedLocation.accuracy) || 0,
       speed: 0,
       heading: Number(parsedLocation.heading) || 0
     };
 
-    // Prepare update object
+    // ===== UPDATE OBJECT =====
     const updateObject = {
       status: "completed",
-      punchOutTime: punchOutTime,
+      punchOutTime,
       punchOutLocation: punchOutGeo,
       punchOutAddress: parsedLocation.address || "",
       duration: durationSeconds
@@ -551,7 +582,7 @@ export const punchOut = async (req, res) => {
       updateObject.punchOutPhoto = punchOutPhoto;
     }
 
-    // Update session atomically
+    // ===== SAFE UPDATE =====
     const updatedSession = await SalesSession.findOneAndUpdate(
       { sessionId, status: "in_progress" },
       {
@@ -562,39 +593,40 @@ export const punchOut = async (req, res) => {
       {
         new: true,
         session: dbSession,
-        runValidators: false  // Skip validators to avoid GeoJSON issues
+        runValidators: true,
+        context: "query"
       }
     );
 
     if (!updatedSession) {
       await dbSession.abortTransaction();
-      return res.status(400).json({ error: "Session update failed. Please try again." });
+      return res.status(400).json({
+        error: "Failed to update session"
+      });
     }
 
     await dbSession.commitTransaction();
 
-    // Format response
-    const durationMinutes = Math.round(durationSeconds / 60);
-    const totalDistanceMeters = Math.round(updatedSession.totalDistance || 0);
+    // ===== RESPONSE =====
+    const minutes = Math.round(durationSeconds / 60);
+    const meters = Math.round(updatedSession.totalDistance || 0);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Punched out successfully",
-      sessionId: sessionId,
+      message: "Punch-out successful",
+      sessionId,
       summary: {
         duration: {
           seconds: durationSeconds,
-          minutes: durationMinutes,
-          formatted: durationMinutes >= 60
-            ? `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`
-            : `${durationMinutes}m`
+          minutes: minutes,
+          formatted:
+            minutes >= 60
+              ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+              : `${minutes}m`
         },
-        totalDistance: {
-          meters: totalDistanceMeters,
-          kilometers: (totalDistanceMeters / 1000).toFixed(2),
-          formatted: totalDistanceMeters > 1000
-            ? `${(totalDistanceMeters / 1000).toFixed(2)} km`
-            : `${totalDistanceMeters} m`
+        distance: {
+          meters,
+          km: (meters / 1000).toFixed(2)
         },
         routePoints: updatedSession.routePath?.length || 0
       }
@@ -602,11 +634,13 @@ export const punchOut = async (req, res) => {
 
   } catch (error) {
     await dbSession.abortTransaction();
+
     console.error("PunchOut error:", error);
-    res.status(500).json({
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+
+    return res.status(500).json({
+      error: error.message
     });
+
   } finally {
     dbSession.endSession();
   }
