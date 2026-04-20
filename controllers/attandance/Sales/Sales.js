@@ -104,14 +104,15 @@ export const punchIn = async (req, res) => {
         error: "Missing required fields: salesPersonId, companyId"
       });
     }
-
+    console.log("PunchIn request body:", req.body);
+    
     // Normalize input early
     if (typeof location === "string") {
       location = JSON.parse(location);
     }
 
     const validatedLocation = validateLocation(location);
-
+    console.log("Validated Location:", validatedLocation);
     const parsedDeviceInfo =
       typeof deviceInfo === "string" ? JSON.parse(deviceInfo) : deviceInfo;
 
