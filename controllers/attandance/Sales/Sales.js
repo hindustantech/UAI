@@ -24,61 +24,63 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-// STRICT GeoJSON Point creator - ensures primitive numbers only
+// ========== FIXED: Strict GeoJSON Point creator - ensures PRIMITIVE numbers only ==========
 const createGeoPoint = (lng, lat) => {
-  // Force conversion to primitive numbers and validate
+  // Step 1: Validate inputs exist
+  if (lng === undefined || lng === null || lat === undefined || lat === null) {
+    throw new Error(`Missing coordinates: lng=${lng}, lat=${lat}`);
+  }
+
+  // Step 2: Convert to primitive numbers, handling Mongoose objects
   let longitude, latitude;
   
   try {
-    // Handle if lng/lat are objects with valueOf
-    longitude = Number(lng?.valueOf ? lng.valueOf() : lng);
-    latitude = Number(lat?.valueOf ? lat.valueOf() : lat);
+    // Handle if lng/lat are objects with valueOf (Mongoose Number wrappers)
+    longitude = Number(typeof lng === 'object' && lng.valueOf ? lng.valueOf() : lng);
+    latitude = Number(typeof lat === 'object' && lat.valueOf ? lat.valueOf() : lat);
   } catch (e) {
     longitude = Number(lng);
     latitude = Number(lat);
   }
-  
-  // Final validation
-  if (isNaN(longitude) || isNaN(latitude)) {
-    throw new Error(`Invalid coordinates: lng=${lng} (${typeof lng}), lat=${lat} (${typeof lat})`);
+
+  // Step 3: Validate numeric conversion - ensure primitives
+  if (!isFinite(longitude) || !isFinite(latitude)) {
+    throw new Error(
+      `Invalid coordinates after conversion: lng=${longitude} (${typeof longitude}), ` +
+      `lat=${latitude} (${typeof latitude}). Both must be finite numbers.`
+    );
   }
-  
-  if (longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) {
-    throw new Error(`Coordinates out of range: lng=${longitude}, lat=${latitude}`);
+
+  // Step 4: Validate geospatial bounds
+  if (longitude < -180 || longitude > 180) {
+    throw new Error(`Longitude out of range: ${longitude} (must be between -180 and 180)`);
   }
-  
-  // Return plain object with primitive numbers
-  return {
+  if (latitude < -90 || latitude > 90) {
+    throw new Error(`Latitude out of range: ${latitude} (must be between -90 and 90)`);
+  }
+
+  // Step 5: Return PLAIN object with primitive numbers
+  // Using Object.create(null) ensures no prototype chain interference
+  const point = {
     type: "Point",
     coordinates: [longitude, latitude]
   };
+
+  // Verify it's correct before returning
+  if (typeof point.coordinates[0] !== 'number' || typeof point.coordinates[1] !== 'number') {
+    throw new Error(`GeoPoint coordinates are not primitives: [${typeof point.coordinates[0]}, ${typeof point.coordinates[1]}]`);
+  }
+
+  return point;
 };
 
-// Deep sanitize any object to ensure numbers are primitives
-const sanitizeCoordinates = (obj) => {
-  if (!obj) return obj;
-  
-  // If it's a GeoJSON point
-  if (obj.type === "Point" && Array.isArray(obj.coordinates)) {
-    return {
-      type: "Point",
-      coordinates: obj.coordinates.map(c => Number(c?.valueOf ? c.valueOf() : c))
-    };
-  }
-  
-  // If it's an array of coordinates
-  if (Array.isArray(obj) && obj.length === 2) {
-    return obj.map(c => Number(c?.valueOf ? c.valueOf() : c));
-  }
-  
-  return obj;
-};
-
-// Validate and sanitize location
+// ========== FIXED: Validate and sanitize location ==========
 const validateLocation = (location) => {
   if (!location) throw new Error("Location is required");
   
   let parsedLocation = location;
+  
+  // Parse JSON if needed
   if (typeof location === "string") {
     try {
       parsedLocation = JSON.parse(location);
@@ -86,26 +88,29 @@ const validateLocation = (location) => {
       throw new Error("Invalid location JSON format");
     }
   }
-  
-  // Extract lat/lng with proper conversion
-  let lat, lng;
-  
-  try {
-    lng = Number(parsedLocation.lng?.valueOf ? parsedLocation.lng.valueOf() : parsedLocation.lng);
-    lat = Number(parsedLocation.lat?.valueOf ? parsedLocation.lat.valueOf() : parsedLocation.lat);
-  } catch (e) {
-    lng = Number(parsedLocation.lng);
-    lat = Number(parsedLocation.lat);
+
+  // Step 1: Extract and convert to primitives
+  let lat = Number(typeof parsedLocation.lat === 'object' && parsedLocation.lat.valueOf 
+    ? parsedLocation.lat.valueOf() 
+    : parsedLocation.lat);
+    
+  let lng = Number(typeof parsedLocation.lng === 'object' && parsedLocation.lng.valueOf 
+    ? parsedLocation.lng.valueOf() 
+    : parsedLocation.lng);
+
+  // Step 2: Validate conversion was successful
+  if (!isFinite(lat) || !isFinite(lng)) {
+    throw new Error(
+      `Invalid location coordinates: lat=${parsedLocation.lat} (${typeof parsedLocation.lat}), ` +
+      `lng=${parsedLocation.lng} (${typeof parsedLocation.lng}). Both must be valid numbers.`
+    );
   }
-  
-  if (isNaN(lat) || isNaN(lng)) {
-    throw new Error(`Location must have valid lat and lng coordinates. Got: lat=${parsedLocation.lat} (${typeof parsedLocation.lat}), lng=${parsedLocation.lng} (${typeof parsedLocation.lng})`);
-  }
-  
+
+  // Step 3: Return primitive values only
   return {
     lat: lat,
     lng: lng,
-    address: parsedLocation.address || "",
+    address: String(parsedLocation.address || ""),
     accuracy: Number(parsedLocation.accuracy) || 0,
     heading: Number(parsedLocation.heading) || 0
   };
@@ -143,6 +148,7 @@ export const punchIn = async (req, res) => {
     // Validate and parse location
     const validatedLocation = validateLocation(location);
     console.log("Validated location:", validatedLocation);
+    console.log("Coordinate types:", typeof validatedLocation.lng, typeof validatedLocation.lat);
     
     const parsedDeviceInfo = typeof deviceInfo === 'string' ? JSON.parse(deviceInfo) : deviceInfo;
 
@@ -175,17 +181,24 @@ export const punchIn = async (req, res) => {
 
     const sessionId = generateSessionId(salesPersonId);
     
-    // Create GeoJSON point with strict validation
-    const geoPoint = createGeoPoint(validatedLocation.lng, validatedLocation.lat);
-    console.log("Created GeoPoint:", JSON.stringify(geoPoint));
+    // ========== CRITICAL: Create GeoJSON with strict validation ==========
+    const punchInLocationGeo = createGeoPoint(validatedLocation.lng, validatedLocation.lat);
+    console.log("Created punchInLocation GeoPoint:", JSON.stringify(punchInLocationGeo));
+    console.log("Coordinate types in GeoPoint:", typeof punchInLocationGeo.coordinates[0], typeof punchInLocationGeo.coordinates[1]);
 
-    // Create route point
+    // Verify coordinates are primitives before proceeding
+    if (typeof punchInLocationGeo.coordinates[0] !== 'number' || 
+        typeof punchInLocationGeo.coordinates[1] !== 'number') {
+      throw new Error(`GeoPoint coordinates failed type check: [${typeof punchInLocationGeo.coordinates[0]}, ${typeof punchInLocationGeo.coordinates[1]}]`);
+    }
+
+    // Create route point with same strict validation
     const routePoint = {
-      location: geoPoint,
+      location: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
       timestamp: new Date(),
-      accuracy: validatedLocation.accuracy,
+      accuracy: Number(validatedLocation.accuracy) || 0,
       speed: 0,
-      heading: validatedLocation.heading
+      heading: Number(validatedLocation.heading) || 0
     };
 
     // Create session document with explicit primitive values
@@ -195,8 +208,9 @@ export const punchIn = async (req, res) => {
       companyId: new mongoose.Types.ObjectId(companyId),
       status: "in_progress",
       punchInTime: new Date(),
-      punchInLocation: geoPoint,
-      punchInPhoto,
+      punchInLocation: punchInLocationGeo,
+      // Only include photo if it exists
+      ...(punchInPhoto && { punchInPhoto }),
       punchInAddress: validatedLocation.address || "",
       punchOutAddress: "",
       routePath: [routePoint],
@@ -226,9 +240,9 @@ export const punchIn = async (req, res) => {
       createdBy: new mongoose.Types.ObjectId(salesPersonId)
     };
     
-    console.log("Session data being saved:", JSON.stringify(sessionData, null, 2));
+    console.log("Session data coordinates:", JSON.stringify(sessionData.punchInLocation, null, 2));
 
-    // Create new session
+    // IMPORTANT: Use create() instead of insertOne() to use Mongoose serialization
     const newSession = await SalesSession.create([sessionData], { session });
 
     await session.commitTransaction();
@@ -244,7 +258,10 @@ export const punchIn = async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     console.error('PunchIn error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: error.message,
+      details: error.stack 
+    });
   } finally {
     session.endSession();
   }
@@ -285,7 +302,7 @@ export const updateRoute = async (req, res) => {
 
     const speed = timeDiff > 0 ? distance / timeDiff : 0;
 
-    // Create new route point with sanitized coordinates
+    // Create new route point with strict GeoJSON validation
     const routePoint = {
       location: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
       timestamp: now,
@@ -363,8 +380,8 @@ export const completeSalesForm = async (req, res) => {
     if (parsedCustomer?.location && parsedCustomer.location.lat && parsedCustomer.location.lng) {
       try {
         customerLocation = createGeoPoint(
-          Number(parsedCustomer.location.lng),
-          Number(parsedCustomer.location.lat)
+          parsedCustomer.location.lng,
+          parsedCustomer.location.lat
         );
       } catch (error) {
         console.error('Error creating customer location:', error);
@@ -473,7 +490,7 @@ export const punchOut = async (req, res) => {
     const punchOutTime = new Date();
     const durationSeconds = Math.round((punchOutTime - salesSession.punchInTime) / 1000);
 
-    // Create final route point
+    // Create final route point with strict GeoJSON validation
     const finalRoutePoint = {
       location: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
       timestamp: punchOutTime,
@@ -482,18 +499,27 @@ export const punchOut = async (req, res) => {
       heading: validatedLocation.heading
     };
 
+    // Prepare update object
+    const updateObject = {
+      status: "completed",
+      punchOutTime,
+      punchOutLocation: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
+      punchOutAddress: validatedLocation.address || "",
+      duration: durationSeconds
+    };
+
+    // Only add punchOutPhoto if it exists
+    if (punchOutPhoto) {
+      updateObject.punchOutPhoto = punchOutPhoto;
+    }
+
     // Update session
     const updatedSession = await SalesSession.findOneAndUpdate(
       { sessionId },
       {
-        status: "completed",
-        punchOutTime,
-        punchOutLocation: createGeoPoint(validatedLocation.lng, validatedLocation.lat),
-        ...(punchOutPhoto && { punchOutPhoto }),
-        punchOutAddress: validatedLocation.address || "",
+        $set: updateObject,
         $push: { routePath: finalRoutePoint },
-        $inc: { totalDistance: finalDistance },
-        duration: durationSeconds
+        $inc: { totalDistance: finalDistance }
       },
       { new: true, session }
     );
