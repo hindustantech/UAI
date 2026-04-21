@@ -852,3 +852,202 @@ export const getActiveSessionAgg = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+
+
+export const assignToOther = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { sessionId } = req.params;
+    const { targetUserId } = req.body;
+    const assignerId = req.user.id;
+
+    // ========== VALIDATION ==========
+    if (!sessionId || !targetUserId) {
+      return res.status(400).json({
+        success: false,
+        message: "sessionId and targetUserId are required"
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid targetUserId"
+      });
+    }
+
+    // ========== FIND SESSION ==========
+    const existingSession = await SalesSession.findOne({ sessionId }).session(session);
+
+    if (!existingSession) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Session not found"
+      });
+    }
+
+    // ========== PREVENT DUPLICATE ASSIGN ==========
+    const alreadyAssigned = existingSession.assingnedTo.some(
+      (id) => id.toString() === targetUserId
+    );
+
+    if (alreadyAssigned) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "User already assigned to this session"
+      });
+    }
+
+    // ========== UPDATE ==========
+    const updatedSession = await SalesSession.findOneAndUpdate(
+      { sessionId },
+      {
+        $push: { assingnedTo: targetUserId }, // append to array
+        $set: {
+          assingnedBy: assignerId,
+          assingnAt: new Date(),
+          updatedBy: assignerId
+        }
+      },
+      {
+        new: true,
+        session,
+        runValidators: true
+      }
+    ).populate("assingnedTo", "name email");
+
+    // ========== COMMIT ==========
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      success: true,
+      message: "Session assigned successfully",
+      data: updatedSession
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+
+    console.error("assignToOther error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+
+
+
+
+
+
+
+export const getNearbyFilteredSessions = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    let { page = 1, limit = 10, radius = 500 } = req.query;
+
+    const userId = req.user.id;
+    const companyId = req.user.companyId;
+
+    page = Number(page);
+    limit = Number(limit);
+    radius = Math.min(Number(radius), 2000);
+
+    const skip = (page - 1) * limit;
+
+    // ========== GET CURRENT SESSION ==========
+    const currentSession = await SalesSession.findOne({ sessionId }).lean();
+
+    if (!currentSession?.punchInLocation?.coordinates) {
+      return res.status(404).json({
+        success: false,
+        message: "Session or location not found"
+      });
+    }
+
+    const coordinates = currentSession.punchInLocation.coordinates;
+
+    // ========== GEO QUERY ==========
+    const results = await SalesSession.aggregate([
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates
+          },
+          distanceField: "distance",
+          maxDistance: radius,
+          spherical: true,
+          query: {
+            sessionId: { $ne: sessionId },
+            SalesStatus: "open",
+
+            // assigned OR created by me
+            $or: [
+              { assingnedTo: new mongoose.Types.ObjectId(userId) },
+              { createdBy: new mongoose.Types.ObjectId(userId) }
+            ],
+
+            // company filter (direct)
+            companyId: new mongoose.Types.ObjectId(companyId)
+          }
+        }
+      },
+
+      { $sort: { distance: 1 } },
+
+      {
+        $facet: {
+          data: [
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                sessionId: 1,
+                salesPersonId: 1,
+                distance: 1,
+                punchInTime: 1,
+                SalesStatus: 1
+              }
+            }
+          ],
+          totalCount: [{ $count: "count" }]
+        }
+      }
+    ]);
+
+    const sessions = results[0].data;
+    const total = results[0].totalCount[0]?.count || 0;
+
+    return res.status(200).json({
+      success: true,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      },
+      data: sessions
+    });
+
+  } catch (error) {
+    console.error("getNearbyFilteredSessions error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+};
