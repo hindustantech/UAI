@@ -10,7 +10,7 @@ import { getActiveSubscription } from "../../services/subscription.service.js";
 import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
 import { validateSubscription, canCreateEmployee, getEmployeeLimit, isNearingEmployeeLimit, getRemainingEmployeeSlots } from "../../services/featureAccess.service.js";
 // controllers/companyController.js
-
+import { hasPlanType } from "../../services/featureAccess.service.js";
 
 
 export const activateEmployee = async (req, res) => {
@@ -564,7 +564,7 @@ export const changeEmployeeRole = async (req, res) => {
     try {
         const { empId } = req.params;
         const { newRole } = req.body;
-        const allowedRoles = ['employee', 'manager', 'hr', 'admin', 'super_admin'];
+        const allowedRoles = ['employee', 'manager', 'hr', 'admin', 'super_admin','sales'];
         if (!allowedRoles.includes(newRole)) {
             return res.status(400).json({
                 success: false,
