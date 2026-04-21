@@ -334,7 +334,7 @@ export const completeSalesForm = async (req, res) => {
       sales,
       nextMeeting,
       evideinceVisite,
-      SalesStatus
+      SalesStatus,
     } = req.body;
 
     // Parse JSON strings if needed
@@ -397,6 +397,7 @@ export const completeSalesForm = async (req, res) => {
         ...(parsedSales?.paymentMode && { paymentMode: parsedSales.paymentMode }),
         ...(parsedSales?.paymentDate && { paymentDate: new Date(parsedSales.paymentDate) })
       },
+      formCompleted: true,
       SalesStatus: SalesStatus || "open",
       nextMeeting: {
         decided: parsedNextMeeting?.decided === true,
@@ -515,6 +516,12 @@ export const punchOut = async (req, res) => {
     if (!salesSession) {
       return res.status(404).json({
         error: "Session not found or already completed"
+      });
+    }
+
+    if (!salesSession.formCompleted) {
+      return res.status(400).json({
+        error: "Please complete the sales form before punching out"
       });
     }
 

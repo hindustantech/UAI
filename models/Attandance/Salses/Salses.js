@@ -240,7 +240,10 @@ const salesSessionSchema = new Schema({
       default: null
     }
   },
-
+  formCompleted: {
+    type: Boolean,
+    default: false,
+  },
   SalesStatus: {
     type: String,
     enum: ["open", "close", "suspened"],
