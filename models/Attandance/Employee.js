@@ -49,7 +49,11 @@ const employeeSchema = new mongoose.Schema({
             ref: "User"
         }
     },
-
+    employeeType: {
+        type: String,
+        enum: ['non_sales', 'sales'],
+        default: "non_sales"
+    },
     role: {
         type: String,
         enum: ['employee', 'manager', 'hr', 'admin', 'sales', 'super_admin'],

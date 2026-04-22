@@ -397,6 +397,7 @@ export const createEmployee = async (req, res) => {
             salaryStructure,
             bankDetails,
             officeLocation,
+            employeeType,
             referalCode
         } = req.body;
 
@@ -472,6 +473,7 @@ export const createEmployee = async (req, res) => {
             userId,
             companyId,
             empCode,
+            employeeType,
             referalCode,
             user_name,
             jobInfo,
@@ -564,7 +566,7 @@ export const changeEmployeeRole = async (req, res) => {
     try {
         const { empId } = req.params;
         const { newRole } = req.body;
-        const allowedRoles = ['employee', 'manager', 'hr', 'admin', 'super_admin','sales'];
+        const allowedRoles = ['employee', 'manager', 'hr', 'admin', 'super_admin', 'sales'];
         if (!allowedRoles.includes(newRole)) {
             return res.status(400).json({
                 success: false,
@@ -679,6 +681,7 @@ export const updateEmployee = async (req, res) => {
             jobInfo,
             salaryStructure,
             bankDetails,
+            employeeType,
             shift,
             weeklyOff,
             referalCode,
@@ -835,6 +838,17 @@ export const updateEmployee = async (req, res) => {
         if (employmentStatus) {
             updatePayload.employmentStatus = employmentStatus;
         }
+
+        if (employeeType) {
+            if (!["non_sales", "sales"].includes(employeeType)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid employeeType value",
+                });
+            }
+            updatePayload.employeeType = employeeType;
+        }
+
 
         /* ---------------------------------------------
            11. Atomic Update
