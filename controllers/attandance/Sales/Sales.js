@@ -1376,7 +1376,69 @@ export const assignToOther = async (req, res) => {
   }
 };
 
+export const getMyAssignedSessions = async (req, res) => {
+  try {
+    const userId = req.user._id; // from auth middleware
 
+    // ===== QUERY PARAMS (ENTERPRISE LEVEL) =====
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      fromDate,
+      toDate
+    } = req.query;
+
+    const skip = (page - 1) * limit;
+
+    // ===== BUILD FILTER =====
+    const filter = {
+      assingnedTo: { $in: [userId] }
+    };
+
+    if (status) {
+      filter.status = status;
+    }
+
+    if (fromDate || toDate) {
+      filter.punchInTime = {};
+      if (fromDate) filter.punchInTime.$gte = new Date(fromDate);
+      if (toDate) filter.punchInTime.$lte = new Date(toDate);
+    }
+
+    // ===== MAIN QUERY =====
+    const [sessions, total] = await Promise.all([
+      SalesSession.find(filter)
+        .sort({ punchInTime: -1 }) // recent first
+        .skip(skip)
+        .limit(Number(limit))
+        .populate("salesPersonId", "name email")
+        .populate("companyId", "name")
+        .lean(), // performance optimization
+
+      SalesSession.countDocuments(filter)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: sessions,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error("GET_ASSIGNED_SESSIONS_ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch assigned sessions",
+      error: error.message
+    });
+  }
+};
 
 
 

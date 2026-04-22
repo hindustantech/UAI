@@ -12,7 +12,8 @@ import {
   getSessionRoute,
   getActiveSessionAgg,
   assignToOther,
-  getNearbyFilteredSessions
+  getNearbyFilteredSessions,
+  getMyAssignedSessions
 } from "../../../controllers/attandance/Sales/Sales.js";
 
 import authMiddleware from "../../../middlewares/authMiddleware.js";
@@ -133,6 +134,11 @@ router.post(
   "/assignToOther/:sessionId",
   authMiddleware,
   assignToOther
+);
+router.get(
+  "/getMyAssignedSessions",
+  authMiddleware,
+  getMyAssignedSessions
 );
 router.get(
   "/getNearbyFilteredSessions",
