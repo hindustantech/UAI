@@ -129,13 +129,13 @@ router.get(
   authMiddleware,
   getActiveSessionAgg
 );
-router.get(
-  "/getActiveSessionAgg",
+router.post(
+  "/assignToOther",
   authMiddleware,
   assignToOther
 );
 router.get(
-  "/getActiveSessionAgg",
+  "/getNearbyFilteredSessions",
   authMiddleware,
   getNearbyFilteredSessions
 );
