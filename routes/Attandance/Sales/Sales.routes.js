@@ -130,7 +130,7 @@ router.get(
   getActiveSessionAgg
 );
 router.post(
-  "/assignToOther",
+  "/assignToOther/:sessionId",
   authMiddleware,
   assignToOther
 );
