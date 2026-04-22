@@ -744,7 +744,7 @@ export const getProfile = async (req, res) => {
     const employeeQuery = Employee.findOne({ userId })
       .select(`
         empCode role weeklyOff employmentStatus
-        jobInfo salaryStructure bankDetails officeLocation shift
+        jobInfo salaryStructure bankDetails officeLocation shift employeeType
       `)
       .populate({
         path: "jobInfo.reportingManager",
