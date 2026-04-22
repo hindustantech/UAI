@@ -795,7 +795,7 @@ export const getProfile = async (req, res) => {
           role: employee.role || null,
           weeklyOff: employee.weeklyOff || [],
           employmentStatus: employee.employmentStatus || null,
-
+          employeeType: employee.employeeType || null,
           jobInfo: {
             ...employee.jobInfo,
             reportingManager:
