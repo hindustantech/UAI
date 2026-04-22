@@ -18,7 +18,7 @@ const attendanceSchema = new mongoose.Schema({
 
     employeeId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Employee", 
+        ref: "Employee",
         required: true,
         index: true
     },
@@ -54,7 +54,7 @@ const attendanceSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    
+
 
     /* ===========================
        Punch Timing
@@ -82,6 +82,16 @@ const attendanceSchema = new mongoose.Schema({
                 required: true
             },
 
+            type: {
+                type: String,
+                enum: ["in", "out"],
+                required: true
+            },
+
+            time: {
+                type: Date,
+                required: true
+            },
             geoLocation: Object,
 
             deviceInfo: Object,

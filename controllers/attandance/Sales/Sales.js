@@ -2,6 +2,9 @@ import { SalesSession } from "../../../models/Attandance/Salses/Salses.js";
 import { uploadToCloudinary } from "../../../utils/Cloudinary.js";
 import mongoose from "mongoose";
 import { fileTypeFromBuffer } from "file-type";
+import Attendance from "../../../models/Attandance/Attendance.js";
+import Shift from "../../../models/Attandance/Shift.js";
+import Holiday from "../../../models/Attandance/Holiday.js";
 
 // ========== HELPER FUNCTIONS ==========
 
@@ -119,141 +122,331 @@ const uploadImage = async (file, folder) => {
 };
 
 // ========== PUNCH IN ==========
+// export const punchIn = async (req, res) => {
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
+
+//   try {
+//     let { salesPersonId, companyId, location, deviceInfo } = req.body;
+
+//     if (!salesPersonId || !companyId) {
+//       return res.status(400).json({
+//         error: "Missing required fields: salesPersonId, companyId"
+//       });
+//     }
+//     console.log("PunchIn request body:", req.body);
+
+//     // Normalize input early
+//     if (typeof location === "string") {
+//       location = JSON.parse(location);
+//     }
+
+//     const validatedLocation = validateLocation(location);
+//     console.log("Validated Location:", validatedLocation);
+
+//     const parsedDeviceInfo =
+//       typeof deviceInfo === "string" ? JSON.parse(deviceInfo) : deviceInfo;
+
+//     // Check active session
+//     const activeSession = await SalesSession.findOne({
+//       salesPersonId,
+//       status: "in_progress"
+//     });
+
+//     if (activeSession) {
+//       return res.status(400).json({
+//         error: "You have an active session. Please punch out first.",
+//         sessionId: activeSession.sessionId
+//       });
+//     }
+
+//     let punchInPhoto = null;
+//     if (req.file) {
+//       punchInPhoto = await uploadImage(req.file, "sales/punch-in");
+//     }
+
+//     const sessionId = generateSessionId(salesPersonId);
+
+//     // ✅ FIXED: Use validatedLocation.lng and validatedLocation.lat directly
+//     const punchInLocationGeo = createGeoPoint(
+//       validatedLocation.lng,  // Now this exists
+//       validatedLocation.lat   // Now this exists
+//     );
+
+//     const routePoint = {
+//       location: createGeoPoint(
+//         validatedLocation.lng,  // Now this exists
+//         validatedLocation.lat   // Now this exists
+//       ),
+//       timestamp: new Date(),
+//       accuracy: validatedLocation.accuracy,
+//       speed: 0,
+//       heading: validatedLocation.heading
+//     };
+
+//     // ✅ FINAL SANITY CHECK (production defensive layer)
+//     const [lng, lat] = punchInLocationGeo.coordinates;
+//     if (typeof lng !== "number" || typeof lat !== "number") {
+//       throw new Error("Final Geo validation failed");
+//     }
+
+//     const sessionData = {
+//       sessionId,
+//       salesPersonId: new mongoose.Types.ObjectId(salesPersonId),
+//       companyId: new mongoose.Types.ObjectId(companyId),
+
+//       status: "in_progress",
+//       punchInTime: new Date(),
+
+//       punchInLocation: punchInLocationGeo,
+//       ...(punchInPhoto && { punchInPhoto }),
+
+//       punchInAddress: validatedLocation.address,
+//       punchOutAddress: "",
+
+//       routePath: [routePoint],
+
+//       totalDistance: 0,
+//       duration: 0,
+
+//       customer: {
+//         companyName: "",
+//         contactName: "",
+//         phoneNumber: "",
+//         address: "",
+//         landmark: ""
+//       },
+
+//       sales: {
+//         dealStatus: "Negotiation",
+//         paymentCollected: false,
+//         amount: 0
+//       },
+
+//       SalesStatus: "open",
+
+//       nextMeeting: {
+//         decided: false,
+//         time: "",
+//         notes: ""
+//       },
+
+//       evideinceVisite: {
+//         visitNotes: ""
+//       },
+
+//       createdBy: new mongoose.Types.ObjectId(salesPersonId)
+//     };
+
+//     const [newSession] = await SalesSession.create([sessionData], { session });
+
+//     await session.commitTransaction();
+
+//     return res.status(201).json({
+//       success: true,
+//       sessionId,
+//       session: newSession
+//     });
+
+//   } catch (error) {
+//     await session.abortTransaction();
+//     console.error("PunchIn error:", error);
+
+//     return res.status(500).json({
+//       error: error.message
+//     });
+//   } finally {
+//     session.endSession();
+//   }
+// };
+
+
+
 export const punchIn = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
-    let { salesPersonId, companyId, location, deviceInfo } = req.body;
-
-    if (!salesPersonId || !companyId) {
-      return res.status(400).json({
-        error: "Missing required fields: salesPersonId, companyId"
-      });
-    }
-    console.log("PunchIn request body:", req.body);
-
-    // Normalize input early
-    if (typeof location === "string") {
-      location = JSON.parse(location);
-    }
+    const { employeeId, companyId } = req.user;
+    const { location, deviceInfo } = req.body;
 
     const validatedLocation = validateLocation(location);
-    console.log("Validated Location:", validatedLocation);
+    const now = new Date();
 
-    const parsedDeviceInfo =
-      typeof deviceInfo === "string" ? JSON.parse(deviceInfo) : deviceInfo;
+    /* ============================
+       1. NORMALIZE DATE (IST SAFE)
+    ============================ */
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    // Check active session
-    const activeSession = await SalesSession.findOne({
-      salesPersonId,
-      status: "in_progress"
+    /* ============================
+       2. FETCH EMPLOYEE + SHIFT
+    ============================ */
+    const employee = await Employee.findOne({
+      _id: employeeId,
+      companyId,
+      employmentStatus: "active"
     });
 
-    if (activeSession) {
+    if (!employee) {
+      return res.status(404).json({ error: "Employee not found" });
+    }
+
+    const shift = await Shift.findOne({
+      _id: employee.shift,
+      companyId,
+      isDeleted: false
+    });
+
+    if (!shift || !shift.startTime || !shift.endTime) {
       return res.status(400).json({
-        error: "You have an active session. Please punch out first.",
-        sessionId: activeSession.sessionId
+        error: "Invalid shift configuration"
       });
     }
 
-    let punchInPhoto = null;
-    if (req.file) {
-      punchInPhoto = await uploadImage(req.file, "sales/punch-in");
+    /* ============================
+       3. HOLIDAY CHECK (CONFIG)
+    ============================ */
+    const holiday = await Holiday.findOne({
+      companyId,
+      date: today
+    });
+
+    let attendanceStatus = "present";
+
+    if (holiday) {
+      if (!shift.allowHolidayWork) {
+        return res.status(403).json({
+          error: `Holiday (${holiday.name || "Holiday"}). Punch-in not allowed`
+        });
+      }
+      attendanceStatus = "holiday_working";
     }
 
-    const sessionId = generateSessionId(salesPersonId);
+    /* ============================
+       4. TIME CALCULATION (IST)
+    ============================ */
+    const shiftStart = createDateTimeIST(today, shift.startTime);
+    const shiftEnd = createDateTimeIST(today, shift.endTime);
 
-    // ✅ FIXED: Use validatedLocation.lng and validatedLocation.lat directly
-    const punchInLocationGeo = createGeoPoint(
-      validatedLocation.lng,  // Now this exists
-      validatedLocation.lat   // Now this exists
+    const punchTimeIST = getPunchTimeIST(now);
+
+    const earlyLimit = shift.earlyPunchLimit || 60;
+    const maxLate = shift.maxLatePunch || 120;
+
+    const minutesBefore = diffMinutes(punchTimeIST, shiftStart);
+    const minutesAfter = diffMinutes(shiftStart, punchTimeIST);
+
+    /* ============================
+       5. TOO EARLY BLOCK
+    ============================ */
+    if (minutesBefore > earlyLimit) {
+      return res.status(400).json({
+        error: "Too early to punch-in",
+        allowedBeforeMinutes: earlyLimit,
+        current: minutesBefore
+      });
+    }
+
+    /* ============================
+       6. TOO LATE BLOCK
+    ============================ */
+    if (minutesAfter > maxLate) {
+      return res.status(403).json({
+        error: "Punch-in too late",
+        allowedLateMinutes: maxLate,
+        current: minutesAfter
+      });
+    }
+
+    /* ============================
+       7. UPSERT ATTENDANCE
+    ============================ */
+    const attendance = await Attendance.findOneAndUpdate(
+      {
+        companyId,
+        employeeId,
+        date: today
+      },
+      {
+        $setOnInsert: {
+          companyId,
+          employeeId,
+          date: today,
+          status: attendanceStatus
+        }
+      },
+      {
+        new: true,
+        upsert: true
+      }
     );
 
-    const routePoint = {
-      location: createGeoPoint(
-        validatedLocation.lng,  // Now this exists
-        validatedLocation.lat   // Now this exists
-      ),
-      timestamp: new Date(),
-      accuracy: validatedLocation.accuracy,
-      speed: 0,
-      heading: validatedLocation.heading
-    };
-
-    // ✅ FINAL SANITY CHECK (production defensive layer)
-    const [lng, lat] = punchInLocationGeo.coordinates;
-    if (typeof lng !== "number" || typeof lat !== "number") {
-      throw new Error("Final Geo validation failed");
+    /* ============================
+       8. IDEMPOTENCY CHECK
+    ============================ */
+    if (attendance.punchIn) {
+      return res.status(200).json({
+        success: true,
+        message: "Already punched in (ignored)",
+        punchIn: attendance.punchIn
+      });
     }
 
-    const sessionData = {
-      sessionId,
-      salesPersonId: new mongoose.Types.ObjectId(salesPersonId),
-      companyId: new mongoose.Types.ObjectId(companyId),
-
-      status: "in_progress",
-      punchInTime: new Date(),
-
-      punchInLocation: punchInLocationGeo,
-      ...(punchInPhoto && { punchInPhoto }),
-
-      punchInAddress: validatedLocation.address,
-      punchOutAddress: "",
-
-      routePath: [routePoint],
-
-      totalDistance: 0,
-      duration: 0,
-
-      customer: {
-        companyName: "",
-        contactName: "",
-        phoneNumber: "",
-        address: "",
-        landmark: ""
+    /* ============================
+       9. SAFE UPDATE (RACE SAFE)
+    ============================ */
+    const updated = await Attendance.findOneAndUpdate(
+      {
+        _id: attendance._id,
+        punchIn: { $exists: false }
       },
-
-      sales: {
-        dealStatus: "Negotiation",
-        paymentCollected: false,
-        amount: 0
+      {
+        $set: {
+          punchIn: now,
+          lastPunchAt: now,
+          deviceInfo,
+          geoLocation: createGeoPoint(
+            validatedLocation.lng,
+            validatedLocation.lat
+          )
+        },
+        $push: {
+          punchHistory: {
+            type: "in",
+            time: now,
+            geoLocation: validatedLocation,
+            deviceInfo,
+            source: "mobile"
+          }
+        }
       },
+      { new: true }
+    );
 
-      SalesStatus: "open",
+    if (!updated) {
+      return res.status(200).json({
+        success: true,
+        message: "Punch already recorded (race safe)"
+      });
+    }
 
-      nextMeeting: {
-        decided: false,
-        time: "",
-        notes: ""
-      },
-
-      evideinceVisite: {
-        visitNotes: ""
-      },
-
-      createdBy: new mongoose.Types.ObjectId(salesPersonId)
-    };
-
-    const [newSession] = await SalesSession.create([sessionData], { session });
-
-    await session.commitTransaction();
-
-    return res.status(201).json({
+    /* ============================
+       10. SUCCESS RESPONSE
+    ============================ */
+    return res.status(200).json({
       success: true,
-      sessionId,
-      session: newSession
+      message: "Punch-in successful",
+      data: {
+        punchIn: updated.punchIn,
+        status: updated.status,
+        shift: {
+          start: shift.startTime,
+          end: shift.endTime
+        }
+      }
     });
 
   } catch (error) {
-    await session.abortTransaction();
-    console.error("PunchIn error:", error);
-
-    return res.status(500).json({
-      error: error.message
-    });
-  } finally {
-    session.endSession();
+    console.error("PunchIn Error:", error);
+    return res.status(500).json({ error: error.message });
   }
 };
 
@@ -469,6 +662,194 @@ const buildGeoPoint = (location) => {
 };
 
 // ================= CONTROLLER =================
+// export const punchOut = async (req, res) => {
+//   const dbSession = await mongoose.startSession();
+//   dbSession.startTransaction();
+
+//   try {
+//     const { sessionId, location } = req.body;
+
+//     // ===== VALIDATION =====
+//     if (!sessionId) {
+//       return res.status(400).json({ error: "sessionId is required" });
+//     }
+
+//     let parsedLocation = location;
+
+//     if (typeof location === "string") {
+//       try {
+//         parsedLocation = JSON.parse(location);
+//       } catch {
+//         return res.status(400).json({ error: "Invalid location JSON" });
+//       }
+//     }
+
+//     if (!parsedLocation) {
+//       return res.status(400).json({ error: "location is required" });
+//     }
+
+//     // ===== BUILD SAFE GEO =====
+//     const punchOutGeo = buildGeoPoint(parsedLocation);
+
+//     if (!punchOutGeo) {
+//       return res.status(400).json({
+//         error: "Invalid geo coordinates",
+//         received: parsedLocation
+//       });
+//     }
+
+//     const [lng, lat] = punchOutGeo.coordinates;
+
+//     // ===== FETCH SESSION =====
+//     const salesSession = await SalesSession.findOne({
+//       sessionId,
+//       status: "in_progress"
+//     }).session(dbSession);
+
+//     if (!salesSession) {
+//       return res.status(404).json({
+//         error: "Session not found or already completed"
+//       });
+//     }
+
+//     if (!salesSession.formCompleted) {
+//       return res.status(400).json({
+//         error: "Please complete the sales form before punching out"
+//       });
+//     }
+
+//     // ===== FILE UPLOAD =====
+//     let punchOutPhoto = null;
+//     if (req.file) {
+//       try {
+//         punchOutPhoto = await uploadImage(req.file, "sales/punch-out");
+//       } catch (err) {
+//         console.error("Upload failed:", err);
+//       }
+//     }
+
+//     // ===== DISTANCE CALC =====
+//     let finalDistance = 0;
+
+//     if (salesSession.routePath?.length > 0) {
+//       const lastPoint = salesSession.routePath.at(-1);
+
+//       const coords = lastPoint?.location?.coordinates;
+
+//       if (Array.isArray(coords) && coords.length === 2) {
+//         const [prevLng, prevLat] = coords;
+
+//         if (!isNaN(prevLat) && !isNaN(prevLng)) {
+//           finalDistance = calculateDistance(
+//             prevLat,
+//             prevLng,
+//             lat,
+//             lng
+//           );
+//         }
+//       }
+//     }
+
+//     // ===== TIME CALC =====
+//     const punchOutTime = new Date();
+
+//     const durationSeconds = Math.max(
+//       0,
+//       Math.floor(
+//         (punchOutTime - new Date(salesSession.punchInTime)) / 1000
+//       )
+//     );
+
+//     // ===== ROUTE POINT =====
+//     const finalRoutePoint = {
+//       location: punchOutGeo, // reuse validated object
+//       timestamp: punchOutTime,
+//       accuracy: Number(parsedLocation.accuracy) || 0,
+//       speed: 0,
+//       heading: Number(parsedLocation.heading) || 0
+//     };
+
+//     // ===== UPDATE OBJECT =====
+//     const updateObject = {
+//       status: "completed",
+//       punchOutTime,
+//       punchOutLocation: punchOutGeo,
+//       punchOutAddress: parsedLocation.address || "",
+//       duration: durationSeconds
+//     };
+
+//     if (punchOutPhoto) {
+//       updateObject.punchOutPhoto = punchOutPhoto;
+//     }
+
+//     // ===== SAFE UPDATE =====
+//     const updatedSession = await SalesSession.findOneAndUpdate(
+//       { sessionId, status: "in_progress" },
+//       {
+//         $set: updateObject,
+//         $push: { routePath: finalRoutePoint },
+//         $inc: { totalDistance: finalDistance }
+//       },
+//       {
+//         new: true,
+//         session: dbSession,
+//         runValidators: true,
+//         context: "query"
+//       }
+//     );
+
+//     if (!updatedSession) {
+//       await dbSession.abortTransaction();
+//       return res.status(400).json({
+//         error: "Failed to update session"
+//       });
+//     }
+
+//     await dbSession.commitTransaction();
+
+//     // ===== RESPONSE =====
+//     const minutes = Math.round(durationSeconds / 60);
+//     const meters = Math.round(updatedSession.totalDistance || 0);
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Punch-out successful",
+//       sessionId,
+//       summary: {
+//         duration: {
+//           seconds: durationSeconds,
+//           minutes: minutes,
+//           formatted:
+//             minutes >= 60
+//               ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+//               : `${minutes}m`
+//         },
+//         distance: {
+//           meters,
+//           km: (meters / 1000).toFixed(2)
+//         },
+//         routePoints: updatedSession.routePath?.length || 0
+//       }
+//     });
+
+//   } catch (error) {
+//     await dbSession.abortTransaction();
+
+//     console.error("PunchOut error:", error);
+
+//     return res.status(500).json({
+//       error: error.message
+//     });
+
+//   } finally {
+//     dbSession.endSession();
+//   }
+// };
+
+
+
+
+
 export const punchOut = async (req, res) => {
   const dbSession = await mongoose.startSession();
   dbSession.startTransaction();
@@ -476,13 +857,14 @@ export const punchOut = async (req, res) => {
   try {
     const { sessionId, location } = req.body;
 
-    // ===== VALIDATION =====
+    /* ============================
+       1. BASIC VALIDATION
+    ============================ */
     if (!sessionId) {
       return res.status(400).json({ error: "sessionId is required" });
     }
 
     let parsedLocation = location;
-
     if (typeof location === "string") {
       try {
         parsedLocation = JSON.parse(location);
@@ -495,19 +877,16 @@ export const punchOut = async (req, res) => {
       return res.status(400).json({ error: "location is required" });
     }
 
-    // ===== BUILD SAFE GEO =====
     const punchOutGeo = buildGeoPoint(parsedLocation);
-
     if (!punchOutGeo) {
-      return res.status(400).json({
-        error: "Invalid geo coordinates",
-        received: parsedLocation
-      });
+      return res.status(400).json({ error: "Invalid geo coordinates" });
     }
 
     const [lng, lat] = punchOutGeo.coordinates;
 
-    // ===== FETCH SESSION =====
+    /* ============================
+       2. FETCH ACTIVE SESSION
+    ============================ */
     const salesSession = await SalesSession.findOne({
       sessionId,
       status: "in_progress"
@@ -519,45 +898,45 @@ export const punchOut = async (req, res) => {
       });
     }
 
-    if (!salesSession.formCompleted) {
+    if (!salesSession.punchInTime) {
       return res.status(400).json({
-        error: "Please complete the sales form before punching out"
+        error: "Punch-in required before punch-out"
       });
     }
 
-    // ===== FILE UPLOAD =====
-    let punchOutPhoto = null;
-    if (req.file) {
-      try {
-        punchOutPhoto = await uploadImage(req.file, "sales/punch-out");
-      } catch (err) {
-        console.error("Upload failed:", err);
+    if (!salesSession.formCompleted) {
+      return res.status(400).json({
+        error: "Complete form before punch-out"
+      });
+    }
+
+    /* ============================
+       3. ANTI-SPAM PROTECTION
+    ============================ */
+    if (salesSession.punchOutTime) {
+      const gap = (Date.now() - new Date(salesSession.punchOutTime)) / 1000;
+      if (gap < 20) {
+        return res.status(429).json({
+          error: "Punch too frequent",
+          retryAfterSeconds: 20
+        });
       }
     }
 
-    // ===== DISTANCE CALC =====
+    /* ============================
+       4. DISTANCE CALCULATION
+    ============================ */
     let finalDistance = 0;
 
-    if (salesSession.routePath?.length > 0) {
-      const lastPoint = salesSession.routePath.at(-1);
-
-      const coords = lastPoint?.location?.coordinates;
-
-      if (Array.isArray(coords) && coords.length === 2) {
-        const [prevLng, prevLat] = coords;
-
-        if (!isNaN(prevLat) && !isNaN(prevLng)) {
-          finalDistance = calculateDistance(
-            prevLat,
-            prevLng,
-            lat,
-            lng
-          );
-        }
-      }
+    const lastPoint = salesSession.routePath?.at(-1);
+    if (lastPoint?.location?.coordinates) {
+      const [prevLng, prevLat] = lastPoint.location.coordinates;
+      finalDistance = calculateDistance(prevLat, prevLng, lat, lng);
     }
 
-    // ===== TIME CALC =====
+    /* ============================
+       5. TIME CALCULATION
+    ============================ */
     const punchOutTime = new Date();
 
     const durationSeconds = Math.max(
@@ -567,54 +946,100 @@ export const punchOut = async (req, res) => {
       )
     );
 
-    // ===== ROUTE POINT =====
-    const finalRoutePoint = {
-      location: punchOutGeo, // reuse validated object
+    /* ============================
+       6. ROUTE POINT
+    ============================ */
+    const routePoint = {
+      location: punchOutGeo,
       timestamp: punchOutTime,
-      accuracy: Number(parsedLocation.accuracy) || 0,
+      accuracy: parsedLocation.accuracy || 0,
       speed: 0,
-      heading: Number(parsedLocation.heading) || 0
+      heading: parsedLocation.heading || 0
     };
 
-    // ===== UPDATE OBJECT =====
-    const updateObject = {
-      status: "completed",
-      punchOutTime,
-      punchOutLocation: punchOutGeo,
-      punchOutAddress: parsedLocation.address || "",
-      duration: durationSeconds
-    };
-
-    if (punchOutPhoto) {
-      updateObject.punchOutPhoto = punchOutPhoto;
-    }
-
-    // ===== SAFE UPDATE =====
+    /* ============================
+       7. UPDATE SESSION (ATOMIC)
+    ============================ */
     const updatedSession = await SalesSession.findOneAndUpdate(
       { sessionId, status: "in_progress" },
       {
-        $set: updateObject,
-        $push: { routePath: finalRoutePoint },
+        $set: {
+          status: "completed",
+          punchOutTime,
+          punchOutLocation: punchOutGeo,
+          punchOutAddress: parsedLocation.address || "",
+          duration: durationSeconds,
+          lastPunchAt: punchOutTime
+        },
+        $push: { routePath: routePoint },
         $inc: { totalDistance: finalDistance }
       },
       {
         new: true,
-        session: dbSession,
-        runValidators: true,
-        context: "query"
+        session: dbSession
       }
     );
 
     if (!updatedSession) {
       await dbSession.abortTransaction();
-      return res.status(400).json({
-        error: "Failed to update session"
-      });
+      return res.status(400).json({ error: "Session update failed" });
     }
 
+    /* =====================================================
+       8. ATTENDANCE SYNC (FINAL STATE OVERWRITE)
+    ====================================================== */
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const attendance = await Attendance.findOne({
+        companyId: updatedSession.companyId,
+        employeeId: updatedSession.employeeId,
+        date: today
+      }).session(dbSession);
+
+      if (attendance && attendance.punchIn) {
+        const now = punchOutTime;
+
+        // overwrite final state
+        attendance.punchOut = now;
+        attendance.lastPunchAt = now;
+
+        // recalculate work
+        const totalMinutes = Math.max(
+          0,
+          Math.floor((now - new Date(attendance.punchIn)) / 60000)
+        );
+
+        attendance.workSummary.totalMinutes = totalMinutes;
+        attendance.workSummary.payableMinutes = totalMinutes;
+        attendance.totalWorkingHours = totalMinutes / 60;
+
+        // audit log
+        attendance.punchHistory.push({
+          type: "out",
+          time: now,
+          geoLocation: punchOutGeo,
+          deviceInfo: { source: "session-sync" },
+          source: "mobile"
+        });
+
+        await attendance.save({ session: dbSession });
+      }
+
+    } catch (err) {
+      console.error("Attendance sync failed:", err);
+      // do not break main flow
+    }
+
+    /* ============================
+       9. COMMIT
+    ============================ */
     await dbSession.commitTransaction();
 
-    // ===== RESPONSE =====
+    /* ============================
+       10. RESPONSE
+    ============================ */
     const minutes = Math.round(durationSeconds / 60);
     const meters = Math.round(updatedSession.totalDistance || 0);
 
@@ -625,7 +1050,7 @@ export const punchOut = async (req, res) => {
       summary: {
         duration: {
           seconds: durationSeconds,
-          minutes: minutes,
+          minutes,
           formatted:
             minutes >= 60
               ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
@@ -641,7 +1066,6 @@ export const punchOut = async (req, res) => {
 
   } catch (error) {
     await dbSession.abortTransaction();
-
     console.error("PunchOut error:", error);
 
     return res.status(500).json({
