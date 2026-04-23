@@ -1159,6 +1159,98 @@ export const getSessions = async (req, res) => {
   }
 };
 
+
+// ========== GET ACTIVE SESSIONS ==========
+// controllers/leadController.js
+
+
+
+export const getCompanyLeads = async (req, res) => {
+  try {
+    const {
+      companyId,
+      salesPersonId,
+      status,
+      startDate,
+      endDate,
+      search,
+      page = 1,
+      limit = 10
+    } = req.query;
+
+    // ===== VALIDATION =====
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: "companyId is required"
+      });
+    }
+
+    // ===== QUERY BUILDING =====
+    const query = {
+      companyId: new mongoose.Types.ObjectId(companyId)
+    };
+
+    if (salesPersonId) {
+      query.salesPersonId = new mongoose.Types.ObjectId(salesPersonId);
+    }
+
+    if (status) {
+      query.status = status;
+    }
+
+    // Date filter (createdAt based)
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+
+    // Search (name / phone)
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { phone: { $regex: search, $options: "i" } }
+      ];
+    }
+
+    const skip = (Number(page) - 1) * Number(limit);
+
+    // ===== PARALLEL EXECUTION (Netflix-level optimization) =====
+    const [leads, total] = await Promise.all([
+      Lead.find(query)
+        .populate("salesPersonId", "name email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(), // 🚀 performance boost
+
+      Lead.countDocuments(query)
+    ]);
+
+    // ===== RESPONSE =====
+    return res.status(200).json({
+      success: true,
+      data: leads,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error("getCompanyLeads error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+};
+
 // ========== GET TODAY'S SESSIONS ==========
 export const getTodaySessions = async (req, res) => {
   try {
@@ -1440,7 +1532,113 @@ export const getMyAssignedSessions = async (req, res) => {
   }
 };
 
+export const getTodaySessionsAll = async (req, res) => {
+  try {
+    const {
+      companyId,
+      salesPersonId,
+      status,          // optional filter
+      page = 1,
+      limit = 10
+    } = req.query;
 
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: "companyId is required"
+      });
+    }
+
+    const parsedCompanyId = new mongoose.Types.ObjectId(companyId);
+
+    // ===== TODAY RANGE =====
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // ===== QUERY =====
+    const query = {
+      companyId: parsedCompanyId,
+      punchInTime: { $gte: startOfDay, $lte: endOfDay }
+    };
+
+    if (salesPersonId) {
+      query.salesPersonId = new mongoose.Types.ObjectId(salesPersonId);
+    }
+
+    if (status) {
+      query.status = status; // "in_progress" | "completed"
+    }
+
+    const skip = (Number(page) - 1) * Number(limit);
+
+    // ===== PARALLEL EXECUTION =====
+    const [sessions, total] = await Promise.all([
+      SalesSession.find(query)
+        .populate("salesPersonId", "name email")
+        .populate("companyId", "name")
+        .sort({ punchInTime: -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+
+      SalesSession.countDocuments(query)
+    ]);
+
+    // ===== OPTIONAL STATS =====
+    const stats = await SalesSession.aggregate([
+      {
+        $match: {
+          companyId: parsedCompanyId,
+          punchInTime: { $gte: startOfDay, $lte: endOfDay }
+        }
+      },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const formattedStats = {
+      total: 0,
+      inProgress: 0,
+      completed: 0
+    };
+
+    stats.forEach(s => {
+      formattedStats.total += s.count;
+      if (s._id === "in_progress") formattedStats.inProgress = s.count;
+      if (s._id === "completed") formattedStats.completed = s.count;
+    });
+
+    // ===== RESPONSE =====
+    return res.status(200).json({
+      success: true,
+      date: startOfDay,
+      stats: formattedStats, // optional
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        pages: Math.ceil(total / limit)
+      },
+      data: sessions
+    });
+
+  } catch (error) {
+    console.error("getTodaySessions error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+};
 
 
 

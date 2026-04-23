@@ -13,7 +13,9 @@ import {
   getActiveSessionAgg,
   assignToOther,
   getNearbyFilteredSessions,
-  getMyAssignedSessions
+  getMyAssignedSessions,
+  getCompanyLeads,
+  getTodaySessionsAll
 } from "../../../controllers/attandance/Sales/Sales.js";
 
 import authMiddleware from "../../../middlewares/authMiddleware.js";
@@ -126,6 +128,11 @@ router.get(
   getTodaySessions
 );
 router.get(
+  "/getTodaySessionsAll",
+  authMiddleware,
+  getTodaySessionsAll
+);
+router.get(
   "/getActiveSessionAgg",
   authMiddleware,
   getActiveSessionAgg
@@ -141,7 +148,12 @@ router.get(
   getMyAssignedSessions
 );
 router.get(
-  "/getNearbyFilteredSessions",
+  "/getCompanyLeads",
+  authMiddleware,
+  getCompanyLeads
+);
+router.get(
+  "/getNearbyFilteredSessions/:sessionId",
   authMiddleware,
   getNearbyFilteredSessions
 );

@@ -1,14 +1,65 @@
 import Plan from "../../../models/Attandance/subscration/plan.js";
 import mongoose from "mongoose";
 
+import crypto from "crypto";
+
+export const normalizeFeatureKey = (key) =>
+    key.toString().trim().toUpperCase().replace(/\s+/g, "_");
+
+export const generateFeatureKey = () =>
+    `FEATURE_${crypto.randomUUID().replace(/-/g, "_")}`;
+
+export const formatFeatures = (features = []) => {
+    return features.map((feature) => {
+        if (
+            typeof feature === "object" &&
+            feature !== null &&
+            feature.key &&
+            feature.value !== undefined
+        ) {
+            return {
+                key: normalizeFeatureKey(feature.key),
+                value: feature.value,
+                description:
+                    feature.description || String(feature.value),
+            };
+        }
+
+        return {
+            key: generateFeatureKey(),
+            value: feature,
+            description: String(feature || ""),
+        };
+    });
+};
+
+export const calculateFinalPrice = (price, discount) => {
+    if (discount > 0) {
+        return Math.round(price * (1 - discount / 100));
+    }
+    return price;
+};
+
+export const buildFeatureVersion = (type) => {
+    return {
+        UAI_Pro: type === "PRO",
+        UAI_Basic: type === "BASIC",
+        UAI_Sales: type === "SALES",
+    };
+};
+
 
 /**
  * @desc Create Plan
  * @route POST /api/plan
  */
+
 export const createPlan = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-        const {
+        let {
             name,
             price,
             discount = 0,
@@ -19,88 +70,71 @@ export const createPlan = async (req, res) => {
             data_see = false,
             isfree = false,
             Max_Employees = 0,
+            feature_version_type = "BASIC", // NEW FIELD
         } = req.body;
 
-        // Validation
-        if (!name || !price || !validityDays) {
-            return res.status(400).json({
-                success: false,
-                message: "Name, price, and validityDays are required"
-            });
+        // ===== VALIDATION =====
+        if (!name || price == null || !validityDays) {
+            throw new Error("Name, price and validityDays are required");
         }
 
-        if (!Array.isArray(features)) {
-            return res.status(400).json({
-                success: false,
-                message: "Features must be an array"
-            });
-        }
-
-        // Check duplicate plan name
+        // ===== DUPLICATE CHECK =====
         const existing = await Plan.findOne({
-            name: { $regex: new RegExp(`^${name}$`, "i") }
-        });
+            name: new RegExp(`^${name.trim()}$`, "i"),
+        }).session(session);
 
         if (existing) {
-            return res.status(400).json({
-                success: false,
-                message: "Plan with this name already exists"
-            });
+            throw new Error("Plan already exists");
         }
 
-        // Format features properly
-        const formattedFeatures = features.map((feature) => {
-            if (typeof feature === 'object' && feature !== null && feature.key && feature.value !== undefined) {
-                return {
-                    key: feature.key.toString().trim().toUpperCase().replace(/\s+/g, '_'),
-                    value: feature.value,
-                    description: feature.description || feature.value.toString()
-                };
-            }
-            return {
-                key: `FEATURE_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-                value: feature,
-                description: feature.toString()
-            };
-        });
+        // ===== TRANSFORM =====
+        const formattedFeatures = formatFeatures(features);
 
-        const plan = await Plan.create({
-            name: name.trim(),
-            price: Number(price),
-            discount: Number(discount),
-            validityDays: Number(validityDays),
-            features: formattedFeatures,
-            planType: planType.toUpperCase(),
-            data_export: Boolean(data_export),
-            data_see: Boolean(data_see),
-            isfree: Boolean(isfree),
-            Max_Employees: Number(Max_Employees),
-        });
+        const finalPrice = calculateFinalPrice(price, discount);
+
+        const features_version = buildFeatureVersion(
+            feature_version_type.toUpperCase()
+        );
+
+        // ===== CREATE =====
+        const plan = await Plan.create(
+            [
+                {
+                    name: name.trim(),
+                    price: Number(price),
+                    discount: Number(discount),
+                    finalPrice,
+                    validityDays: Number(validityDays),
+                    features: formattedFeatures,
+                    planType: planType.toUpperCase(),
+                    data_export: Boolean(data_export),
+                    data_see: Boolean(data_see),
+                    isfree: Boolean(isfree),
+                    Max_Employees: Number(Max_Employees),
+                    features_version,
+                },
+            ],
+            { session }
+        );
+
+        await session.commitTransaction();
 
         return res.status(201).json({
             success: true,
             message: "Plan created successfully",
-            data: plan
+            data: plan[0],
         });
-
     } catch (error) {
-        console.error("Create Plan Error:", error);
+        await session.abortTransaction();
 
-        if (error.code === 11000) {
-            return res.status(400).json({
-                success: false,
-                message: "Plan name already exists"
-            });
-        }
-
-        return res.status(500).json({
+        return res.status(400).json({
             success: false,
-            message: "Internal Server Error",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: error.message || "Create failed",
         });
+    } finally {
+        session.endSession();
     }
 };
-
 
 
 /**
@@ -145,88 +179,108 @@ export const getPlanById = async (req, res) => {
  * @route PUT /api/plan/:id
  */
 export const updatePlan = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
         const { id } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid Plan ID"
-            });
+            throw new Error("Invalid Plan ID");
         }
 
-        const {
-            features = [],
+        let {
+            features,
+            price,
+            discount,
             planType,
             data_export,
             data_see,
             isfree,
             Max_Employees,
+            feature_version_type, // NEW
             ...rest
         } = req.body;
 
-        // Format features from frontend
-        const formattedFeatures = features.map((feature) => {
-            if (typeof feature === 'object' && feature !== null && feature.key && feature.value !== undefined) {
-                return {
-                    key: feature.key.toString().trim().toUpperCase().replace(/\s+/g, '_'),
-                    value: feature.value,
-                    description: feature.description || feature.value.toString()
-                };
-            }
-            return {
-                key: `FEATURE_${Date.now()}`,
-                value: feature,
-                description: feature?.toString() || ''
-            };
-        });
+        const updateData = { ...rest };
 
-        const updateData = {
-            ...rest,
-            features: formattedFeatures,
-        };
+        // ===== FEATURES =====
+        if (features) {
+            updateData.features = formatFeatures(features);
+        }
 
-        if (planType) updateData.planType = planType.toUpperCase();
-        if (data_export !== undefined) updateData.data_export = Boolean(data_export);
-        if (data_see !== undefined) updateData.data_see = Boolean(data_see);
-        if (Max_Employees !== undefined) updateData.Max_Employees = Number(Max_Employees);
-        if (isfree !== undefined) updateData.isfree = Boolean(isfree);
+        // ===== PRICING =====
+        if (price !== undefined || discount !== undefined) {
+            const existing = await Plan.findById(id).session(session);
+            if (!existing) throw new Error("Plan not found");
+
+            const newPrice = price ?? existing.price;
+            const newDiscount = discount ?? existing.discount;
+
+            updateData.price = Number(newPrice);
+            updateData.discount = Number(newDiscount);
+            updateData.finalPrice = calculateFinalPrice(
+                newPrice,
+                newDiscount
+            );
+        }
+
+        // ===== ENUMS =====
+        if (planType) {
+            updateData.planType = planType.toUpperCase();
+        }
+
+        // ===== FLAGS =====
+        if (data_export !== undefined)
+            updateData.data_export = Boolean(data_export);
+
+        if (data_see !== undefined)
+            updateData.data_see = Boolean(data_see);
+
+        if (isfree !== undefined)
+            updateData.isfree = Boolean(isfree);
+
+        if (Max_Employees !== undefined)
+            updateData.Max_Employees = Number(Max_Employees);
+
+        // ===== FEATURE VERSION TOGGLE =====
+        if (feature_version_type) {
+            updateData.features_version = buildFeatureVersion(
+                feature_version_type.toUpperCase()
+            );
+        }
+
+        // ===== UPDATE =====
         const updatedPlan = await Plan.findByIdAndUpdate(
             id,
-            updateData,
+            { $set: updateData },
             {
                 new: true,
-                runValidators: true
+                runValidators: true,
+                session,
             }
         );
 
         if (!updatedPlan) {
-            return res.status(404).json({
-                success: false,
-                message: "Plan not found"
-            });
+            throw new Error("Plan not found");
         }
+
+        await session.commitTransaction();
 
         return res.status(200).json({
             success: true,
             message: "Plan updated successfully",
-            data: updatedPlan
+            data: updatedPlan,
         });
-
     } catch (error) {
-        console.error("Update Plan Error:", error);
+        await session.abortTransaction();
 
-        if (error.code === 11000) {
-            return res.status(400).json({
-                success: false,
-                message: "Plan name already exists"
-            });
-        }
-
-        return res.status(500).json({
+        return res.status(400).json({
             success: false,
-            message: "Internal Server Error"
+            message: error.message || "Update failed",
         });
+    } finally {
+        session.endSession();
     }
 };
 

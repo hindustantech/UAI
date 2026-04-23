@@ -35,7 +35,7 @@ const planSchema = new mongoose.Schema({
     finalPrice: {
         type: Number,
     },
-    features: {
+    features_version: {
         UAI_Pro: {
             type: Boolean,
             default: false,
