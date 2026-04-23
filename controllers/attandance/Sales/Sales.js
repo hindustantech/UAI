@@ -1845,8 +1845,7 @@ export const getNearbySalesByLocation = async (req, res) => {
 };
 
 
-import mongoose from "mongoose";
-import { SalesSession } from "../../models/SalesSession.js";
+
 
 export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
   try {

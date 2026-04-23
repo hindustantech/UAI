@@ -16,7 +16,8 @@ import {
   getMyAssignedSessions,
   getCompanyLeads,
   getTodaySessionsAll,
-  getNearbySalesByLocation
+  getNearbySalesByLocation,
+  getNearbyOpenSalesAdminOptimized
 } from "../../../controllers/attandance/Sales/Sales.js";
 
 import authMiddleware from "../../../middlewares/authMiddleware.js";

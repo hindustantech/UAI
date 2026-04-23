@@ -149,5 +149,9 @@ router.get(
     authMiddleware,
     getEmployees
 );
-
+router.get(
+    "/getSalesEmployeesByCompanyPaginated",
+     authMiddleware,
+     getSalesEmployeesByCompanyPaginated
+);
 export default router;
