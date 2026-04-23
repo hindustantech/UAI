@@ -1651,14 +1651,16 @@ export const getNearbyFilteredSessions = async (req, res) => {
     const userId = req.user.id;
     const companyId = req.user.companyId;
 
-    page = Number(page);
-    limit = Number(limit);
+    page = Math.max(1, Number(page));
+    limit = Math.min(50, Number(limit));
     radius = Math.min(Number(radius), 2000);
 
     const skip = (page - 1) * limit;
 
-    // ========== GET CURRENT SESSION ==========
-    const currentSession = await SalesSession.findOne({ sessionId }).lean();
+    // ===== FETCH SOURCE SESSION =====
+    const currentSession = await SalesSession.findOne({ sessionId })
+      .select("punchInLocation.coordinates")
+      .lean();
 
     if (!currentSession?.punchInLocation?.coordinates) {
       return res.status(404).json({
@@ -1669,35 +1671,27 @@ export const getNearbyFilteredSessions = async (req, res) => {
 
     const coordinates = currentSession.punchInLocation.coordinates;
 
-    // ========== GEO QUERY ==========
-    const results = await SalesSession.aggregate([
+    // ===== GEO PIPELINE =====
+    const pipeline = [
       {
         $geoNear: {
-          near: {
-            type: "Point",
-            coordinates
-          },
+          near: { type: "Point", coordinates },
           distanceField: "distance",
           maxDistance: radius,
           spherical: true,
+          key: "punchInLocation", // ✅ mandatory fix
           query: {
             sessionId: { $ne: sessionId },
             SalesStatus: "open",
-
-            // assigned OR created by me
+            companyId: new mongoose.Types.ObjectId(companyId),
             $or: [
               { assingnedTo: new mongoose.Types.ObjectId(userId) },
               { createdBy: new mongoose.Types.ObjectId(userId) }
-            ],
-
-            // company filter (direct)
-            companyId: new mongoose.Types.ObjectId(companyId)
+            ]
           }
         }
       },
-
       { $sort: { distance: 1 } },
-
       {
         $facet: {
           data: [
@@ -1716,20 +1710,19 @@ export const getNearbyFilteredSessions = async (req, res) => {
           totalCount: [{ $count: "count" }]
         }
       }
-    ]);
+    ];
 
-    const sessions = results[0].data;
-    const total = results[0].totalCount[0]?.count || 0;
+    const [result] = await SalesSession.aggregate(pipeline);
 
     return res.status(200).json({
       success: true,
       pagination: {
-        total,
+        total: result?.totalCount?.[0]?.count || 0,
         page,
         limit,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil((result?.totalCount?.[0]?.count || 0) / limit)
       },
-      data: sessions
+      data: result?.data || []
     });
 
   } catch (error) {
