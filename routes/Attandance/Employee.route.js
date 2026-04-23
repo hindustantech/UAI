@@ -151,7 +151,7 @@ router.get(
 );
 router.get(
     "/sales/paginated",
-     authMiddleware,
-     getSalesEmployeesByCompanyPaginated
+    authMiddleware,
+    getSalesEmployeesByCompanyPaginated
 );
 export default router;

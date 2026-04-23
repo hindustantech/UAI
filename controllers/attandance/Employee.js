@@ -155,7 +155,7 @@ export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
 
 export const getEmployees = async (req, res) => {
     try {
-        const companyId = req.user._id;
+        const companyId = req.user?._id||req.user?.id;
 
         const status = req.query.status || "all";
 
