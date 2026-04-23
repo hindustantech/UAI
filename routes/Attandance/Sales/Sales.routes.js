@@ -15,7 +15,8 @@ import {
   getNearbyFilteredSessions,
   getMyAssignedSessions,
   getCompanyLeads,
-  getTodaySessionsAll
+  getTodaySessionsAll,
+  getNearbySalesByLocation
 } from "../../../controllers/attandance/Sales/Sales.js";
 
 import authMiddleware from "../../../middlewares/authMiddleware.js";
@@ -156,6 +157,16 @@ router.get(
   "/getNearbyFilteredSessions/:sessionId",
   authMiddleware,
   getNearbyFilteredSessions
+);
+router.get(
+  "/getNearbySalesByLocation",
+  authMiddleware,
+  getNearbySalesByLocation
+);
+router.get(
+  "/getNearbyOpenSalesAdminOptimized/:sessionId",
+  authMiddleware,
+  getNearbyOpenSalesAdminOptimized
 );
 
 export default router;

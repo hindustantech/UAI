@@ -90,6 +90,60 @@ export const activateEmployee = async (req, res) => {
 };
 
 
+export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
+    try {
+        let { page = 1, limit = 10 } = req.query;
+
+        const companyId = new mongoose.Types.ObjectId(req.user.id);
+
+        page = Math.max(1, Number(page));
+        limit = Math.min(50, Number(limit));
+        const skip = (page - 1) * limit;
+
+        const filter = {
+            companyId,
+            employeeType: "sales",
+            employmentStatus: "active"
+        };
+
+        const [data, total] = await Promise.all([
+            Employee.find(filter, {
+                _id: 0,
+                userId: 1,
+                user_name: 1,
+                empCode: 1,
+                role: 1,
+                "jobInfo.designation": 1
+            })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+
+            Employee.countDocuments(filter)
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            },
+            data
+        });
+
+    } catch (error) {
+        console.error("getSalesEmployees error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+            error: error.message
+        });
+    }
+};
+
 export const getEmployees = async (req, res) => {
     try {
         const companyId = req.user._id;

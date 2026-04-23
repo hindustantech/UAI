@@ -1735,3 +1735,236 @@ export const getNearbyFilteredSessions = async (req, res) => {
     });
   }
 };
+
+
+
+export const getNearbySalesByLocation = async (req, res) => {
+  try {
+    let { lat, lng, radius = 1000, page = 1, limit = 10 } = req.query;
+
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const companyId = new mongoose.Types.ObjectId(req.user.companyId);
+
+    // ===== VALIDATION =====
+    if (!lat || !lng) {
+      return res.status(400).json({
+        success: false,
+        message: "lat and lng are required"
+      });
+    }
+
+    lat = Number(lat);
+    lng = Number(lng);
+    radius = Math.min(Number(radius), 3000);
+    page = Math.max(1, Number(page));
+    limit = Math.min(50, Number(limit));
+
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid coordinates"
+      });
+    }
+
+    const skip = (page - 1) * limit;
+
+    // ===== GEO QUERY =====
+    const pipeline = [
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: [lng, lat], // ⚠️ MongoDB format: [longitude, latitude]
+          },
+          distanceField: "distance",
+          spherical: true,
+          maxDistance: radius,
+          key: "punchInLocation", // ✅ REQUIRED
+
+          query: {
+            SalesStatus: "open",
+            companyId,
+
+            $or: [
+              { assingnedTo: userId },
+              { salesPersonId: userId }
+            ]
+          }
+        }
+      },
+
+      { $sort: { distance: 1 } },
+
+      {
+        $facet: {
+          data: [
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 0,
+                sessionId: 1,
+                salesPersonId: 1,
+                assingnedTo: 1,
+                distance: 1,
+                punchInTime: 1,
+                SalesStatus: 1,
+                punchInLocation: 1
+              }
+            }
+          ],
+          total: [{ $count: "count" }]
+        }
+      }
+    ];
+
+    const [result] = await SalesSession.aggregate(pipeline);
+
+    const total = result?.total?.[0]?.count || 0;
+
+    return res.status(200).json({
+      success: true,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      },
+      data: result?.data || []
+    });
+
+  } catch (error) {
+    console.error("getNearbySalesByLocation error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+};
+
+
+import mongoose from "mongoose";
+import { SalesSession } from "../../models/SalesSession.js";
+
+export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    let { page = 1, limit = 10, radius = 1000, userFilterId } = req.query;
+
+    const companyId = new mongoose.Types.ObjectId(req.user.id);
+
+    page = Math.max(1, Number(page));
+    limit = Math.min(50, Number(limit));
+    radius = Math.min(Number(radius), 5000);
+
+    const skip = (page - 1) * limit;
+
+    // ===== FETCH BASE LOCATION (MINIMAL PAYLOAD) =====
+    const baseSession = await SalesSession.findOne(
+      { sessionId },
+      { "punchInLocation.coordinates": 1, _id: 0 }
+    ).lean();
+
+    if (!baseSession?.punchInLocation?.coordinates) {
+      return res.status(404).json({
+        success: false,
+        message: "Session or location not found"
+      });
+    }
+
+    const coordinates = baseSession.punchInLocation.coordinates;
+
+    // ===== BUILD FILTER =====
+    const matchFilter = {
+      sessionId: { $ne: sessionId },
+      SalesStatus: "open",
+      companyId
+    };
+
+    if (userFilterId && mongoose.Types.ObjectId.isValid(userFilterId)) {
+      const userId = new mongoose.Types.ObjectId(userFilterId);
+
+      matchFilter.$or = [
+        { salesPersonId: userId },
+        { assingnedTo: userId }
+      ];
+    }
+
+    // ===== GEO PIPELINE (LIGHTWEIGHT) =====
+    const dataPipeline = [
+      {
+        $geoNear: {
+          near: { type: "Point", coordinates },
+          distanceField: "distance",
+          spherical: true,
+          maxDistance: radius,
+          key: "punchInLocation"
+        }
+      },
+
+      { $match: matchFilter },
+
+      { $sort: { distance: 1 } },
+
+      { $skip: skip },
+      { $limit: limit },
+
+      {
+        $project: {
+          _id: 0,
+          sessionId: 1,
+          salesPersonId: 1,
+          assingnedTo: 1,
+          distance: 1,
+          punchInTime: 1,
+          SalesStatus: 1
+        }
+      }
+    ];
+
+    // ===== COUNT PIPELINE (FAST) =====
+    const countPipeline = [
+      {
+        $geoNear: {
+          near: { type: "Point", coordinates },
+          distanceField: "distance",
+          spherical: true,
+          maxDistance: radius,
+          key: "punchInLocation"
+        }
+      },
+      { $match: matchFilter },
+      { $count: "total" }
+    ];
+
+    // ===== PARALLEL EXECUTION =====
+    const [data, countResult] = await Promise.all([
+      SalesSession.aggregate(dataPipeline),
+      SalesSession.aggregate(countPipeline)
+    ]);
+
+    const total = countResult[0]?.total || 0;
+
+    return res.status(200).json({
+      success: true,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      },
+      data
+    });
+
+  } catch (error) {
+    console.error("Optimized Geo Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+};

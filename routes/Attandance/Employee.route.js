@@ -18,7 +18,8 @@ import {
     getLatestSubscription,
     changeEmployeeRole,
     activateEmployee,
-    getEmployees
+    getEmployees,
+    getSalesEmployeesByCompanyPaginated
 } from "../../controllers/attandance/Employee.js";
 
 /* ===============================
