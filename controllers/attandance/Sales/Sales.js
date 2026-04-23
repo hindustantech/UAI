@@ -1652,12 +1652,11 @@ export const getNearbyFilteredSessions = async (req, res) => {
     const companyId = req.user.companyId;
 
     page = Math.max(1, Number(page));
-    limit = Math.min(50, Number(limit));
-    radius = Math.min(Number(radius), 2000);
+    limit = Math.min(100, Number(limit)); // slightly increased
+    radius = Math.min(Number(radius), 5000);
 
     const skip = (page - 1) * limit;
 
-    // ===== FETCH SOURCE SESSION =====
     const currentSession = await SalesSession.findOne({ sessionId })
       .select("punchInLocation.coordinates")
       .lean();
@@ -1671,7 +1670,6 @@ export const getNearbyFilteredSessions = async (req, res) => {
 
     const coordinates = currentSession.punchInLocation.coordinates;
 
-    // ===== GEO PIPELINE =====
     const pipeline = [
       {
         $geoNear: {
@@ -1679,7 +1677,7 @@ export const getNearbyFilteredSessions = async (req, res) => {
           distanceField: "distance",
           maxDistance: radius,
           spherical: true,
-          key: "punchInLocation", // ✅ mandatory fix
+          key: "punchInLocation",
           query: {
             sessionId: { $ne: sessionId },
             SalesStatus: "open",
@@ -1691,21 +1689,15 @@ export const getNearbyFilteredSessions = async (req, res) => {
           }
         }
       },
+
       { $sort: { distance: 1 } },
+
       {
         $facet: {
           data: [
             { $skip: skip },
-            { $limit: limit },
-            {
-              $project: {
-                sessionId: 1,
-                salesPersonId: 1,
-                distance: 1,
-                punchInTime: 1,
-                SalesStatus: 1
-              }
-            }
+            { $limit: limit }
+            // ❌ NO PROJECT → returns full document
           ],
           totalCount: [{ $count: "count" }]
         }
@@ -1735,7 +1727,6 @@ export const getNearbyFilteredSessions = async (req, res) => {
     });
   }
 };
-
 
 
 export const getNearbySalesByLocation = async (req, res) => {
@@ -1855,12 +1846,11 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
     const companyId = new mongoose.Types.ObjectId(req.user.id);
 
     page = Math.max(1, Number(page));
-    limit = Math.min(50, Number(limit));
-    radius = Math.min(Number(radius), 5000);
+    limit = Math.min(100, Number(limit));
+    radius = Math.min(Number(radius), 10000);
 
     const skip = (page - 1) * limit;
 
-    // ===== FETCH BASE LOCATION (MINIMAL PAYLOAD) =====
     const baseSession = await SalesSession.findOne(
       { sessionId },
       { "punchInLocation.coordinates": 1, _id: 0 }
@@ -1875,7 +1865,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
 
     const coordinates = baseSession.punchInLocation.coordinates;
 
-    // ===== BUILD FILTER =====
     const matchFilter = {
       sessionId: { $ne: sessionId },
       SalesStatus: "open",
@@ -1891,7 +1880,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
       ];
     }
 
-    // ===== GEO PIPELINE (LIGHTWEIGHT) =====
     const dataPipeline = [
       {
         $geoNear: {
@@ -1908,22 +1896,11 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
       { $sort: { distance: 1 } },
 
       { $skip: skip },
-      { $limit: limit },
+      { $limit: limit }
 
-      {
-        $project: {
-          _id: 0,
-          sessionId: 1,
-          salesPersonId: 1,
-          assingnedTo: 1,
-          distance: 1,
-          punchInTime: 1,
-          SalesStatus: 1
-        }
-      }
+      // ❌ NO PROJECT → full document returned
     ];
 
-    // ===== COUNT PIPELINE (FAST) =====
     const countPipeline = [
       {
         $geoNear: {
@@ -1938,7 +1915,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
       { $count: "total" }
     ];
 
-    // ===== PARALLEL EXECUTION =====
     const [data, countResult] = await Promise.all([
       SalesSession.aggregate(dataPipeline),
       SalesSession.aggregate(countPipeline)
