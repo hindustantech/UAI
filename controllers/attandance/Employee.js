@@ -94,7 +94,14 @@ export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
     try {
         let { page = 1, limit = 10 } = req.query;
 
-        const companyId = new mongoose.Types.ObjectId(req.user.id);
+        const companyId = req.user.id;
+
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid company ID"
+            });
+        }
 
         page = Math.max(1, Number(page));
         limit = Math.min(50, Number(limit));
@@ -106,15 +113,17 @@ export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
             employmentStatus: "active"
         };
 
+        const projection = {
+            _id: 0,
+            userId: 1,
+            user_name: 1,
+            empCode: 1,
+            role: 1,
+            "jobInfo.designation": 1
+        };
+
         const [data, total] = await Promise.all([
-            Employee.find(filter, {
-                _id: 0,
-                userId: 1,
-                user_name: 1,
-                empCode: 1,
-                role: 1,
-                "jobInfo.designation": 1
-            })
+            Employee.find(filter, projection)
                 .skip(skip)
                 .limit(limit)
                 .lean(),

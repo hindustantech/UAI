@@ -150,7 +150,7 @@ router.get(
     getEmployees
 );
 router.get(
-    "/getSalesEmployeesByCompanyPaginated",
+    "/sales/paginated",
      authMiddleware,
      getSalesEmployeesByCompanyPaginated
 );

@@ -174,6 +174,7 @@ export const getPlanById = async (req, res) => {
         });
     }
 };
+
 /**
  * @desc Update Plan
  * @route PUT /api/plan/:id
