@@ -305,10 +305,8 @@ attendanceSchema.index(
 
 
 // Geo Spatial
-attendanceSchema.index({
-    geoLocation: "2dsphere"
-});
-
+// ✅ Must be sparse to skip documents without geoLocation
+attendanceSchema.index({ geoLocation: "2dsphere" }, { sparse: true });
 
 // Device Fraud
 attendanceSchema.index({
