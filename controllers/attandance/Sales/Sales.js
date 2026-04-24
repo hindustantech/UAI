@@ -563,6 +563,9 @@ export const punchIn = async (req, res) => {
     /* ============================
        10. CREATE/UPDATE VISIT LOG (If sessionId provided)
     ============================ */
+    /* ============================
+    10. CREATE/UPDATE VISIT LOG (If sessionId provided)
+ ============================ */
     let visitLogResponse = null;
 
     if (sessionId) {
@@ -575,22 +578,18 @@ export const punchIn = async (req, res) => {
             validatedLocation.lat
           ),
           punchOutTime: null,
-          punchOutLocation: createGeoPoint(
-            validatedLocation.lng,
-            validatedLocation.lat
-          ),
+          punchOutLocation: null
         };
 
-        const session = await SalesSession.findOneAndUpdate(
+        // 1️⃣ Try updating existing session
+        let session = await SalesSession.findOneAndUpdate(
           {
-            _id: sessionId,
+            sessionId: sessionId,
             companyId,
             status: "in_progress"
           },
           {
-            $push: {
-              visitLogs: visitLogEntry
-            },
+            $push: { visitLogs: visitLogEntry },
             $set: {
               punchInTime: now,
               punchInLocation: createGeoPoint(
@@ -604,20 +603,33 @@ export const punchIn = async (req, res) => {
           { new: true }
         );
 
+        // 2️⃣ If NOT FOUND → CREATE NEW SESSION
         if (!session) {
-          // Session not found or already completed - just log warning
-          console.warn(`Session ${sessionId} not found or completed`);
-        } else {
-          visitLogResponse = {
-            visitLogId: session.visitLogs[session.visitLogs.length - 1]._id,
+          session = await SalesSession.create({
+            sessionId: sessionId, // optional: remove if auto-generate
+            companyId,
+            employeeId,
+            status: "in_progress",
             punchInTime: now,
-            punchInLocation: validatedLocation
-          };
+            punchInLocation: createGeoPoint(
+              validatedLocation.lng,
+              validatedLocation.lat
+            ),
+            lastPunchAt: now,
+            visitLogs: [visitLogEntry]
+          });
         }
+
+        // 3️⃣ Prepare response
+        visitLogResponse = {
+          sessionId: session._id,
+          visitLogId: session.visitLogs[session.visitLogs.length - 1]._id,
+          punchInTime: now,
+          punchInLocation: validatedLocation
+        };
+
       } catch (sessionError) {
         console.error("Session visit log error:", sessionError);
-        // Don't fail the punch-in if session update fails
-        // Just log it and continue
       }
     }
 
