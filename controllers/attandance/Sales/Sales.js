@@ -557,7 +557,10 @@ export const punchIn = async (req, res) => {
             validatedLocation.lat
           ),
           punchOutTime: null,
-          punchOutLocation: undefined
+          punchOutLocation: createGeoPoint(
+            validatedLocation.lng,
+            validatedLocation.lat
+          ),
         };
 
         const session = await SalesSession.findOneAndUpdate(
