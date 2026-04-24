@@ -880,6 +880,7 @@ export const punchOut = async (req, res) => {
     /* ============================
        2. FETCH EMPLOYEE (ONLY FOR ATTENDANCE)
     ============================ */
+    console.log(`Fetching employee for userId: ${userId}, companyId: ${companyId}, employmentStatus: active`);
     const employee = await Employee.findOne({
       userId,
       companyId,
