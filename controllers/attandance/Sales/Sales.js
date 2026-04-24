@@ -568,69 +568,85 @@ export const punchIn = async (req, res) => {
  ============================ */
     let visitLogResponse = null;
 
-    if (sessionId) {
-      try {
-        const visitLogEntry = {
-          userId: employeeId,
+    try {
+      /* ============================
+         1. ALWAYS RESOLVE SESSION ID
+      ============================ */
+      let finalSessionId = sessionId?.trim();
+
+      if (!finalSessionId) {
+        finalSessionId = generateSessionId(employeeId);
+      }
+
+      /* ============================
+         2. CREATE VISIT LOG ENTRY
+      ============================ */
+      const visitLogEntry = {
+        userId: employeeId,
+        punchInTime: now,
+        punchInLocation: createGeoPoint(
+          validatedLocation.lng,
+          validatedLocation.lat
+        ),
+        punchOutTime: null,
+        punchOutLocation: null
+      };
+
+      /* ============================
+         3. FIND ACTIVE SESSION
+      ============================ */
+      let session = await SalesSession.findOne({
+        sessionId: finalSessionId,
+        companyId,
+        status: "in_progress"
+      });
+
+      /* ============================
+         4. IF NOT FOUND → CREATE SESSION
+      ============================ */
+      if (!session) {
+        session = await SalesSession.create({
+          sessionId: finalSessionId, // ✅ stored here
+          companyId,
+          employeeId,
+          status: "in_progress",
           punchInTime: now,
           punchInLocation: createGeoPoint(
             validatedLocation.lng,
             validatedLocation.lat
           ),
-          punchOutTime: null,
-          punchOutLocation: null
-        };
+          lastPunchAt: now,
+          visitLogs: [visitLogEntry]
+        });
+      } else {
+        /* ============================
+           5. IF FOUND → UPDATE SESSION
+        ============================ */
+        session.visitLogs.push(visitLogEntry);
+        session.lastPunchAt = now;
 
-        // 1️⃣ Try updating existing session
-        let session = await SalesSession.findOneAndUpdate(
-          {
-            sessionId: sessionId,
-            companyId,
-            status: "in_progress"
-          },
-          {
-            $push: { visitLogs: visitLogEntry },
-            $set: {
-              punchInTime: now,
-              punchInLocation: createGeoPoint(
-                validatedLocation.lng,
-                validatedLocation.lat
-              ),
-              lastPunchAt: now,
-              employeeId
-            }
-          },
-          { new: true }
-        );
+        // optional: update latest punch-in
+        session.punchInTime = session.punchInTime || now;
+        session.punchInLocation =
+          session.punchInLocation ||
+          createGeoPoint(validatedLocation.lng, validatedLocation.lat);
 
-        // 2️⃣ If NOT FOUND → CREATE NEW SESSION
-        if (!session) {
-          session = await SalesSession.create({
-            sessionId: sessionId, // optional: remove if auto-generate
-            companyId,
-            employeeId,
-            status: "in_progress",
-            punchInTime: now,
-            punchInLocation: createGeoPoint(
-              validatedLocation.lng,
-              validatedLocation.lat
-            ),
-            lastPunchAt: now,
-            visitLogs: [visitLogEntry]
-          });
-        }
-
-        // 3️⃣ Prepare response
-        visitLogResponse = {
-          sessionId: session._id,
-          visitLogId: session.visitLogs[session.visitLogs.length - 1]._id,
-          punchInTime: now,
-          punchInLocation: validatedLocation
-        };
-
-      } catch (sessionError) {
-        console.error("Session visit log error:", sessionError);
+        await session.save();
       }
+
+      /* ============================
+         6. RESPONSE
+      ============================ */
+      visitLogResponse = {
+        sessionId: session.sessionId, // ✅ correct usage
+        visitLogId:
+          session.visitLogs[session.visitLogs.length - 1]._id,
+        punchInTime: now,
+        punchInLocation: validatedLocation
+      };
+
+    } catch (err) {
+      console.error("Session Error:", err);
     }
 
     /* ============================
