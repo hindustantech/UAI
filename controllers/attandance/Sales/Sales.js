@@ -5,7 +5,7 @@ import { fileTypeFromBuffer } from "file-type";
 import Attendance from "../../../models/Attandance/Attendance.js";
 import Shift from "../../../models/Attandance/Shift.js";
 import Holiday from "../../../models/Attandance/Holiday.js";
-
+import Employee from "../../../models/Attandance/Employee.js";
 
 
 
