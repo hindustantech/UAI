@@ -1077,7 +1077,7 @@ export const punchOut = async (req, res) => {
 
       const attendance = await Attendance.findOne({
         companyId,
-        employeeId,
+        userId:employeeId,
         date: today
       }).session(dbSession);
 
