@@ -425,27 +425,19 @@ export const punchIn = async (req, res) => {
     const { id, companyId } = req.user;
     const { location, deviceInfo, sessionId } = req.body;
     const employeeId = id;
-    // ========== VALIDATE LOCATION ==========
+
     const validatedLocation = validateLocation(location);
     const now = new Date();
 
-    /* ============================
-       1. NORMALIZE DATE (IST SAFE)
-    ============================ */
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     /* ============================
-       2. FETCH EMPLOYEE + SHIFT
+       EMPLOYEE + SHIFT
     ============================ */
-    console.log("Fetching employee and shift for punch-in", {
-      employeeId,
-      companyId
-    });
-
     const employee = await Employee.findOne({
       userId: employeeId,
-      companyId: companyId,
+      companyId,
       employmentStatus: "active"
     });
 
@@ -460,41 +452,30 @@ export const punchIn = async (req, res) => {
     });
 
     if (!shift || !shift.startTime || !shift.endTime) {
-      return res.status(400).json({
-        error: "Invalid shift configuration"
-      });
+      return res.status(400).json({ error: "Invalid shift configuration" });
     }
 
     /* ============================
-       3. HOLIDAY CHECK (CONFIG)
+       HOLIDAY CHECK
     ============================ */
-    const holiday = await Holiday.findOne({
-      companyId,
-      date: today
-    });
+    const holiday = await Holiday.findOne({ companyId, date: today });
 
     let attendanceStatus = "present";
 
     if (holiday) {
       if (!shift.allowHolidayWork) {
         return res.status(403).json({
-          error: `Holiday (${holiday.name || "Holiday"}). Punch-in not allowed`
+          error: `Holiday (${holiday.name || "Holiday"})`
         });
       }
       attendanceStatus = "holiday_working";
     }
 
-
-
     /* ============================
-       7. UPSERT ATTENDANCE
+       UPSERT ATTENDANCE
     ============================ */
     const attendance = await Attendance.findOneAndUpdate(
-      {
-        companyId,
-        employeeId,
-        date: today
-      },
+      { companyId, employeeId, date: today },
       {
         $setOnInsert: {
           companyId,
@@ -503,31 +484,19 @@ export const punchIn = async (req, res) => {
           status: attendanceStatus
         }
       },
-      {
-        new: true,
-        upsert: true
-      }
+      { new: true, upsert: true }
     );
 
-    /* ============================
-       8. IDEMPOTENCY CHECK
-    ============================ */
     if (attendance.punchIn) {
       return res.status(200).json({
         success: true,
-        message: "Already punched in (ignored)",
+        message: "Already punched in",
         punchIn: attendance.punchIn
       });
     }
 
-    /* ============================
-       9. SAFE UPDATE - ATTENDANCE (RACE SAFE)
-    ============================ */
     const updated = await Attendance.findOneAndUpdate(
-      {
-        _id: attendance._id,
-        punchIn: { $exists: false }
-      },
+      { _id: attendance._id, punchIn: { $exists: false } },
       {
         $set: {
           punchIn: now,
@@ -535,7 +504,7 @@ export const punchIn = async (req, res) => {
           deviceInfo,
           geoLocation: {
             type: "Point",
-            coordinates: [validatedLocation.lng, validatedLocation.lat], // ✅ always valid here
+            coordinates: [validatedLocation.lng, validatedLocation.lat],
             verified: false,
             source: "gps"
           }
@@ -545,8 +514,7 @@ export const punchIn = async (req, res) => {
             type: "in",
             time: now,
             geoLocation: validatedLocation,
-            deviceInfo,
-            source: "mobile"
+            deviceInfo
           }
         }
       },
@@ -556,89 +524,83 @@ export const punchIn = async (req, res) => {
     if (!updated) {
       return res.status(200).json({
         success: true,
-        message: "Punch already recorded (race safe)"
+        message: "Already punched (race safe)"
       });
     }
 
     /* ============================
-       10. CREATE/UPDATE VISIT LOG (If sessionId provided)
+       SESSION + VISIT LOG (FIXED)
     ============================ */
-    /* ============================
-    10. CREATE/UPDATE VISIT LOG (If sessionId provided)
- ============================ */
     let visitLogResponse = null;
 
     try {
-      /* ============================
-         1. ALWAYS RESOLVE SESSION ID
-      ============================ */
       let finalSessionId = sessionId?.trim();
 
       if (!finalSessionId) {
         finalSessionId = generateSessionId(employeeId);
       }
 
-      /* ============================
-         2. CREATE VISIT LOG ENTRY
-      ============================ */
+      const geoPoint = createGeoPoint(
+        validatedLocation.lng,
+        validatedLocation.lat
+      );
+
       const visitLogEntry = {
         userId: employeeId,
         punchInTime: now,
-        punchInLocation: createGeoPoint(
-          validatedLocation.lng,
-          validatedLocation.lat
-        ),
+        punchInLocation: geoPoint,
         punchOutTime: null,
         punchOutLocation: null
       };
 
-      /* ============================
-         3. FIND ACTIVE SESSION
-      ============================ */
       let session = await SalesSession.findOne({
         sessionId: finalSessionId,
         companyId,
         status: "in_progress"
       });
 
-      /* ============================
-         4. IF NOT FOUND → CREATE SESSION
-      ============================ */
+      /* ========= CREATE ========= */
       if (!session) {
         session = await SalesSession.create({
-          sessionId: finalSessionId, // ✅ stored here
+          sessionId: finalSessionId,
           companyId,
           employeeId,
           status: "in_progress",
           punchInTime: now,
-          punchInLocation: createGeoPoint(
-            validatedLocation.lng,
-            validatedLocation.lat
-          ),
+          punchInLocation: geoPoint,
           lastPunchAt: now,
+
+          // ✅ CRITICAL FIX (routePath required)
+          routePath: [
+            {
+              location: geoPoint,
+              timestamp: now
+            }
+          ],
+
           visitLogs: [visitLogEntry]
         });
       } else {
-        /* ============================
-           5. IF FOUND → UPDATE SESSION
-        ============================ */
+        /* ========= UPDATE ========= */
         session.visitLogs.push(visitLogEntry);
+
+        // ✅ CRITICAL FIX
+        session.routePath.push({
+          location: geoPoint,
+          timestamp: now
+        });
+
         session.lastPunchAt = now;
 
-        // optional: update latest punch-in
-        session.punchInTime = session.punchInTime || now;
-        session.punchInLocation =
-          session.punchInLocation ||
-          createGeoPoint(validatedLocation.lng, validatedLocation.lat);
+        if (!session.punchInTime) session.punchInTime = now;
+        if (!session.punchInLocation)
+          session.punchInLocation = geoPoint;
 
         await session.save();
       }
 
-      /* ============================
-         6. RESPONSE
-      ============================ */
       visitLogResponse = {
-        sessionId: session.sessionId, // ✅ correct usage
+        sessionId: session.sessionId,
         visitLogId:
           session.visitLogs[session.visitLogs.length - 1]._id,
         punchInTime: now,
@@ -650,7 +612,7 @@ export const punchIn = async (req, res) => {
     }
 
     /* ============================
-       11. SUCCESS RESPONSE
+       RESPONSE
     ============================ */
     return res.status(200).json({
       success: true,
