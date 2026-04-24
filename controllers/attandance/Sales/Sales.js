@@ -487,38 +487,38 @@ export const punchIn = async (req, res) => {
     /* ============================
        4. TIME CALCULATION (IST)
     ============================ */
-    const shiftStart = createDateTimeIST(today, shift.startTime);
-    const shiftEnd = createDateTimeIST(today, shift.endTime);
+    // const shiftStart = createDateTimeIST(today, shift.startTime);
+    // const shiftEnd = createDateTimeIST(today, shift.endTime);
 
-    const punchTimeIST = getPunchTimeIST(now);
+    // const punchTimeIST = getPunchTimeIST(now);
 
-    const earlyLimit = shift.earlyPunchLimit || 60;
-    const maxLate = shift.maxLatePunch || 120;
+    // const earlyLimit = shift.earlyPunchLimit || 60;
+    // const maxLate = shift.maxLatePunch || 120;
 
-    const minutesBefore = diffMinutes(punchTimeIST, shiftStart);
-    const minutesAfter = diffMinutes(shiftStart, punchTimeIST);
+    // const minutesBefore = diffMinutes(punchTimeIST, shiftStart);
+    // const minutesAfter = diffMinutes(shiftStart, punchTimeIST);
 
-    /* ============================
-       5. TOO EARLY BLOCK
-    ============================ */
-    if (minutesBefore > earlyLimit) {
-      return res.status(400).json({
-        error: "Too early to punch-in",
-        allowedBeforeMinutes: earlyLimit,
-        current: minutesBefore
-      });
-    }
+    // /* ============================
+    //    5. TOO EARLY BLOCK
+    // ============================ */
+    // if (minutesBefore > earlyLimit) {
+    //   return res.status(400).json({
+    //     error: "Too early to punch-in",
+    //     allowedBeforeMinutes: earlyLimit,
+    //     current: minutesBefore
+    //   });
+    // }
 
-    /* ============================
-       6. TOO LATE BLOCK
-    ============================ */
-    if (minutesAfter > maxLate) {
-      return res.status(403).json({
-        error: "Punch-in too late",
-        allowedLateMinutes: maxLate,
-        current: minutesAfter
-      });
-    }
+    // /* ============================
+    //    6. TOO LATE BLOCK
+    // ============================ */
+    // if (minutesAfter > maxLate) {
+    //   return res.status(403).json({
+    //     error: "Punch-in too late",
+    //     allowedLateMinutes: maxLate,
+    //     current: minutesAfter
+    //   });
+    // }
 
     /* ============================
        7. UPSERT ATTENDANCE
