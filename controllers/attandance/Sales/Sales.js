@@ -424,7 +424,7 @@ export const punchIn = async (req, res) => {
   try {
     const { id, companyId } = req.user;
     const { location, deviceInfo, sessionId } = req.body;
-    const employeeId = id;
+    const userId = id;
 
     const validatedLocation = validateLocation(location);
     const now = new Date();
@@ -475,11 +475,11 @@ export const punchIn = async (req, res) => {
        UPSERT ATTENDANCE
     ============================ */
     const attendance = await Attendance.findOneAndUpdate(
-      { companyId, employeeId, date: today },
+      { companyId, employeeId: employee._id, date: today },
       {
         $setOnInsert: {
           companyId,
-          employeeId,
+          employeeId: employee._id,
           date: today,
           status: attendanceStatus
         }
@@ -546,7 +546,7 @@ export const punchIn = async (req, res) => {
       );
 
       const visitLogEntry = {
-        userId: employeeId,
+        userId,
         punchInTime: now,
         punchInLocation: geoPoint,
         punchOutTime: null,
@@ -564,7 +564,7 @@ export const punchIn = async (req, res) => {
         session = await SalesSession.create({
           sessionId: finalSessionId,
           companyId,
-          employeeId,
+          employeeId: userId,
           status: "in_progress",
           punchInTime: now,
           punchInLocation: geoPoint,
