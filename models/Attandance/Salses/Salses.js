@@ -218,7 +218,7 @@ const salesSessionSchema = new Schema({
 
     routePath: {
         type: [routePointSchema],
-        default: []
+        default: [0.0, 0.0]
     },
 
     totalDistance: {
