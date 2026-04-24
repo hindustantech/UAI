@@ -865,9 +865,9 @@ export const punchOut = async (req, res) => {
   dbSession.startTransaction();
 
   try {
-    const { employeeId, companyId } = req.user;
+    const { id, companyId } = req.user;
     const { sessionId, location, deviceInfo } = req.body;
-
+    const employeeId = id;
     /* ============================
        1. STRICT VALIDATION
     ============================ */
