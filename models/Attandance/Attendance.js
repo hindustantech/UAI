@@ -198,12 +198,19 @@ const attendanceSchema = new mongoose.Schema({
         type: {
             type: String,
             enum: ["Point"],
-            default: "Point"
         },
 
         coordinates: {
             type: [Number],
-            required: true
+            // ❌ REMOVE required: true  ← causes [] to be stored on $setOnInsert
+            default: undefined,   // ✅ don't store empty array
+            validate: {
+                validator: function (v) {
+                    // Only validate if coordinates exist
+                    return !v || v.length === 0 || (v.length === 2 && v.every(n => typeof n === 'number'));
+                },
+                message: 'Coordinates must be [lng, lat]'
+            }
         },
 
         accuracy: Number,
