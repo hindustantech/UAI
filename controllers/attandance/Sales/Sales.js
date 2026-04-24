@@ -422,9 +422,9 @@ const uploadImage = async (file, folder) => {
 
 export const punchIn = async (req, res) => {
   try {
-    const { employeeId, companyId } = req.user;
+    const { id, companyId } = req.user;
     const { location, deviceInfo, sessionId } = req.body;
-
+    const employeeId = id;
     // ========== VALIDATE LOCATION ==========
     const validatedLocation = validateLocation(location);
     const now = new Date();
@@ -442,7 +442,7 @@ export const punchIn = async (req, res) => {
       employeeId,
       companyId
     });
-    
+
     const employee = await Employee.findOne({
       userId: employeeId,
       companyId: companyId,
