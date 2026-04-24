@@ -537,7 +537,7 @@ export const punchIn = async (req, res) => {
       let finalSessionId = sessionId?.trim();
 
       if (!finalSessionId) {
-        finalSessionId = generateSessionId(employeeId);
+        finalSessionId = generateSessionId(userId);
       }
 
       const geoPoint = createGeoPoint(
