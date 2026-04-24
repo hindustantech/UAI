@@ -791,9 +791,9 @@ export const completeSalesForm = async (req, res) => {
     session.formCompleted = true;
 
     // Auto-complete only when user submits data
-    if (session.status === "in_progress") {
-      session.status = "completed";
-    }
+    // if (session.status === "in_progress") {
+    //   session.status = "in_progress";
+    // }
 
     await session.save();
 
@@ -918,7 +918,7 @@ export const punchOut = async (req, res) => {
        2. FETCH ACTIVE SESSION
     ============================ */
     const salesSession = await SalesSession.findOne({
-      _id: mongoose.Types.ObjectId.isValid(sessionId) ? sessionId : null,
+      sessionId,
       companyId,
       status: "in_progress"
     }).session(dbSession);
