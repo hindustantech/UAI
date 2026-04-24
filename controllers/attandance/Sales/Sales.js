@@ -440,7 +440,7 @@ export const punchIn = async (req, res) => {
     ============================ */
     const employee = await Employee.findOne({
       userId: employeeId,
-      companyId,
+      companyId: companyId,
       employmentStatus: "active"
     });
 
