@@ -919,7 +919,6 @@ export const punchOut = async (req, res) => {
     const activeSession = await SalesSession.findOne({
       sessionId,
       companyId,
-      userId, // ✅ NOT employeeId
       status: "in_progress"
     }).session(dbSession);
 
