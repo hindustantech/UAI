@@ -438,6 +438,11 @@ export const punchIn = async (req, res) => {
     /* ============================
        2. FETCH EMPLOYEE + SHIFT
     ============================ */
+    console.log("Fetching employee and shift for punch-in", {
+      employeeId,
+      companyId
+    });
+    
     const employee = await Employee.findOne({
       userId: employeeId,
       companyId: companyId,
