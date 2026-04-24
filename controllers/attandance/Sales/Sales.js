@@ -340,23 +340,47 @@ const toNumber = (val) => {
 export const validateLocation = (location) => {
   if (!location) throw new Error("Location required");
 
+  // 🔥 CASE 1: already object
+  if (typeof location === "object") {
+    return normalizeLocation(location);
+  }
+
+  // 🔥 CASE 2: string → try JSON.parse
+  if (typeof location === "string") {
+    try {
+      const parsed = JSON.parse(location);
+      return normalizeLocation(parsed);
+    } catch (e) {
+      // 🔥 CASE 3: malformed string like "{lat: 25, lng: 85}"
+      try {
+        const fixed = location
+          .replace(/([a-zA-Z0-9_]+):/g, '"$1":') // fix keys
+          .replace(/'/g, '"');
+
+        const parsed = JSON.parse(fixed);
+        return normalizeLocation(parsed);
+      } catch (err) {
+        throw new Error(`Invalid location format: ${location}`);
+      }
+    }
+  }
+
+  throw new Error(`Unsupported location type: ${typeof location}`);
+};
+
+
+// 🔧 Separate clean normalizer
+const normalizeLocation = (location) => {
   let lat, lng;
 
-  // ✅ Case 1: Normal object
   if (location.lat !== undefined || location.latitude !== undefined) {
     lat = location.lat ?? location.latitude;
     lng = location.lng ?? location.longitude;
-  }
-
-  // ✅ Case 2: GeoJSON format
-  else if (location.coordinates) {
+  } else if (Array.isArray(location.coordinates)) {
     lng = location.coordinates[0];
     lat = location.coordinates[1];
-  }
-
-  // ❌ Invalid format
-  else {
-    throw new Error("Invalid location format");
+  } else {
+    throw new Error(`Invalid location structure: ${JSON.stringify(location)}`);
   }
 
   lat = Number(lat);
@@ -379,9 +403,7 @@ export const validateLocation = (location) => {
     coordinates: [lng, lat],
     lat,
     lng,
-    address: location.address || "",
-    accuracy: location.accuracy || null,
-    heading: location.heading || null
+    address: location.address || ""
   };
 };
 
