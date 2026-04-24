@@ -4,7 +4,6 @@ export const resolveDateRange = (fromDate, toDate) => {
 
     let start;
     let end;
-
     /* =====================================
        AUTO MODE (No Dates Provided)
        Today → Last 31 Days

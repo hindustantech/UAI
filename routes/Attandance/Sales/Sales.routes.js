@@ -8,7 +8,6 @@ import {
   getSessions,
   getSessionDetails,
   getTodaySessions,
-  updateRoute,
   getSessionRoute,
   getActiveSessionAgg,
   assignToOther,
@@ -76,12 +75,7 @@ router.post(
   punchIn
 );
 
-// 2. UPDATE ROUTE - Real-time location tracking (optional)
-router.put(
-  "/route/:sessionId",
-  authMiddleware,
-  updateRoute
-);
+
 
 // 3. COMPLETE SALES FORM - Fill customer and sales details
 router.put(
