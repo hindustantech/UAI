@@ -340,25 +340,48 @@ const toNumber = (val) => {
 export const validateLocation = (location) => {
   if (!location) throw new Error("Location required");
 
-  let lat = location.lat ?? location.latitude;
-  let lng = location.lng ?? location.longitude;
+  let lat, lng;
 
-  lat = toNumber(lat);
-  lng = toNumber(lng);
-
-  if (lat === null || lng === null) {
-    throw new Error("Invalid coordinates: must be numbers");
+  // ✅ Case 1: Normal object
+  if (location.lat !== undefined || location.latitude !== undefined) {
+    lat = location.lat ?? location.latitude;
+    lng = location.lng ?? location.longitude;
   }
 
-  // Return both the GeoJSON object AND separate lat/lng for convenience
+  // ✅ Case 2: GeoJSON format
+  else if (location.coordinates) {
+    lng = location.coordinates[0];
+    lat = location.coordinates[1];
+  }
+
+  // ❌ Invalid format
+  else {
+    throw new Error("Invalid location format");
+  }
+
+  lat = Number(lat);
+  lng = Number(lng);
+
+  if (isNaN(lat) || isNaN(lng)) {
+    throw new Error(`Invalid coordinates: lat=${lat}, lng=${lng}`);
+  }
+
+  if (lng < -180 || lng > 180) {
+    throw new Error(`Longitude out of range: ${lng}`);
+  }
+
+  if (lat < -90 || lat > 90) {
+    throw new Error(`Latitude out of range: ${lat}`);
+  }
+
   return {
     type: "Point",
-    coordinates: [lng, lat], // MongoDB expects [lng, lat]
-    lat: lat,  // ADDED: expose lat
-    lng: lng,  // ADDED: expose lng
-    address: location.address,
-    accuracy: location.accuracy,
-    heading: location.heading
+    coordinates: [lng, lat],
+    lat,
+    lng,
+    address: location.address || "",
+    accuracy: location.accuracy || null,
+    heading: location.heading || null
   };
 };
 
