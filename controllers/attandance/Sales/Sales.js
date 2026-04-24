@@ -868,6 +868,13 @@ export const punchOut = async (req, res) => {
     const { id, companyId } = req.user;
     const { sessionId, location, deviceInfo } = req.body;
     const employeeId = id;
+
+    const EmployeeData = await Employee.findOne({
+      userId: employeeId,
+      companyId,
+      employmentStatus: "active"
+    }).session(dbSession);
+
     /* ============================
        1. STRICT VALIDATION
     ============================ */
@@ -1077,7 +1084,7 @@ export const punchOut = async (req, res) => {
 
       const attendance = await Attendance.findOne({
         companyId,
-        userId:employeeId,
+        employeeId: EmployeeData._id,
         date: today
       }).session(dbSession);
 
