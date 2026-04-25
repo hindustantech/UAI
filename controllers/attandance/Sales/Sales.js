@@ -1320,6 +1320,7 @@ export const getSessionDetails = async (req, res) => {
 
 export const getSessions = async (req, res) => {
   try {
+    // ================= EXTRACT QUERY PARAMETERS =================
     const {
       salesPersonId,
       status,
@@ -1329,41 +1330,101 @@ export const getSessions = async (req, res) => {
       page = 1,
       limit = 10,
       includeLogs = "true",
-      includeRoute = "false"
+      includeRoute = "false",
+      sortBy = "punchInTime", // Field to sort by
+      sortOrder = "-1" // -1 for descending, 1 for ascending
     } = req.query;
 
-    /* ================= COMPANY ISOLATION ================= */
-    const companyId = req.user.companyId;
-    const employeeId = salesPersonId; // for better naming consistency
-    /* ================= QUERY BUILD ================= */
-    const query = { companyId };
-
-    if (employeeId) query.employeeId = employeeId;
-    if (status) query.status = status;
-    if (SalesStatus) query.SalesStatus = SalesStatus;
-
-    if (startDate || endDate) {
-      query.punchInTime = {};
-      if (startDate) query.punchInTime.$gte = new Date(startDate);
-      if (endDate) query.punchInTime.$lte = new Date(endDate);
+    // ================= COMPANY ISOLATION (MULTI-TENANCY) =================
+    if (!req.user || !req.user.companyId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized: Company ID not found"
+      });
     }
 
-    /* ================= PAGINATION ================= */
-    const pageNumber = Math.max(1, parseInt(page));
-    const limitNumber = Math.max(1, Math.min(100, parseInt(limit)));
+    const companyId = req.user.companyId;
+    const employeeId = salesPersonId;
+
+    // ================= BUILD QUERY OBJECT =================
+    const query = { companyId };
+
+    // Filter by employee/sales person
+    if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
+      query.employeeId = new mongoose.Types.ObjectId(employeeId);
+    }
+
+    // Filter by session status
+    if (status && ["in_progress", "completed"].includes(status)) {
+      query.status = status;
+    }
+
+    // Filter by sales status
+    if (SalesStatus && ["open", "closed", "follow_up"].includes(SalesStatus)) {
+      query.SalesStatus = SalesStatus;
+    }
+
+    // ================= DATE RANGE FILTERING (PROPER) =================
+    if (startDate || endDate) {
+      query.punchInTime = {};
+
+      if (startDate) {
+        const start = new Date(startDate);
+        if (isNaN(start.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid startDate format. Use ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)"
+          });
+        }
+        // Start of the day
+        start.setHours(0, 0, 0, 0);
+        query.punchInTime.$gte = start;
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+        if (isNaN(end.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid endDate format. Use ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)"
+          });
+        }
+        // End of the day
+        end.setHours(23, 59, 59, 999);
+        query.punchInTime.$lte = end;
+      }
+    }
+
+    // ================= PAGINATION =================
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.max(1, Math.min(100, parseInt(limit) || 10));
     const skip = (pageNumber - 1) * limitNumber;
 
-    /* ================= FETCH ================= */
+    // ================= SORTING =================
+    const sortObj = {};
+    const validSortFields = [
+      "punchInTime",
+      "createdAt",
+      "updatedAt",
+      "totalDistance",
+      "status"
+    ];
+    const sortField = validSortFields.includes(sortBy) ? sortBy : "punchInTime";
+    const order = sortOrder === "1" ? 1 : -1;
+    sortObj[sortField] = order;
+
+    // ================= BUILD MONGO QUERY =================
     let mongoQuery = SalesSession.find(query)
       .populate("employeeId", "name email phone")
       .populate("createdBy", "name email")
+      .populate("companyId", "name")
       .populate("assignedTo", "name email")
-      .sort({ punchInTime: -1 })
+      .sort(sortObj)
       .skip(skip)
       .limit(limitNumber)
       .lean();
 
-    /* ================= OPTIONAL POPULATES ================= */
+    // ================= CONDITIONAL POPULATES FOR LOGS =================
     if (includeLogs === "true") {
       mongoQuery = mongoQuery
         .populate("visitLogs.userId", "name email")
@@ -1372,125 +1433,211 @@ export const getSessions = async (req, res) => {
         .populate("visitNotes.userId", "name email");
     }
 
-    const sessions = await mongoQuery;
+    // ================= EXECUTE QUERY =================
+    const sessions = await mongoQuery.exec();
     const total = await SalesSession.countDocuments(query);
 
-    /* ================= GEO HELPER ================= */
+    // ================= HELPER: EXTRACT GEO COORDINATES =================
     const extractGeo = (geo) => {
-      if (!geo?.coordinates || geo.coordinates.length !== 2) return null;
+      if (!geo || !geo.coordinates || geo.coordinates.length !== 2) {
+        return null;
+      }
       return {
         latitude: geo.coordinates[1],
-        longitude: geo.coordinates[0]
+        longitude: geo.coordinates[0],
+        type: geo.type || "Point"
       };
     };
 
-    /* ================= FORMAT ================= */
-    const formatted = sessions.map((s) => ({
-      id: s.sessionId,
+    // ================= HELPER: FORMAT DATE =================
+    const formatDate = (date) => {
+      if (!date) return null;
+      return {
+        iso: new Date(date).toISOString(),
+        unix: new Date(date).getTime(),
+        readable: new Date(date).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        })
+      };
+    };
 
-      status: s.status,
-      SalesStatus: s.SalesStatus,
-      formCompleted: s.formCompleted,
+    // ================= FORMAT RESPONSE =================
+    const formatted = sessions.map((session) => {
+      const formattedSession = {
+        id: session.sessionId,
 
-      customer: {
-        companyName: s.customer?.companyName || "",
-        contactName: s.customer?.contactName || "",
-        phone: s.customer?.phoneNumber || "",
-        address: s.customer?.address || "",
-        landmark: s.customer?.landmark || "",
-        location: extractGeo(s.customer?.location),
-        shopPhoto: s.customer?.shopPhoto || null
-      },
+        // Status Fields
+        status: session.status,
+        SalesStatus: session.SalesStatus,
+        formCompleted: session.formCompleted,
 
-      employee: s.employeeId,
-      createdBy: s.createdBy,
-      assignedTo: s.assignedTo || [],
+        // Customer Information
+        customer: {
+          companyName: session.customer?.companyName || "",
+          contactName: session.customer?.contactName || "",
+          phone: session.customer?.phoneNumber || "",
+          address: session.customer?.address || "",
+          landmark: session.customer?.landmark || "",
+          location: extractGeo(session.customer?.location),
+          shopPhoto: session.customer?.shopPhoto
+            ? {
+              url: session.customer.shopPhoto.url,
+              fileName: session.customer.shopPhoto.fileName,
+              uploadedAt: formatDate(session.customer.shopPhoto.uploadedAt)
+            }
+            : null
+        },
 
-      punch: {
-        inTime: s.punchInTime,
-        outTime: s.punchOutTime,
-        inLocation: extractGeo(s.punchInLocation),
-        outLocation: extractGeo(s.punchOutLocation),
-        outAddress: s.punchOutAddress,
-        lastPunchAt: s.lastPunchAt
-      },
+        // User References
+        employee: session.employeeId,
+        createdBy: session.createdBy,
+        assignedTo: session.assignedTo || [],
+        company: session.companyId,
 
-      stats: {
-        totalDistance: s.totalDistance || 0,
-        duration: s.duration || 0,
-        visits: s.visitLogs?.length || 0,
-        sales: s.salesLogs?.length || 0
-      },
+        // Punch Details
+        punch: {
+          inTime: formatDate(session.punchInTime),
+          outTime: formatDate(session.punchOutTime),
+          inLocation: extractGeo(session.punchInLocation),
+          outLocation: extractGeo(session.punchOutLocation),
+          outAddress: session.punchOutAddress || "",
+          lastPunchAt: formatDate(session.lastPunchAt)
+        },
 
-      /* ================= LOGS ================= */
-      visitLogs:
-        includeLogs === "true"
-          ? (s.visitLogs || []).map((v) => ({
-            userId: v.userId,
-            punchInTime: v.punchInTime,
-            punchOutTime: v.punchOutTime,
-            punchInLocation: extractGeo(v.punchInLocation),
-            punchOutLocation: extractGeo(v.punchOutLocation)
-          }))
-          : undefined,
+        // Statistics
+        stats: {
+          totalDistance: session.totalDistance || 0,
+          duration: session.duration || 0,
+          visits: session.visitLogs?.length || 0,
+          sales: session.salesLogs?.length || 0,
+          meetings: session.meetingLogs?.length || 0,
+          notes: session.visitNotes?.length || 0
+        },
 
-      salesLogs:
-        includeLogs === "true"
-          ? (s.salesLogs || []).map((sl) => ({
-            userId: sl.userId,
-            dealStatus: sl.dealStatus,
-            amount: sl.amount,
-            paymentCollected: sl.paymentCollected,
-            paymentMode: sl.paymentMode,
-            note: sl.note,
-            createdAt: sl.createdAt
-          }))
-          : undefined,
+        // Next Meeting
+        nextMeeting: session.nextMeeting
+          ? {
+            decided: session.nextMeeting.decided,
+            date: formatDate(session.nextMeeting.date),
+            time: session.nextMeeting.time,
+            notes: session.nextMeeting.notes
+          }
+          : null,
 
-      meetingLogs: includeLogs === "true" ? s.meetingLogs || [] : undefined,
-      visitNotes: includeLogs === "true" ? s.visitNotes || [] : undefined,
+        // Evidence
+        evidence: {
+          visitNotes: session.evidence?.visitNotes || "",
+          visitPhoto: session.evidence?.visitPhoto
+            ? {
+              url: session.evidence.visitPhoto.url,
+              fileName: session.evidence.visitPhoto.fileName,
+              uploadedAt: formatDate(session.evidence.visitPhoto.uploadedAt)
+            }
+            : null
+        },
 
-      /* ================= ROUTE ================= */
-      routePath:
-        includeRoute === "true"
-          ? (s.routePath || []).map((r) => ({
-            userId: r.userId,
-            location: extractGeo(r.location),
-            timestamp: r.timestamp,
-            accuracy: r.accuracy,
-            speed: r.speed,
-            heading: r.heading
-          }))
-          : undefined,
+        // Timestamps
+        timestamps: {
+          createdAt: formatDate(session.createdAt),
+          updatedAt: formatDate(session.updatedAt)
+        }
+      };
 
-      /* ================= EXTRA ================= */
-      evidence: s.evidence || {},
-      nextMeeting: s.nextMeeting || {},
+      // ================= CONDITIONAL LOG INCLUSION =================
+      if (includeLogs === "true") {
+        formattedSession.visitLogs = (session.visitLogs || []).map((visit) => ({
+          userId: visit.userId,
+          punchInTime: formatDate(visit.punchInTime),
+          punchOutTime: formatDate(visit.punchOutTime),
+          punchInLocation: extractGeo(visit.punchInLocation),
+          punchOutLocation: extractGeo(visit.punchOutLocation)
+        }));
 
-      timestamps: {
-        createdAt: s.createdAt,
-        updatedAt: s.updatedAt
+        formattedSession.salesLogs = (session.salesLogs || []).map((sale) => ({
+          userId: sale.userId,
+          dealStatus: sale.dealStatus,
+          amount: sale.amount,
+          paymentCollected: sale.paymentCollected,
+          paymentMode: sale.paymentMode,
+          note: sale.note,
+          createdAt: formatDate(sale.createdAt)
+        }));
+
+        formattedSession.meetingLogs = (session.meetingLogs || []).map((meeting) => ({
+          userId: meeting.userId,
+          date: formatDate(meeting.date),
+          time: meeting.time,
+          notes: meeting.notes,
+          createdAt: formatDate(meeting.createdAt)
+        }));
+
+        formattedSession.visitNotes = (session.visitNotes || []).map((note) => ({
+          userId: note.userId,
+          note: note.note,
+          photo: note.photo
+            ? {
+              url: note.photo.url,
+              fileName: note.photo.fileName,
+              uploadedAt: formatDate(note.photo.uploadedAt)
+            }
+            : null,
+          createdAt: formatDate(note.createdAt)
+        }));
       }
-    }));
 
-    /* ================= RESPONSE ================= */
+      // ================= CONDITIONAL ROUTE INCLUSION =================
+      if (includeRoute === "true") {
+        formattedSession.routePath = (session.routePath || []).map((point) => ({
+          userId: point.userId,
+          location: extractGeo(point.location),
+          timestamp: formatDate(point.timestamp),
+          accuracy: point.accuracy,
+          speed: point.speed,
+          heading: point.heading
+        }));
+      }
+
+      return formattedSession;
+    });
+
+    // ================= SUCCESS RESPONSE =================
     res.status(200).json({
       success: true,
+      message: "Sessions retrieved successfully",
       count: formatted.length,
       data: formatted,
       pagination: {
         total,
         page: pageNumber,
         limit: limitNumber,
-        pages: Math.ceil(total / limitNumber)
+        pages: Math.ceil(total / limitNumber),
+        hasNextPage: pageNumber < Math.ceil(total / limitNumber),
+        hasPrevPage: pageNumber > 1
+      },
+      filters: {
+        companyId: companyId.toString(),
+        employeeId: employeeId || null,
+        status: status || null,
+        SalesStatus: SalesStatus || null,
+        dateRange: {
+          start: startDate || null,
+          end: endDate || null
+        }
       }
     });
   } catch (error) {
-    console.error("GetSessions error:", error);
+    console.error("GetSessions Error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch sessions",
-      error: error.message
+      error: error.message,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined
     });
   }
 };
