@@ -194,39 +194,27 @@ const attendanceSchema = new mongoose.Schema({
     ============================ */
 
     geoLocation: {
-
         type: {
             type: String,
-            enum: ["Point"],
+            enum: ["Point"]
         },
 
         coordinates: {
             type: [Number],
-            // ❌ REMOVE required: true  ← causes [] to be stored on $setOnInsert
-            default: undefined,   // ✅ don't store empty array
+            default: undefined,
             validate: {
                 validator: function (v) {
-                    // Only validate if coordinates exist
-                    return !v || v.length === 0 || (v.length === 2 && v.every(n => typeof n === 'number'));
+                    return !v || (Array.isArray(v) && v.length === 2);
                 },
-                message: 'Coordinates must be [lng, lat]'
+                message: "Coordinates must be [lng, lat]"
             }
         },
 
         accuracy: Number,
 
-        verified: {
-            type: Boolean,
-            default: false
-        },
+        verified: Boolean,   // ✅ REMOVE default
 
-        source: {
-            type: String,
-            enum: ["gps", "network", "manual"],
-            default: "gps"
-        }
     },
-
 
     /* ===========================
        Device Binding
