@@ -2253,7 +2253,7 @@ export const getNearbySalesByLocation = async (req, res) => {
     let {
       lat,
       lng,
-      radius = 1000,
+      radius = 100000, // 100km default
       page = 1,
       limit = 10
     } = req.query;
