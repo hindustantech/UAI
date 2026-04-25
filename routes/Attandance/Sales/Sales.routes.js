@@ -159,6 +159,7 @@ router.get(
   authMiddleware,
   getNearbySalesByLocation
 );
+
 router.get(
   "/getNearbyOpenSalesAdminOptimized/:sessionId",
   authMiddleware,
