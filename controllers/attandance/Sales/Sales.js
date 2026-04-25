@@ -537,15 +537,18 @@ export const punchIn = async (req, res) => {
     attendance.punchIn = now;
     attendance.lastPunchAt = now;
     attendance.deviceInfo = deviceInfo;
-    attendance.geoLocation = {
+
+    const geoPoint = {
       type: "Point",
       coordinates: [validatedLocation.lng, validatedLocation.lat]
     };
+    attendance.geoLocation = geoPoint;
+
 
     attendance.punchHistory.push({
       type: "in",
       time: now,
-      geoLocation: validatedLocation,
+      geoLocation: geoPoint,
       deviceInfo
     });
 
