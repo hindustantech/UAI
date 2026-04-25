@@ -2235,106 +2235,113 @@ export const getNearbyFilteredSessions = async (req, res) => {
   }
 };
 
-// ========== GET NEARBY SALES BY LOCATION ==========
-/**
- * ============================================================
- * GET NEARBY SALES BY CURRENT LOCATION
- * ============================================================
- * Finds sales sessions near the user's current location
- * Proper geo-spatial query with validation
- */
+
 export const getNearbySalesByLocation = async (req, res) => {
   try {
-    // ================= EXTRACT & VALIDATE PARAMS =================
-    let { lat, lng, radius = 1000, page = 1, limit = 10, sortBy = "distance" } = req.query;
-
-    // Validate user authentication
+    /* ================= AUTH VALIDATION ================= */
     if (!req.user || !req.user.companyId) {
       return res.status(401).json({
         success: false,
-        message: "Unauthorized: User or company not found"
+        message: "Unauthorized"
       });
     }
 
     const userId = new mongoose.Types.ObjectId(req.user._id || req.user.id);
     const companyId = new mongoose.Types.ObjectId(req.user.companyId);
 
-    // ================= VALIDATE COORDINATES =================
-    if (lat === undefined || lat === null || lng === undefined || lng === null) {
+    /* ================= QUERY PARAMS ================= */
+    let {
+      lat,
+      lng,
+      radius = 1000,
+      page = 1,
+      limit = 10
+    } = req.query;
+
+    if (lat === undefined || lng === undefined) {
       return res.status(400).json({
         success: false,
-        message: "Latitude (lat) and Longitude (lng) are required",
-        example: "?lat=25.5941&lng=85.1376&radius=1000"
+        message: "lat and lng are required",
+        example: "?lat=25.5941&lng=85.1376"
       });
     }
 
     lat = parseFloat(lat);
     lng = parseFloat(lng);
 
-    // Validate coordinate ranges
     if (isNaN(lat) || isNaN(lng)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid coordinates: lat and lng must be valid numbers"
+        message: "Invalid coordinates"
       });
     }
 
-    if (lat < -90 || lat > 90) {
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
       return res.status(400).json({
         success: false,
-        message: `Invalid latitude: ${lat}. Must be between -90 and 90`
+        message: "Coordinates out of range"
       });
     }
 
-    if (lng < -180 || lng > 180) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid longitude: ${lng}. Must be between -180 and 180`
-      });
-    }
-
-    // ================= VALIDATE & SANITIZE PARAMS =================
-    radius = Math.min(parseInt(radius) || 1000, 5000); // Max 5km
-    if (radius < 100) radius = 100; // Min 100m
-
+    radius = Math.max(100, Math.min(parseInt(radius) || 1000, 5000));
     page = Math.max(1, parseInt(page) || 1);
-    limit = Math.min(parseInt(limit) || 10, 50); // Max 50 results
+    limit = Math.min(parseInt(limit) || 10, 50);
 
     const skip = (page - 1) * limit;
 
-    // ================= BUILD GEO PIPELINE =================
+    /* ================= GEO PIPELINE ================= */
     const pipeline = [
-      // Step 1: Find nearby sales using geospatial index
       {
         $geoNear: {
           near: {
             type: "Point",
-            coordinates: [lng, lat] // GeoJSON format: [longitude, latitude]
+            coordinates: [lng, lat] // IMPORTANT: [lng, lat]
           },
-          distanceField: "distance", // Distance in meters
-          spherical: true, // Earth curvature
-          maxDistance: radius, // Radius in meters
-          key: "punchInLocation", // Index field
+          distanceField: "distance",
+          spherical: true,
+          maxDistance: radius,
+          key: "punchInLocation",
           query: {
-            // Only open sales
+            companyId,
+            status: "in_progress",
             SalesStatus: "open",
-            // Same company
-            companyId: companyId,
-            // Assigned to user or created by user
+
+            // FIXED: cleaner array matching
             $or: [
-              { assignedTo: { $in: [userId] } },
+              { assignedTo: userId },
               { employeeId: userId },
               { createdBy: userId }
             ],
-            // Only in progress sessions
-            status: "in_progress",
-            // Must have punch in location
-            "punchInLocation.coordinates": { $exists: true }
+
+            // FIXED: strict geo validation
+            "punchInLocation.coordinates.0": { $exists: true },
+            "punchInLocation.coordinates.1": { $exists: true }
           }
         }
       },
 
-      // Step 2: Populate user details
+      /* ================= LIGHT PROJECTION ================= */
+      {
+        $project: {
+          sessionId: 1,
+          employeeId: 1,
+          createdBy: 1,
+          customer: 1,
+          punchInLocation: 1,
+          punchOutLocation: 1,
+          punchInTime: 1,
+          SalesStatus: 1,
+          status: 1,
+          visitLogs: 1,
+          salesLogs: 1,
+          meetingLogs: 1,
+          distance: 1,
+          createdAt: 1,
+          updatedAt: 1
+        }
+      },
+
+      /* ================= LOOKUPS ================= */
       {
         $lookup: {
           from: "users",
@@ -2343,8 +2350,6 @@ export const getNearbySalesByLocation = async (req, res) => {
           as: "employee"
         }
       },
-
-      // Step 3: Populate customer details
       {
         $lookup: {
           from: "users",
@@ -2354,199 +2359,110 @@ export const getNearbySalesByLocation = async (req, res) => {
         }
       },
 
-      // Step 4: Sort by distance
-      {
-        $sort: {
-          distance: 1
-        }
-      },
+      /* ================= SORT ================= */
+      { $sort: { distance: 1 } },
 
-      // Step 5: Facet for pagination and total count
+      /* ================= PAGINATION ================= */
       {
         $facet: {
-          // Main data with pagination
           data: [
             { $skip: skip },
             { $limit: limit },
             {
-              $project: {
-                _id: 1,
-                sessionId: 1,
-                status: 1,
-                SalesStatus: 1,
-                distance: { $round: ["$distance", 2] }, // Round to 2 decimals
-                distanceInKm: {
-                  $round: [{ $divide: ["$distance", 1000] }, 2]
-                },
-                punchInTime: 1,
-                punchInLocation: 1,
-                punchOutLocation: 1,
-                customer: {
-                  companyName: "$customer.companyName",
-                  contactName: "$customer.contactName",
-                  phone: "$customer.phoneNumber",
-                  address: "$customer.address",
-                  landmark: "$customer.landmark",
-                  location: "$customer.location"
-                },
-                employee: {
-                  $arrayElemAt: ["$employee", 0]
-                },
-                creator: {
-                  $arrayElemAt: ["$creator", 0]
-                },
-                stats: {
-                  visits: { $size: { $ifNull: ["$visitLogs", []] } },
-                  sales: { $size: { $ifNull: ["$salesLogs", []] } },
-                  meetings: { $size: { $ifNull: ["$meetingLogs", []] } }
-                },
-                createdAt: 1,
-                updatedAt: 1
+              $addFields: {
+                employee: { $arrayElemAt: ["$employee", 0] },
+                creator: { $arrayElemAt: ["$creator", 0] }
               }
             }
           ],
-          // Total count
-          total: [
-            { $count: "count" }
-          ]
+          total: [{ $count: "count" }]
         }
       }
     ];
 
-    // ================= EXECUTE AGGREGATION =================
-    const [result] = await SalesSession.aggregate(pipeline).allowDiskUse(true);
+    /* ================= EXECUTE ================= */
+    const [result] = await SalesSession.aggregate(pipeline);
 
     const total = result?.total?.[0]?.count || 0;
-    const data = result?.data || [];
+    const sessions = result?.data || [];
 
-    // ================= FORMAT RESPONSE =================
-    const formatted = data.map((session) => ({
-      id: session.sessionId,
-      status: session.status,
-      SalesStatus: session.SalesStatus,
+    /* ================= FORMAT RESPONSE ================= */
+    const formatted = sessions.map((s) => ({
+      id: s.sessionId,
+      status: s.status,
+      SalesStatus: s.SalesStatus,
 
-      // Distance Information
       distance: {
-        meters: session.distance,
-        kilometers: session.distanceInKm,
-        formatted: `${session.distanceInKm} km away`
+        meters: Math.round(s.distance),
+        km: +(s.distance / 1000).toFixed(2)
       },
 
-      // Location Information
       location: {
-        current: session.punchInLocation
+        current: s.punchInLocation
           ? {
-            latitude: session.punchInLocation.coordinates[1],
-            longitude: session.punchInLocation.coordinates[0],
-            address: session.customer?.address || "Not set",
-            landmark: session.customer?.landmark || "Not set"
-          }
+              lat: s.punchInLocation.coordinates[1],
+              lng: s.punchInLocation.coordinates[0]
+            }
           : null,
-        lastPunchOut: session.punchOutLocation
+        lastPunchOut: s.punchOutLocation
           ? {
-            latitude: session.punchOutLocation.coordinates[1],
-            longitude: session.punchOutLocation.coordinates[0]
-          }
+              lat: s.punchOutLocation.coordinates[1],
+              lng: s.punchOutLocation.coordinates[0]
+            }
           : null
       },
 
-      // Customer Information
       customer: {
-        companyName: session.customer?.companyName || "Unknown",
-        contactName: session.customer?.contactName || "Not set",
-        phone: session.customer?.phone || "Not set",
-        address: session.customer?.address || "Not set",
-        landmark: session.customer?.landmark || "Not set"
+        companyName: s.customer?.companyName || "",
+        contactName: s.customer?.contactName || "",
+        phone: s.customer?.phoneNumber || "",
+        address: s.customer?.address || "",
+        landmark: s.customer?.landmark || ""
       },
 
-      // User Information
-      employee: session.employee
+      employee: s.employee
         ? {
-          id: session.employee._id,
-          name: session.employee.name || "Unknown",
-          email: session.employee.email || "Not set",
-          phone: session.employee.phone || "Not set"
-        }
+            id: s.employee._id,
+            name: s.employee.name,
+            email: s.employee.email
+          }
         : null,
 
-      creator: session.creator
+      creator: s.creator
         ? {
-          id: session.creator._id,
-          name: session.creator.name || "Unknown"
-        }
+            id: s.creator._id,
+            name: s.creator.name
+          }
         : null,
 
-      // Activity Stats
-      stats: session.stats,
+      stats: {
+        visits: s.visitLogs?.length || 0,
+        sales: s.salesLogs?.length || 0,
+        meetings: s.meetingLogs?.length || 0
+      },
 
-      // Timestamps
-      punchInTime: session.punchInTime
-        ? {
-          iso: new Date(session.punchInTime).toISOString(),
-          readable: new Date(session.punchInTime).toLocaleString("en-IN", {
-            timeZone: "Asia/Kolkata",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit"
-          })
-        }
-        : null,
-
-      timestamps: {
-        createdAt: session.createdAt
-          ? new Date(session.createdAt).toLocaleString("en-IN", {
-            timeZone: "Asia/Kolkata",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit"
-          })
-          : null,
-        updatedAt: session.updatedAt
-          ? new Date(session.updatedAt).toLocaleString("en-IN", {
-            timeZone: "Asia/Kolkata",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit"
-          })
-          : null
-      }
+      punchInTime: s.punchInTime,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt
     }));
 
-    // ================= RETURN SUCCESS RESPONSE =================
+    /* ================= RESPONSE ================= */
     return res.status(200).json({
       success: true,
-      message: "Nearby sales retrieved successfully",
       count: formatted.length,
-      data: formatted,
-      search: {
-        latitude: lat,
-        longitude: lng,
-        radiusMeters: radius,
-        radiusKm: (radius / 1000).toFixed(2)
-      },
-      pagination: {
-        total,
-        page,
-        limit,
-        pages: Math.ceil(total / limit),
-        hasNextPage: page < Math.ceil(total / limit),
-        hasPrevPage: page > 1
-      }
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      data: formatted
     });
+
   } catch (error) {
-    console.error("getNearbySalesByLocation error:", error);
+    console.error("Nearby Sales Error:", error);
 
     return res.status(500).json({
       success: false,
       message: "Failed to fetch nearby sales",
-      error: process.env.NODE_ENV === "development" ? error.message : "Internal Server Error"
+      error: error.message
     });
   }
 };
