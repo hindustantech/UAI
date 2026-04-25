@@ -79,18 +79,18 @@ const attendanceSchema = new mongoose.Schema({
         {
             punchOut: {
                 type: Date,
-                required: true
+               
             },
 
             type: {
                 type: String,
                 enum: ["in", "out"],
-                required: true
+                
             },
 
             time: {
                 type: Date,
-                required: true
+                
             },
             geoLocation: Object,
 
