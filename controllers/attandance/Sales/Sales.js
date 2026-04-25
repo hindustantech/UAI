@@ -1316,22 +1316,26 @@ export const getSessionDetails = async (req, res) => {
 };
 
 // ========== GET ALL SESSIONS ==========
+
+
 export const getSessions = async (req, res) => {
   try {
     const {
-      employeeId,
+      salesPersonId,
       status,
       SalesStatus,
       startDate,
       endDate,
       page = 1,
-      limit = 10
+      limit = 10,
+      includeLogs = "true",
+      includeRoute = "false"
     } = req.query;
 
-    // ✅ enforce company isolation
+    /* ================= COMPANY ISOLATION ================= */
     const companyId = req.user.companyId;
-
-    /* ========= QUERY BUILD ========= */
+    const employeeId = salesPersonId; // for better naming consistency
+    /* ================= QUERY BUILD ================= */
     const query = { companyId };
 
     if (employeeId) query.employeeId = employeeId;
@@ -1344,24 +1348,34 @@ export const getSessions = async (req, res) => {
       if (endDate) query.punchInTime.$lte = new Date(endDate);
     }
 
-    /* ========= PAGINATION ========= */
+    /* ================= PAGINATION ================= */
     const pageNumber = Math.max(1, parseInt(page));
-    const limitNumber = Math.max(1, Math.min(100, parseInt(limit))); // cap at 100
+    const limitNumber = Math.max(1, Math.min(100, parseInt(limit)));
     const skip = (pageNumber - 1) * limitNumber;
 
-    /* ========= FETCH ========= */
-    const sessions = await SalesSession.find(query)
+    /* ================= FETCH ================= */
+    let mongoQuery = SalesSession.find(query)
       .populate("employeeId", "name email phone")
       .populate("createdBy", "name email")
       .populate("assignedTo", "name email")
       .sort({ punchInTime: -1 })
       .skip(skip)
       .limit(limitNumber)
-      .lean(); // faster response
+      .lean();
 
+    /* ================= OPTIONAL POPULATES ================= */
+    if (includeLogs === "true") {
+      mongoQuery = mongoQuery
+        .populate("visitLogs.userId", "name email")
+        .populate("salesLogs.userId", "name email")
+        .populate("meetingLogs.userId", "name email")
+        .populate("visitNotes.userId", "name email");
+    }
+
+    const sessions = await mongoQuery;
     const total = await SalesSession.countDocuments(query);
 
-    /* ========= GEO HELPER ========= */
+    /* ================= GEO HELPER ================= */
     const extractGeo = (geo) => {
       if (!geo?.coordinates || geo.coordinates.length !== 2) return null;
       return {
@@ -1370,35 +1384,88 @@ export const getSessions = async (req, res) => {
       };
     };
 
-    /* ========= FORMAT RESPONSE ========= */
+    /* ================= FORMAT ================= */
     const formatted = sessions.map((s) => ({
       id: s.sessionId,
+
       status: s.status,
       SalesStatus: s.SalesStatus,
+      formCompleted: s.formCompleted,
 
       customer: {
-        name: s.customer?.companyName || "",
-        contact: s.customer?.contactName || "",
+        companyName: s.customer?.companyName || "",
+        contactName: s.customer?.contactName || "",
         phone: s.customer?.phoneNumber || "",
-        location: extractGeo(s.customer?.location)
+        address: s.customer?.address || "",
+        landmark: s.customer?.landmark || "",
+        location: extractGeo(s.customer?.location),
+        shopPhoto: s.customer?.shopPhoto || null
       },
 
       employee: s.employeeId,
       createdBy: s.createdBy,
+      assignedTo: s.assignedTo || [],
 
       punch: {
         inTime: s.punchInTime,
         outTime: s.punchOutTime,
         inLocation: extractGeo(s.punchInLocation),
-        outLocation: extractGeo(s.punchOutLocation)
+        outLocation: extractGeo(s.punchOutLocation),
+        outAddress: s.punchOutAddress,
+        lastPunchAt: s.lastPunchAt
       },
 
       stats: {
-        distance: Math.round(s.totalDistance || 0),
+        totalDistance: s.totalDistance || 0,
         duration: s.duration || 0,
         visits: s.visitLogs?.length || 0,
         sales: s.salesLogs?.length || 0
       },
+
+      /* ================= LOGS ================= */
+      visitLogs:
+        includeLogs === "true"
+          ? (s.visitLogs || []).map((v) => ({
+            userId: v.userId,
+            punchInTime: v.punchInTime,
+            punchOutTime: v.punchOutTime,
+            punchInLocation: extractGeo(v.punchInLocation),
+            punchOutLocation: extractGeo(v.punchOutLocation)
+          }))
+          : undefined,
+
+      salesLogs:
+        includeLogs === "true"
+          ? (s.salesLogs || []).map((sl) => ({
+            userId: sl.userId,
+            dealStatus: sl.dealStatus,
+            amount: sl.amount,
+            paymentCollected: sl.paymentCollected,
+            paymentMode: sl.paymentMode,
+            note: sl.note,
+            createdAt: sl.createdAt
+          }))
+          : undefined,
+
+      meetingLogs: includeLogs === "true" ? s.meetingLogs || [] : undefined,
+      visitNotes: includeLogs === "true" ? s.visitNotes || [] : undefined,
+
+      /* ================= ROUTE ================= */
+      routePath:
+        includeRoute === "true"
+          ? (s.routePath || []).map((r) => ({
+            userId: r.userId,
+            location: extractGeo(r.location),
+            timestamp: r.timestamp,
+            accuracy: r.accuracy,
+            speed: r.speed,
+            heading: r.heading
+          }))
+          : undefined,
+
+      /* ================= EXTRA ================= */
+      evidence: s.evidence || {},
+      nextMeeting: s.nextMeeting || {},
 
       timestamps: {
         createdAt: s.createdAt,
@@ -1406,9 +1473,10 @@ export const getSessions = async (req, res) => {
       }
     }));
 
-    /* ========= RESPONSE ========= */
+    /* ================= RESPONSE ================= */
     res.status(200).json({
       success: true,
+      count: formatted.length,
       data: formatted,
       pagination: {
         total,
@@ -1417,10 +1485,13 @@ export const getSessions = async (req, res) => {
         pages: Math.ceil(total / limitNumber)
       }
     });
-
   } catch (error) {
     console.error("GetSessions error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch sessions",
+      error: error.message
+    });
   }
 };
 // ========== GET COMPANY LEADS ==========
