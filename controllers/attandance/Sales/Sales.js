@@ -1737,39 +1737,99 @@ export const getCompanyLeads = async (req, res) => {
 // ========== GET TODAY'S SESSIONS ==========
 export const getTodaySessions = async (req, res) => {
   try {
+    // ================= EXTRACT & VALIDATE PARAMS =================
     const { salesPersonId } = req.query;
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    // Validate and clean salesPersonId
+    const employeeId =
+      salesPersonId && salesPersonId.trim() !== ""
+        ? salesPersonId.trim()
+        : null;
 
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    // Validate MongoDB ObjectId format if provided
+    if (employeeId && !mongoose.Types.ObjectId.isValid(employeeId)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid employeeId format`
+      });
+    }
 
+    // ================= OPTIMIZE DATE CALCULATION =================
+    // Use Date.UTC() instead of setHours() - more efficient
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const date = today.getDate();
+
+    const startOfDay = new Date(year, month, date, 0, 0, 0, 0);
+    const endOfDay = new Date(year, month, date, 23, 59, 59, 999);
+
+    // ================= BUILD OPTIMIZED QUERY =================
     const query = {
       punchInTime: { $gte: startOfDay, $lte: endOfDay }
     };
 
-    if (salesPersonId) query.employeeId = salesPersonId;
+    // Add employeeId filter only if provided (AND with company for multi-tenancy)
+    if (employeeId) {
+      query.employeeId = new mongoose.Types.ObjectId(employeeId);
+    }
 
+    // ================= ADD COMPANY ISOLATION =================
+    // IMPORTANT: Always filter by company for security
+    if (req.user?.companyId) {
+      query.companyId = req.user.companyId;
+    }
+
+    // ================= OPTIMIZE WITH LEAN & SELECT =================
+    // Only fetch fields you need - reduces memory and network
     const sessions = await SalesSession.find(query)
-      .populate("employeeId", "name email")
+      .select(
+        "sessionId employeeId status punchInTime punchOutTime " +
+        "duration totalDistance assignedTo customer visitLogs salesLogs meetingLogs"
+      )
+      .populate("employeeId", "name email phone")
       .populate("assignedTo", "name email")
-      .sort({ punchInTime: -1 });
+      .sort({ punchInTime: -1 })
+      .lean() // ← KEY: Returns plain JS objects, not Mongoose documents
+      .exec(); // ← Explicit exec() for consistency
 
+    // ================= CALCULATE STATS EFFICIENTLY =================
+    // Single pass through array instead of multiple filter() calls
+    const stats = {
+      totalVisits: sessions.length,
+      completedVisits: 0,
+      inProgressVisits: 0,
+      totalDuration: 0,
+      totalDistance: 0
+    };
+
+    for (const session of sessions) {
+      if (session.status === "completed") {
+        stats.completedVisits++;
+      } else if (session.status === "in_progress") {
+        stats.inProgressVisits++;
+      }
+      if (session.duration) stats.totalDuration += session.duration;
+      if (session.totalDistance) stats.totalDistance += session.totalDistance;
+    }
+
+    // ================= FORMAT RESPONSE =================
     res.status(200).json({
       success: true,
-      date: startOfDay,
-      stats: {
-        totalVisits: sessions.length,
-        completedVisits: sessions.filter(s => s.status === "completed").length,
-        inProgressVisits: sessions.filter(s => s.status === "in_progress").length
-      },
+      timestamp: new Date().toISOString(),
+      date: startOfDay.toISOString().split("T")[0],
+      stats,
+      count: sessions.length,
       data: sessions
     });
 
   } catch (error) {
-    console.error('GetTodaySessions error:', error);
-    res.status(500).json({ error: error.message });
+    console.error("GetTodaySessions Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch today's sessions",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
   }
 };
 
