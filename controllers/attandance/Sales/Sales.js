@@ -1326,6 +1326,7 @@ export const getSessions = async (req, res) => {
       status,
       SalesStatus,
       startDate,
+      companyId,
       endDate,
       page = 1,
       limit = 10,
@@ -1336,18 +1337,20 @@ export const getSessions = async (req, res) => {
     } = req.query;
 
     // ================= COMPANY ISOLATION (MULTI-TENANCY) =================
-    if (!req.user || !req.user.companyId) {
+    // Get companyId: prioritize query param, fallback to middleware
+    let finalCompanyId = companyId || req.user?.companyId;
+
+    if (!req.user || !finalCompanyId) {
       return res.status(401).json({
         success: false,
         message: "Unauthorized: Company ID not found"
       });
     }
 
-    const companyId = req.user.companyId;
     const employeeId = salesPersonId;
 
     // ================= BUILD QUERY OBJECT =================
-    const query = { companyId };
+    const query = { companyId: finalCompanyId };
 
     // Filter by employee/sales person
     if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
@@ -1621,7 +1624,7 @@ export const getSessions = async (req, res) => {
         hasPrevPage: pageNumber > 1
       },
       filters: {
-        companyId: companyId.toString(),
+        companyId: finalCompanyId.toString(),
         employeeId: employeeId || null,
         status: status || null,
         SalesStatus: SalesStatus || null,
@@ -1641,6 +1644,7 @@ export const getSessions = async (req, res) => {
     });
   }
 };
+
 // ========== GET COMPANY LEADS ==========
 export const getCompanyLeads = async (req, res) => {
   try {
