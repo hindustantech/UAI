@@ -1011,7 +1011,7 @@ export const updateEmployee = async (req, res) => {
         }
 
         if (employeeType) {
-            if (!["non_sales", "sales"].includes(employeeType)) {
+            if (!["non_sales", "sales",'pro_sales'].includes(employeeType)) {
                 return res.status(400).json({
                     success: false,
                     message: "Invalid employeeType value",
