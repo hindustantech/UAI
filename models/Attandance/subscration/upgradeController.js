@@ -154,13 +154,7 @@ export const createUpgradeOrder = async (req, res) => {
                 });
             }
             
-            // Also ensure enough regular employees exist to convert
-            if (convertToSales > regularEmployeesUsed) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Cannot convert ${convertToSales} to Sales. Only ${regularEmployeesUsed} regular employees exist.`,
-                });
-            }
+           
 
             const conversionCost = calculateProratedCost(SALES_PERSON_RATE, convertToSales, remainingDays);
 
