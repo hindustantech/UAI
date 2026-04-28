@@ -1,5 +1,4 @@
-// controllers/payment/upgradeController.js - FULLY CORRECTED VERSION
-// Fixes: Conversion logic - checks available regular capacity (maxEmployees - employeesUsed)
+// controllers/payment/upgradeController.js
 
 import mongoose from "mongoose";
 import PaymentLog from "../../../models/Attandance/subscration/PaymentLog.js";
@@ -13,14 +12,32 @@ const razorpay = new Razorpay({
     key_secret: process.env.RAZORPAY_API_SECRET,
 });
 
-const SALES_PERSON_RATE = 1;
-const PRO_SALES_PERSON_RATE = 2;
+/**
+ * PRICING CONSTANTS (Per Month)
+ * ₹500 per Sales person per month
+ * ₹2000 per Pro Sales person per month
+ */
+const SALES_PERSON_RATE = 500;          // ₹500 per month
+const PRO_SALES_PERSON_RATE = 2000;     // ₹2000 per month
 
+/**
+ * Calculate prorated cost based on remaining days in subscription
+ * @param {number} monthlyRate - Monthly rate (e.g., 500 for sales)
+ * @param {number} remainingDays - Days remaining in current subscription
+ * @returns {number} - Daily rate
+ */
 const calculateDailyRate = (monthlyRate, remainingDays) => {
     const daysInMonth = 30;
     return (monthlyRate / daysInMonth);
 };
 
+/**
+ * Calculate prorated cost for given days
+ * @param {number} monthlyRate - Monthly rate
+ * @param {number} count - Number of employees
+ * @param {number} remainingDays - Days remaining
+ * @returns {number} - Total cost
+ */
 const calculateProratedCost = (monthlyRate, count, remainingDays) => {
     const dailyRate = calculateDailyRate(monthlyRate, remainingDays);
     return count * dailyRate * remainingDays;
@@ -42,7 +59,7 @@ export const createUpgradeOrder = async (req, res) => {
         const companyId = req.user._id;
 
         // Validate at least one operation
-        if (!additionalEmployees && !convertToSales && !convertToProSales && !addSales && !addProSales) {
+        if (additionalEmployees === 0 && convertToSales === 0 && convertToProSales === 0 && addSales === 0 && addProSales === 0) {
             return res.status(400).json({
                 success: false,
                 message: "Please specify upgrade details",
@@ -79,7 +96,7 @@ export const createUpgradeOrder = async (req, res) => {
             });
         }
 
-        // Current plan details
+        // Current plan and usage details
         const plan = subscription.plan;
         const planBaseMaxEmployees = plan.Max_Employees;
         const planValidityDays = plan.validityDays;
@@ -92,25 +109,6 @@ export const createUpgradeOrder = async (req, res) => {
         const currentEmployeesUsed = subscription.usage.employeesUsed || 0;
         const currentSalesUsed = subscription.usage.no_of_sales_person_employeesUsed || 0;
         const currentProSalesUsed = subscription.usage.no_of_pro_sales_person_employeesUsed || 0;
-
-        // Calculate available regular capacity
-        const availableRegularCapacity = currentMaxEmployees - currentEmployeesUsed;
-        
-        // Calculate billable employees and regular breakdown
-        const billableEmployees = Math.max(0, currentEmployeesUsed - currentMaxEmployees);
-        const regularEmployeesUsed = currentEmployeesUsed - currentSalesUsed - currentProSalesUsed;
-
-        console.log("=== EMPLOYEE CAPACITY ANALYSIS ===", {
-            planMaxEmployees: currentMaxEmployees,
-            actualEmployeesUsed: currentEmployeesUsed,
-            billableEmployees,
-            availableRegularCapacity,
-            employeeBreakdown: {
-                regularUsed: regularEmployeesUsed,
-                salesUsed: currentSalesUsed,
-                proSalesUsed: currentProSalesUsed,
-            },
-        });
 
         // Calculate base employee cost (daily rate)
         const baseEmployeeMonthlyRate = planFinalPrice / planBaseMaxEmployees;
@@ -146,16 +144,17 @@ export const createUpgradeOrder = async (req, res) => {
         // SCENARIO 1: Convert regular employees to Sales
         // ============================================
         if (convertToSales > 0) {
-            // Check if enough available regular capacity exists
-            if (convertToSales > availableRegularCapacity) {
+            const regularEmployeesAvailable = currentEmployeesUsed - currentMaxEmployees;
+
+            if (convertToSales >= regularEmployeesAvailable) {
                 return res.status(400).json({
                     success: false,
-                    message: `Cannot convert ${convertToSales} regular employees to Sales. Only ${availableRegularCapacity} available regular capacity (Max Employees: ${currentMaxEmployees}, Used: ${currentEmployeesUsed}). Please purchase additional base employees using "additionalEmployees".`,
+                    message: `Cannot convert ${convertToSales} to Sales. Only ${regularEmployeesAvailable} regular employees available. Need to purchase ${convertToSales - regularEmployeesAvailable} additional base employees first.`,
                 });
             }
-            
-           
 
+            // Conversion cost: Premium from regular to sales
+            // Already paying for base employee, only charge the premium
             const conversionCost = calculateProratedCost(SALES_PERSON_RATE, convertToSales, remainingDays);
 
             costBreakdown.conversions.salesConversionCost = conversionCost;
@@ -163,11 +162,10 @@ export const createUpgradeOrder = async (req, res) => {
             upgradeDetails.convertToSales = convertToSales;
             newSalesMax += convertToSales;
 
-            console.log(`✓ Converting ${convertToSales} regular → Sales:`, {
-                availableRegularCapacity,
-                regularEmployeesUsed,
-                conversionCost: Math.round(conversionCost),
-                newSalesMax,
+            console.log(`Converting ${convertToSales} employees to Sales:`, {
+                dailyRate: calculateDailyRate(SALES_PERSON_RATE, remainingDays),
+                remainingDays,
+                conversionCost
             });
         }
 
@@ -175,25 +173,17 @@ export const createUpgradeOrder = async (req, res) => {
         // SCENARIO 2: Convert regular employees to Pro Sales
         // ============================================
         if (convertToProSales > 0) {
-            // Account for regular employees already being converted in this request
-            const regularAfterConversions = regularEmployeesUsed - upgradeDetails.convertToSales;
-            
-            // Check if enough available regular capacity exists
-            if (convertToProSales > availableRegularCapacity) {
+            // Available regular employees after sales conversions
+            const regularEmployeesAvailable = currentEmployeesUsed - currentMaxEmployees;
+
+            if (convertToProSales >= regularEmployeesAvailable) {
                 return res.status(400).json({
                     success: false,
-                    message: `Cannot convert ${convertToProSales} regular employees to Pro Sales. Only ${availableRegularCapacity} available regular capacity (Max Employees: ${currentMaxEmployees}, Used: ${currentEmployeesUsed}). Please purchase additional base employees using "additionalEmployees".`,
-                });
-            }
-            
-            // Ensure enough regular employees remain after conversions
-            if (convertToProSales > regularAfterConversions) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Cannot convert ${convertToProSales} to Pro Sales. Only ${regularAfterConversions} regular employees available (after converting ${upgradeDetails.convertToSales} to Sales).`,
+                    message: `Cannot convert ${convertToProSales} to Pro Sales. Only ${regularEmployeesAvailable} regular employees available. Need to purchase ${convertToProSales - regularEmployeesAvailable} additional base employees first.`,
                 });
             }
 
+            // Conversion cost: Premium from regular to pro sales
             const conversionCost = calculateProratedCost(PRO_SALES_PERSON_RATE, convertToProSales, remainingDays);
 
             costBreakdown.conversions.proSalesConversionCost = conversionCost;
@@ -201,11 +191,10 @@ export const createUpgradeOrder = async (req, res) => {
             upgradeDetails.convertToProSales = convertToProSales;
             newProSalesMax += convertToProSales;
 
-            console.log(`✓ Converting ${convertToProSales} regular → Pro Sales:`, {
-                availableRegularCapacity,
-                regularAfterConversions,
-                conversionCost: Math.round(conversionCost),
-                newProSalesMax,
+            console.log(`Converting ${convertToProSales} employees to Pro Sales:`, {
+                dailyRate: calculateDailyRate(PRO_SALES_PERSON_RATE, remainingDays),
+                remainingDays,
+                conversionCost
             });
         }
 
@@ -213,18 +202,18 @@ export const createUpgradeOrder = async (req, res) => {
         // SCENARIO 3: Add new Sales employees
         // ============================================
         if (addSales > 0) {
-            // Check if adding would exceed plan max
-            const totalEmployeesAfterAddition = currentEmployeesUsed + upgradeDetails.additionalEmployeesAdded + addSales;
-            const totalCapacityAvailable = currentMaxEmployees + additionalEmployees;
+            const newTotalEmployees = currentEmployeesUsed + upgradeDetails.additionalEmployeesAdded + addSales;
+            const newTotalAllowed = currentMaxEmployees + additionalEmployees;
 
-            if (totalEmployeesAfterAddition > totalCapacityAvailable) {
-                const shortfall = totalEmployeesAfterAddition - totalCapacityAvailable;
+            if (newTotalEmployees > newTotalAllowed) {
+                const shortfall = newTotalEmployees - newTotalAllowed;
                 return res.status(400).json({
                     success: false,
-                    message: `Cannot add ${addSales} Sales employees. Total would be ${totalEmployeesAfterAddition}, but capacity is ${totalCapacityAvailable}. Need to purchase ${shortfall} additional base employees.`,
+                    message: `Cannot add ${addSales} Sales employees. Would exceed max limit. Need to purchase ${shortfall} additional base employees.`,
                 });
             }
 
+            // Cost = Base employee cost + Sales premium cost
             const baseCost = calculateProratedCost(baseEmployeeMonthlyRate, addSales, remainingDays);
             const premiumCost = calculateProratedCost(SALES_PERSON_RATE, addSales, remainingDays);
             const totalCost = baseCost + premiumCost;
@@ -236,10 +225,11 @@ export const createUpgradeOrder = async (req, res) => {
             newMaxEmployees += addSales;
             newSalesMax += addSales;
 
-            console.log(`✓ Adding ${addSales} Sales employees:`, {
-                totalEmployeesAfterAddition,
-                totalCapacityAvailable,
-                totalCost: Math.round(totalCost),
+            console.log(`Adding ${addSales} Sales employees:`, {
+                baseEmployeeMonthlyCost: baseEmployeeMonthlyRate,
+                baseCost,
+                premiumCost,
+                totalCost
             });
         }
 
@@ -247,17 +237,18 @@ export const createUpgradeOrder = async (req, res) => {
         // SCENARIO 4: Add new Pro Sales employees
         // ============================================
         if (addProSales > 0) {
-            const totalEmployeesAfterAddition = currentEmployeesUsed + upgradeDetails.additionalEmployeesAdded + addProSales;
-            const totalCapacityAvailable = currentMaxEmployees + additionalEmployees;
+            const newTotalEmployees = currentEmployeesUsed + upgradeDetails.additionalEmployeesAdded + addProSales;
+            const newTotalAllowed = currentMaxEmployees + additionalEmployees;
 
-            if (totalEmployeesAfterAddition > totalCapacityAvailable) {
-                const shortfall = totalEmployeesAfterAddition - totalCapacityAvailable;
+            if (newTotalEmployees > newTotalAllowed) {
+                const shortfall = newTotalEmployees - newTotalAllowed;
                 return res.status(400).json({
                     success: false,
-                    message: `Cannot add ${addProSales} Pro Sales employees. Total would be ${totalEmployeesAfterAddition}, but capacity is ${totalCapacityAvailable}. Need to purchase ${shortfall} additional base employees.`,
+                    message: `Cannot add ${addProSales} Pro Sales employees. Would exceed max limit. Need to purchase ${shortfall} additional base employees.`,
                 });
             }
 
+            // Cost = Base employee cost + Pro Sales premium cost
             const baseCost = calculateProratedCost(baseEmployeeMonthlyRate, addProSales, remainingDays);
             const premiumCost = calculateProratedCost(PRO_SALES_PERSON_RATE, addProSales, remainingDays);
             const totalCost = baseCost + premiumCost;
@@ -269,10 +260,11 @@ export const createUpgradeOrder = async (req, res) => {
             newMaxEmployees += addProSales;
             newProSalesMax += addProSales;
 
-            console.log(`✓ Adding ${addProSales} Pro Sales employees:`, {
-                totalEmployeesAfterAddition,
-                totalCapacityAvailable,
-                totalCost: Math.round(totalCost),
+            console.log(`Adding ${addProSales} Pro Sales employees:`, {
+                baseEmployeeMonthlyCost: baseEmployeeMonthlyRate,
+                baseCost,
+                premiumCost,
+                totalCost
             });
         }
 
@@ -280,18 +272,17 @@ export const createUpgradeOrder = async (req, res) => {
         // SCENARIO 5: Add regular employees
         // ============================================
         if (additionalEmployees > 0) {
-            // Ensure new capacity covers all employees
-            const newCapacityAfterAddition = currentMaxEmployees + additionalEmployees;
-            const totalEmployeesNeeded = currentEmployeesUsed + upgradeDetails.additionalEmployeesAdded;
+            const newTotalEmployees = currentEmployeesUsed + upgradeDetails.additionalEmployeesAdded + additionalEmployees;
+            const effectiveMaxEmployees = currentMaxEmployees + additionalEmployees;
 
-            if (totalEmployeesNeeded > newCapacityAfterAddition) {
-                const shortfall = totalEmployeesNeeded - newCapacityAfterAddition;
+            if (newTotalEmployees > effectiveMaxEmployees) {
                 return res.status(400).json({
                     success: false,
-                    message: `Adding ${additionalEmployees} base employees increases capacity to ${newCapacityAfterAddition}, but you need ${totalEmployeesNeeded}. Need ${shortfall} more base employees.`,
+                    message: `Cannot add ${additionalEmployees} base employees. Exceeds limit.`,
                 });
             }
 
+            // Only base employee cost
             const baseCost = calculateProratedCost(baseEmployeeMonthlyRate, additionalEmployees, remainingDays);
 
             costBreakdown.additions.regularEmployeesCost = baseCost;
@@ -299,33 +290,43 @@ export const createUpgradeOrder = async (req, res) => {
             upgradeDetails.additionalEmployeesAdded += additionalEmployees;
             newMaxEmployees += additionalEmployees;
 
-            console.log(`✓ Adding ${additionalEmployees} base employees:`, {
-                newCapacityAfterAddition,
-                totalEmployeesNeeded,
-                baseCost: Math.round(baseCost),
+            console.log(`Adding ${additionalEmployees} base employees:`, {
+                baseEmployeeMonthlyCost: baseEmployeeMonthlyRate,
+                baseCost
             });
         }
 
-        console.log("=== UPGRADE ORDER FINAL SUMMARY ===", {
-            companyId: companyId.toString(),
-            subscriptionId: subscription._id.toString(),
+        console.log("=== UPGRADE ORDER SUMMARY ===", {
+            companyId,
+            subscriptionId: subscription._id,
+            subscriptionEndDate: subscription.endDate,
             remainingDays,
-            currentCapacity: {
+            currentUsage: {
                 maxEmployees: currentMaxEmployees,
+                salesMax: currentSalesMax,
+                proSalesMax: currentProSalesMax,
                 employeesUsed: currentEmployeesUsed,
-                availableRegularCapacity,
+                salesUsed: currentSalesUsed,
+                proSalesUsed: currentProSalesUsed,
             },
             requestedUpgrades: upgradeDetails,
-            newCapacity: {
+            newLimits: {
                 maxEmployees: newMaxEmployees,
                 salesMax: newSalesMax,
                 proSalesMax: newProSalesMax,
             },
-            costSummary: {
-                conversions: Math.round(costBreakdown.conversions.salesConversionCost + costBreakdown.conversions.proSalesConversionCost),
-                additions: Math.round(costBreakdown.additions.salesAdditionCost + costBreakdown.additions.proSalesAdditionCost + costBreakdown.additions.regularEmployeesCost),
-                total: Math.round(totalUpgradeCost),
+            pricingRates: {
+                baseEmployeeMonthlyRate,
+                salesPersonRate: SALES_PERSON_RATE,
+                proSalesPersonRate: PRO_SALES_PERSON_RATE,
+                dailyRates: {
+                    base: baseEmployeeDailyRate,
+                    sales: calculateDailyRate(SALES_PERSON_RATE, remainingDays),
+                    proSales: calculateDailyRate(PRO_SALES_PERSON_RATE, remainingDays)
+                }
             },
+            costBreakdown,
+            totalUpgradeCost: Math.round(totalUpgradeCost),
         });
 
         // Free upgrade if cost rounds to zero
@@ -356,6 +357,11 @@ export const createUpgradeOrder = async (req, res) => {
                             salesAdded: upgradeDetails.addSales,
                             proSalesAdded: upgradeDetails.addProSales,
                             regularAdded: additionalEmployees,
+                        },
+                        oldLimits: {
+                            maxEmployees: currentMaxEmployees,
+                            salesMax: currentSalesMax,
+                            proSalesMax: currentProSalesMax,
                         },
                         newLimits: {
                             maxEmployees: upgradedSubscription.usage.maxEmployees,
@@ -402,18 +408,18 @@ export const createUpgradeOrder = async (req, res) => {
                 costBreakdown,
                 currentState: {
                     maxEmployees: currentMaxEmployees,
-                    employeesUsed: currentEmployeesUsed,
-                    billableEmployees,
-                    availableRegularCapacity,
                     salesMax: currentSalesMax,
-                    salesUsed: currentSalesUsed,
                     proSalesMax: currentProSalesMax,
+                    employeesUsed: currentEmployeesUsed,
+                    salesUsed: currentSalesUsed,
                     proSalesUsed: currentProSalesUsed,
                 },
                 pricingInfo: {
                     baseEmployeeMonthlyRate,
-                    planValidityDays,
-                    planFinalPrice,
+                    salesPersonRate: SALES_PERSON_RATE,
+                    proSalesPersonRate: PRO_SALES_PERSON_RATE,
+                    planValidityDays: planValidityDays,
+                    planFinalPrice: planFinalPrice,
                 }
             },
             rawPayload: {
@@ -634,6 +640,15 @@ export const verifyUpgradePayment = async (req, res) => {
 
 /**
  * Helper - Process employee upgrade (atomic update)
+ * @param {ObjectId} subscriptionId - Subscription ID
+ * @param {Object} upgradeDetails - Details of upgrade
+ * @param {number} newMaxEmployees - New max employees
+ * @param {number} newSalesMax - New sales max
+ * @param {number} newProSalesMax - New pro sales max
+ * @param {string} transactionId - Payment transaction ID
+ * @param {number} cost - Cost paid
+ * @param {number} remainingDays - Remaining days used for proration
+ * @param {Object} costBreakdown - Cost breakdown details
  */
 async function processEmployeeUpgrade(
     subscriptionId,
@@ -742,16 +757,13 @@ export const getUpgradeHistory = async (req, res) => {
             Math.ceil(remainingMs / (1000 * 60 * 60 * 24))
         );
 
-        // Calculate available regular capacity
-        const availableRegularCapacity = subscription.usage.maxEmployees - (subscription.usage.employeesUsed || 0);
-
         res.status(200).json({
             success: true,
             data: {
                 currentAllocation: {
                     employeesUsed: subscription.usage.employeesUsed || 0,
                     maxEmployees: subscription.usage.maxEmployees,
-                    availableEmployees: availableRegularCapacity,
+                    availableEmployees: subscription.usage.maxEmployees - (subscription.usage.employeesUsed || 0),
                     salesUsed: subscription.usage.no_of_sales_person_employeesUsed || 0,
                     salesMax: subscription.usage.no_of_sales_person_maxEmployees || 0,
                     salesAvailable: (subscription.usage.no_of_sales_person_maxEmployees || 0) - (subscription.usage.no_of_sales_person_employeesUsed || 0),
