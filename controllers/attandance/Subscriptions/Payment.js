@@ -12,6 +12,46 @@ const razorpay = new Razorpay({
     key_secret: process.env.RAZORPAY_API_SECRET,
 });
 
+/**
+ * PRICING STRUCTURE:
+ * - Base Plan Price: Includes up to Max_Employees regular employees
+ * - Sales Person: ₹500 per person per month
+ * - Pro Sales Person: ₹2000 per person per month
+ * 
+ * Calculation Formula:
+ * Total Price = Base Plan Price + (Sales Count × ₹500) + (Pro Sales Count × ₹2000)
+ */
+
+// Helper function to calculate total price
+const calculateTotalPrice = (basePlanPrice, salesCount, proSalesCount, validityDays) => {
+    // Per month rates
+    const SALES_PERSON_RATE = 500; // ₹500 per month
+    const PRO_SALES_PERSON_RATE = 2000; // ₹2000 per month
+
+    // Calculate number of months based on validity days
+    const months = Math.ceil(validityDays / 30);
+
+    // Calculate additional costs
+    const salesCost = salesCount * SALES_PERSON_RATE * months;
+    const proSalesCost = proSalesCount * PRO_SALES_PERSON_RATE * months;
+
+    // Total additional price
+    const additionalPrice = salesCost + proSalesCost;
+
+    // Total price
+    const totalPrice = basePlanPrice + additionalPrice;
+
+    return {
+        basePlanPrice,
+        salesCount,
+        proSalesCount,
+        months,
+        salesCost,
+        proSalesCost,
+        additionalPrice,
+        totalPrice,
+    };
+};
 
 // @desc    Create Razorpay order (or handle free plan)
 // @route   POST /api/payment/create-order
@@ -56,18 +96,15 @@ export const createOrder = async (req, res) => {
             });
         }
 
-        // Calculate pricing based on employees
-        // Base plan price already includes up to Max_Employees
-        let additionalPrice = 0;
+        // Calculate pricing with proper per-month rates
+        const pricingDetails = calculateTotalPrice(
+            plan.finalPrice,
+            salesCount,
+            proSalesCount,
+            plan.validityDays
+        );
 
-        // Sales person: ₹50 per person (not included in base plan)
-        additionalPrice += salesCount * 1;
-
-        // Pro sales person: ₹2000 per person (not included in base plan)
-        additionalPrice += proSalesCount * 2;
-
-        // Total price = base plan final price + additional employee costs
-        const totalPrice = plan.finalPrice + additionalPrice;
+        const totalPrice = pricingDetails.totalPrice;
 
         // Handle FREE plan - no payment required
         if (plan.isfree === true || plan.finalPrice === 0) {
@@ -80,7 +117,12 @@ export const createOrder = async (req, res) => {
             }
 
             // Directly activate free subscription with employee counts
-            const subscription = await activateFreeSubscription(companyId, plan, salesCount, proSalesCount);
+            const subscription = await activateFreeSubscription(
+                companyId,
+                plan,
+                salesCount,
+                proSalesCount
+            );
 
             return res.status(200).json({
                 success: true,
@@ -120,7 +162,9 @@ export const createOrder = async (req, res) => {
                 proSalesCount: proSalesCount.toString(),
                 totalEmployees: totalEmployees.toString(),
                 basePrice: plan.finalPrice.toString(),
-                additionalPrice: additionalPrice.toString(),
+                salesCost: pricingDetails.salesCost.toString(),
+                proSalesCost: pricingDetails.proSalesCost.toString(),
+                additionalPrice: pricingDetails.additionalPrice.toString(),
                 dataSee: plan.data_see.toString(),
                 dataExport: plan.data_export.toString(),
             },
@@ -145,7 +189,10 @@ export const createOrder = async (req, res) => {
                 proSalesCount,
                 totalEmployees,
                 basePrice: plan.finalPrice,
-                additionalPrice,
+                salesCost: pricingDetails.salesCost,
+                proSalesCost: pricingDetails.proSalesCost,
+                additionalPrice: pricingDetails.additionalPrice,
+                months: pricingDetails.months,
             },
         });
 
@@ -155,10 +202,13 @@ export const createOrder = async (req, res) => {
             orderId: order.id,
             amount: order.amount,
             currency: order.currency,
+            validityDays: plan.validityDays,
             breakdown: {
                 basePrice: plan.finalPrice,
-                salesCost: salesCount * 50,
-                proSalesCost: proSalesCount * 2000,
+                salesCount,
+                salesCost: pricingDetails.salesCost,
+                proSalesCount,
+                proSalesCost: pricingDetails.proSalesCost,
                 total: totalPrice,
             },
         });
@@ -184,9 +234,12 @@ export const createOrder = async (req, res) => {
                     salesCount,
                     proSalesCount,
                     totalEmployees,
-                    salesCost: salesCount * 50,
-                    proSalesCost: proSalesCount * 2000,
-                    additionalTotal: additionalPrice,
+                    months: pricingDetails.months,
+                    salesPersonRate: 500,
+                    proSalesPersonRate: 2000,
+                    salesCost: pricingDetails.salesCost,
+                    proSalesCost: pricingDetails.proSalesCost,
+                    additionalTotal: pricingDetails.additionalPrice,
                 },
             },
         });
@@ -293,8 +346,6 @@ async function activateFreeSubscription(companyId, plan, salesCount = 0, proSale
     return subscription;
 }
 
-
-
 // @desc    Verify payment and activate subscription
 // @route   POST /api/payment/verify
 // @access  Private
@@ -340,13 +391,24 @@ export const verifyPayment = async (req, res) => {
 
         const totalEmployees = salesCount + proSalesCount;
 
-        // Calculate pricing
-        const additionalPrice = (salesCount * 50) + (proSalesCount * 2000);
-        const totalPrice = plan.finalPrice + additionalPrice;
+        // Calculate pricing with proper per-month rates
+        const pricingDetails = calculateTotalPrice(
+            plan.finalPrice,
+            salesCount,
+            proSalesCount,
+            plan.validityDays
+        );
+
+        const totalPrice = pricingDetails.totalPrice;
 
         // If it's a free plan, don't verify payment
         if (plan.isfree === true || plan.finalPrice === 0) {
-            const subscription = await activateFreeSubscription(companyId, plan, salesCount, proSalesCount);
+            const subscription = await activateFreeSubscription(
+                companyId,
+                plan,
+                salesCount,
+                proSalesCount
+            );
 
             return res.status(200).json({
                 success: true,
@@ -429,6 +491,18 @@ export const verifyPayment = async (req, res) => {
                 data: {
                     subscription: existingSubscription,
                     paymentId: razorpay_payment_id,
+                    pricingBreakdown: {
+                        basePrice: plan.finalPrice,
+                        months: pricingDetails.months,
+                        salesCount,
+                        salesPersonRate: 500,
+                        salesCost: pricingDetails.salesCost,
+                        proSalesCount,
+                        proSalesPersonRate: 2000,
+                        proSalesCost: pricingDetails.proSalesCost,
+                        additionalTotal: pricingDetails.additionalPrice,
+                        totalPaid: totalPrice,
+                    },
                     employeeAllocation: {
                         salesCount,
                         proSalesCount,
@@ -497,10 +571,16 @@ export const verifyPayment = async (req, res) => {
             data: {
                 subscription,
                 paymentId: razorpay_payment_id,
-                priceBreakdown: {
+                pricingBreakdown: {
                     basePrice: plan.finalPrice,
-                    salesCost: salesCount * 50,
-                    proSalesCost: proSalesCount * 2000,
+                    months: pricingDetails.months,
+                    salesCount,
+                    salesPersonRate: 500,
+                    salesCost: pricingDetails.salesCost,
+                    proSalesCount,
+                    proSalesPersonRate: 2000,
+                    proSalesCost: pricingDetails.proSalesCost,
+                    additionalTotal: pricingDetails.additionalPrice,
                     totalPaid: totalPrice,
                 },
                 employeeAllocation: {
@@ -519,9 +599,6 @@ export const verifyPayment = async (req, res) => {
         });
     }
 };
-
-
-
 
 // @desc    Initialize free plan for new company
 // @route   POST /api/payment/init-free-plan
@@ -648,8 +725,9 @@ export const cancelSubscription = async (req, res) => {
     }
 };
 
-
-
+// @desc    Get active subscription
+// @route   GET /api/payment/subscription
+// @access  Private
 export const getActiveSubscription = async (req, res) => {
     try {
         const companyId = req.user._id;
@@ -739,6 +817,10 @@ export const getActiveSubscription = async (req, res) => {
                     ? featureMap["MAX_EMPLOYEES"] -
                     (subscription.usage?.employeesUsed || 0)
                     : null,
+            salesPersonUsed: subscription.usage?.no_of_sales_person_employeesUsed || 0,
+            salesPersonMax: subscription.usage?.no_of_sales_person_maxEmployees || 0,
+            proSalesPersonUsed: subscription.usage?.no_of_pro_sales_person_employeesUsed || 0,
+            proSalesPersonMax: subscription.usage?.no_of_pro_sales_person_maxEmployees || 0,
         };
 
         /**
