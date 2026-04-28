@@ -17,8 +17,8 @@ const razorpay = new Razorpay({
  * ₹500 per Sales person per month
  * ₹2000 per Pro Sales person per month
  */
-const SALES_PERSON_RATE = 500;          // ₹500 per month
-const PRO_SALES_PERSON_RATE = 2000;     // ₹2000 per month
+const SALES_PERSON_RATE = 1;          // ₹500 per month
+const PRO_SALES_PERSON_RATE = 2;     // ₹2000 per month
 
 /**
  * Calculate prorated cost based on remaining days in subscription
