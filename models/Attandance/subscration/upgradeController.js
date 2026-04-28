@@ -144,7 +144,7 @@ export const createUpgradeOrder = async (req, res) => {
         // SCENARIO 1: Convert regular employees to Sales
         // ============================================
         if (convertToSales > 0) {
-            const regularEmployeesAvailable = currentEmployeesUsed - currentMaxEmployees;
+            const regularEmployeesAvailable = currentMaxEmployees - currentEmployeesUsed;
 
             if (convertToSales >= regularEmployeesAvailable) {
                 return res.status(400).json({
@@ -174,7 +174,7 @@ export const createUpgradeOrder = async (req, res) => {
         // ============================================
         if (convertToProSales > 0) {
             // Available regular employees after sales conversions
-            const regularEmployeesAvailable = currentEmployeesUsed - currentMaxEmployees;
+            const regularEmployeesAvailable = currentMaxEmployees - currentEmployeesUsed;
 
             if (convertToProSales >= regularEmployeesAvailable) {
                 return res.status(400).json({
