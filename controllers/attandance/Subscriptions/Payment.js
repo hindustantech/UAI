@@ -25,8 +25,8 @@ const razorpay = new Razorpay({
 // Helper function to calculate total price
 const calculateTotalPrice = (basePlanPrice, salesCount, proSalesCount, validityDays) => {
     // Per month rates
-    const SALES_PERSON_RATE = 500; // ₹500 per month
-    const PRO_SALES_PERSON_RATE = 2000; // ₹2000 per month
+    const SALES_PERSON_RATE = 1; // ₹500 per month
+    const PRO_SALES_PERSON_RATE = 2; // ₹2000 per month
 
     // Calculate number of months based on validity days
     const months = Math.ceil(validityDays / 30);
