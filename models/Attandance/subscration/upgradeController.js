@@ -139,17 +139,17 @@ export const createUpgradeOrder = async (req, res) => {
             addSales: 0,
             addProSales: 0,
         };
-
+        const checkconersionsum = convertToSales + convertToProSales;
         // ============================================
         // SCENARIO 1: Convert regular employees to Sales
         // ============================================
-        if (convertToSales > 0) {
-            const regularEmployeesAvailable = currentMaxEmployees - currentEmployeesUsed;
-
-            if (convertToSales >= regularEmployeesAvailable) {
+        if (checkconersionsum > 0) {
+            const regularEmployeesAvailable = currentMaxEmployees - currentProSalesMax - currentSalesMax - currentEmployeesUsed;
+            console.log("148 {} Regular employees available for Sales conversion:", regularEmployeesAvailable);
+            if (checkconersionsum >= regularEmployeesAvailable) {
                 return res.status(400).json({
                     success: false,
-                    message: `Cannot convert ${convertToSales} to Sales. Only ${regularEmployeesAvailable} regular employees available. Need to purchase ${convertToSales - regularEmployeesAvailable} additional base employees first.`,
+                    message: `Cannot convert ${checkconersionsum} to Sales. Only ${regularEmployeesAvailable} regular employees available. Need to purchase ${convertToSales - regularEmployeesAvailable} additional base employees first.`,
                 });
             }
 
@@ -172,14 +172,14 @@ export const createUpgradeOrder = async (req, res) => {
         // ============================================
         // SCENARIO 2: Convert regular employees to Pro Sales
         // ============================================
-        if (convertToProSales > 0) {
+        if (checkconersionsum > 0) {
             // Available regular employees after sales conversions
-            const regularEmployeesAvailable = currentMaxEmployees - currentEmployeesUsed;
-
-            if (convertToProSales >= regularEmployeesAvailable) {
+            const regularEmployeesAvailable = currentMaxEmployees - currentProSalesMax - currentSalesMax - currentEmployeesUsed;
+            console.log(`Regular employees available for Pro Sales conversion: ${regularEmployeesAvailable}`);
+            if (checkconersionsum >= regularEmployeesAvailable) {
                 return res.status(400).json({
                     success: false,
-                    message: `Cannot convert ${convertToProSales} to Pro Sales. Only ${regularEmployeesAvailable} regular employees available. Need to purchase ${convertToProSales - regularEmployeesAvailable} additional base employees first.`,
+                    message: `Cannot convert ${checkconersionsum} to Pro Sales. Only ${regularEmployeesAvailable} regular employees available. Need to purchase ${convertToProSales - regularEmployeesAvailable} additional base employees first.`,
                 });
             }
 
