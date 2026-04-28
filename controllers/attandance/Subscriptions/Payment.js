@@ -61,10 +61,10 @@ export const createOrder = async (req, res) => {
         let additionalPrice = 0;
 
         // Sales person: ₹50 per person (not included in base plan)
-        additionalPrice += salesCount * 50;
+        additionalPrice += salesCount * 1;
 
         // Pro sales person: ₹2000 per person (not included in base plan)
-        additionalPrice += proSalesCount * 2000;
+        additionalPrice += proSalesCount * 2;
 
         // Total price = base plan final price + additional employee costs
         const totalPrice = plan.finalPrice + additionalPrice;

@@ -13,8 +13,8 @@ const razorpay = new Razorpay({
 });
 
 // Pricing constants
-const SALES_PERSON_PRICE = 50;      // ₹50 per sales person
-const PRO_SALES_PRICE = 2000;       // ₹2000 per pro sales person
+const SALES_PERSON_PRICE = 1;      // ₹50 per sales person
+const PRO_SALES_PRICE = 2;       // ₹2000 per pro sales person
 
 // @desc    Create order for employee upgrade (handles both conversions and additions)
 // @route   POST /api/payment/create-upgrade-order
