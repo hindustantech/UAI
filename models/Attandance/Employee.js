@@ -51,7 +51,7 @@ const employeeSchema = new mongoose.Schema({
     },
     employeeType: {
         type: String,
-        enum: ['non_sales', 'sales'],
+        enum: ['non_sales', 'sales','pro_sales'],
         default: "non_sales"
     },
     role: {

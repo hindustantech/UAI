@@ -18,13 +18,18 @@ const razorpay = new Razorpay({
 // @access  Private
 export const createOrder = async (req, res) => {
     try {
-        const { planId } = req.body;
+        const { planId, sales, pro_sales } = req.body;
+
+        // Validate input numbers
+        const salesCount = parseInt(sales) || 0;
+        const proSalesCount = parseInt(pro_sales) || 0;
+        const totalEmployees = salesCount + proSalesCount;
+
         let companyId;
         companyId = req.user?._id || req.user?.id;
         const role = req.user?.role || req.user?.type;
         if (role === 'user') {
             companyId = req.user?.companyId || req.user?.companyId;
-
         }
 
         // Validate plan
@@ -43,10 +48,39 @@ export const createOrder = async (req, res) => {
             });
         }
 
+        // Check if total employees exceed plan's max employees
+        if (totalEmployees > plan.Max_Employees) {
+            return res.status(400).json({
+                success: false,
+                message: `Total employees (${totalEmployees}) exceeds plan limit of ${plan.Max_Employees}. Please choose a higher tier plan or reduce employee count.`,
+            });
+        }
+
+        // Calculate pricing based on employees
+        // Base plan price already includes up to Max_Employees
+        let additionalPrice = 0;
+
+        // Sales person: ₹50 per person (not included in base plan)
+        additionalPrice += salesCount * 50;
+
+        // Pro sales person: ₹2000 per person (not included in base plan)
+        additionalPrice += proSalesCount * 2000;
+
+        // Total price = base plan final price + additional employee costs
+        const totalPrice = plan.finalPrice + additionalPrice;
+
         // Handle FREE plan - no payment required
         if (plan.isfree === true || plan.finalPrice === 0) {
-            // Directly activate free subscription
-            const subscription = await activateFreeSubscription(companyId, plan);
+            // For free plan, additional employees should not be charged but need to be validated
+            if (totalEmployees > plan.Max_Employees) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Free plan only allows up to ${plan.Max_Employees} employees.`,
+                });
+            }
+
+            // Directly activate free subscription with employee counts
+            const subscription = await activateFreeSubscription(companyId, plan, salesCount, proSalesCount);
 
             return res.status(200).json({
                 success: true,
@@ -60,6 +94,9 @@ export const createOrder = async (req, res) => {
                         maxEmployees: plan.Max_Employees,
                         dataSee: plan.data_see,
                         dataExport: plan.data_export,
+                        salesCount,
+                        proSalesCount,
+                        totalEmployees,
                     },
                 },
             });
@@ -67,7 +104,7 @@ export const createOrder = async (req, res) => {
 
         // For paid plans - continue with Razorpay order creation
         // Calculate amount (convert to smallest currency unit - paise for INR)
-        const amountInPaise = Math.round(plan.finalPrice * 100);
+        const amountInPaise = Math.round(totalPrice * 100);
 
         // Create order options
         const options = {
@@ -78,7 +115,12 @@ export const createOrder = async (req, res) => {
                 planId: plan._id.toString(),
                 planName: plan.name,
                 companyId: companyId.toString(),
-                maxEmployees: plan.Max_Employees.toString(),
+                basePlanMaxEmployees: plan.Max_Employees.toString(),
+                salesCount: salesCount.toString(),
+                proSalesCount: proSalesCount.toString(),
+                totalEmployees: totalEmployees.toString(),
+                basePrice: plan.finalPrice.toString(),
+                additionalPrice: additionalPrice.toString(),
                 dataSee: plan.data_see.toString(),
                 dataExport: plan.data_export.toString(),
             },
@@ -87,17 +129,23 @@ export const createOrder = async (req, res) => {
         // Create order in Razorpay
         const order = await razorpay.orders.create(options);
 
-        // Create payment log
+        // Create payment log with employee details
         await PaymentLog.create({
             companyId,
             subscriptionId: null,
-            amount: plan.finalPrice,
+            amount: totalPrice,
             status: "PENDING",
             razorpayOrderId: order.id,
             rawPayload: {
                 orderId: order.id,
                 amount: order.amount,
                 currency: order.currency,
+                planId: plan._id.toString(),
+                salesCount,
+                proSalesCount,
+                totalEmployees,
+                basePrice: plan.finalPrice,
+                additionalPrice,
             },
         });
 
@@ -107,6 +155,12 @@ export const createOrder = async (req, res) => {
             orderId: order.id,
             amount: order.amount,
             currency: order.currency,
+            breakdown: {
+                basePrice: plan.finalPrice,
+                salesCost: salesCount * 50,
+                proSalesCost: proSalesCount * 2000,
+                total: totalPrice,
+            },
         });
 
         res.status(200).json({
@@ -119,11 +173,20 @@ export const createOrder = async (req, res) => {
                 keyId: process.env.RAZORPAY_KEY_ID,
                 planDetails: {
                     name: plan.name,
-                    finalPrice: plan.finalPrice,
+                    basePrice: plan.finalPrice,
+                    finalPrice: totalPrice,
                     validityDays: plan.validityDays,
                     maxEmployees: plan.Max_Employees,
                     dataSee: plan.data_see,
                     dataExport: plan.data_export,
+                },
+                employeeBreakdown: {
+                    salesCount,
+                    proSalesCount,
+                    totalEmployees,
+                    salesCost: salesCount * 50,
+                    proSalesCost: proSalesCount * 2000,
+                    additionalTotal: additionalPrice,
                 },
             },
         });
@@ -137,9 +200,8 @@ export const createOrder = async (req, res) => {
     }
 };
 
-// Helper function to activate free subscription
-async function activateFreeSubscription(companyId, plan) {
-
+// Updated helper function to handle employee counts
+async function activateFreeSubscription(companyId, plan, salesCount = 0, proSalesCount = 0) {
     const alreadyUsedFreePlan = await Subscription.findOne({
         company: companyId,
         "payment.paymentGateway": "FREE_PLAN",
@@ -152,6 +214,7 @@ async function activateFreeSubscription(companyId, plan) {
         error.statusCode = 403;
         throw error;
     }
+
     // Calculate subscription dates
     const startDate = new Date();
     const endDate = new Date();
@@ -177,6 +240,8 @@ async function activateFreeSubscription(companyId, plan) {
 
         // Update usage limits based on new plan
         existingSubscription.usage.maxEmployees = plan.Max_Employees;
+        existingSubscription.usage.no_of_sales_person_maxEmployees = salesCount;
+        existingSubscription.usage.no_of_pro_sales_person_maxEmployees = proSalesCount;
         existingSubscription.usage.DATA_SEE = plan.data_see;
         existingSubscription.usage.DATA_EXPORT = plan.data_export;
 
@@ -184,7 +249,7 @@ async function activateFreeSubscription(companyId, plan) {
         return existingSubscription;
     }
 
-    // Create new free subscription
+    // Create new free subscription with employee counts
     const subscription = await Subscription.create({
         company: companyId,
         plan: plan._id,
@@ -214,6 +279,10 @@ async function activateFreeSubscription(companyId, plan) {
         usage: {
             employeesUsed: 0,
             maxEmployees: plan.Max_Employees,
+            no_of_sales_person_employeesUsed: 0,
+            no_of_pro_sales_person_employeesUsed: 0,
+            no_of_sales_person_maxEmployees: salesCount,
+            no_of_pro_sales_person_maxEmployees: proSalesCount,
             DATA_SEE: plan.data_see,
             DATA_EXPORT: plan.data_export,
             upgradeHistory: [],
@@ -223,6 +292,8 @@ async function activateFreeSubscription(companyId, plan) {
 
     return subscription;
 }
+
+
 
 // @desc    Verify payment and activate subscription
 // @route   POST /api/payment/verify
@@ -241,10 +312,9 @@ export const verifyPayment = async (req, res) => {
         const role = req.user?.role || req.user?.type;
         if (role === 'user') {
             companyId = req.user?.companyId || req.user?.companyId;
-
         }
 
-        // Get plan details first
+        // Get plan details
         const plan = await Plan.findById(planId);
         if (!plan) {
             return res.status(404).json({
@@ -253,9 +323,30 @@ export const verifyPayment = async (req, res) => {
             });
         }
 
+        // Get employee counts from payment log or request
+        let salesCount = 0;
+        let proSalesCount = 0;
+
+        // Try to get from payment log first
+        const paymentLog = await PaymentLog.findOne({ razorpayOrderId: razorpay_order_id });
+        if (paymentLog?.rawPayload) {
+            salesCount = paymentLog.rawPayload.salesCount || 0;
+            proSalesCount = paymentLog.rawPayload.proSalesCount || 0;
+        } else {
+            // Fallback to request body
+            salesCount = parseInt(req.body.sales) || 0;
+            proSalesCount = parseInt(req.body.pro_sales) || 0;
+        }
+
+        const totalEmployees = salesCount + proSalesCount;
+
+        // Calculate pricing
+        const additionalPrice = (salesCount * 50) + (proSalesCount * 2000);
+        const totalPrice = plan.finalPrice + additionalPrice;
+
         // If it's a free plan, don't verify payment
         if (plan.isfree === true || plan.finalPrice === 0) {
-            const subscription = await activateFreeSubscription(companyId, plan);
+            const subscription = await activateFreeSubscription(companyId, plan, salesCount, proSalesCount);
 
             return res.status(200).json({
                 success: true,
@@ -268,22 +359,12 @@ export const verifyPayment = async (req, res) => {
         }
 
         // For paid plans - verify signature
-        console.log("Verifying payment for company:", {
-            companyId,
-            razorpay_order_id,
-            razorpay_payment_id,
-            razorpay_signature,
-            planId,
-        });
-
-        // Generate signature for verification
         const body = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = crypto
             .createHmac("sha256", process.env.RAZORPAY_API_SECRET)
             .update(body.toString())
             .digest("hex");
 
-        // Verify signature
         const isAuthentic = expectedSignature === razorpay_signature;
 
         if (!isAuthentic) {
@@ -312,7 +393,6 @@ export const verifyPayment = async (req, res) => {
             status: "ACTIVE",
         });
 
-        // If there's an existing active subscription, update it
         if (existingSubscription) {
             const oldEndDate = existingSubscription.endDate;
             existingSubscription.endDate = endDate;
@@ -324,8 +404,10 @@ export const verifyPayment = async (req, res) => {
                 transactionId: razorpay_payment_id,
             });
 
-            // Update usage limits based on new plan
+            // Update usage limits with employee allocations
             existingSubscription.usage.maxEmployees = plan.Max_Employees;
+            existingSubscription.usage.no_of_sales_person_maxEmployees = salesCount;
+            existingSubscription.usage.no_of_pro_sales_person_maxEmployees = proSalesCount;
             existingSubscription.usage.DATA_SEE = plan.data_see;
             existingSubscription.usage.DATA_EXPORT = plan.data_export;
 
@@ -337,6 +419,7 @@ export const verifyPayment = async (req, res) => {
                     status: "SUCCESS",
                     razorpayPaymentId: razorpay_payment_id,
                     subscriptionId: existingSubscription._id,
+                    paymentCompletedAt: new Date(),
                 }
             );
 
@@ -346,11 +429,16 @@ export const verifyPayment = async (req, res) => {
                 data: {
                     subscription: existingSubscription,
                     paymentId: razorpay_payment_id,
+                    employeeAllocation: {
+                        salesCount,
+                        proSalesCount,
+                        totalEmployees,
+                    },
                 },
             });
         }
 
-        // Create new subscription
+        // Create new subscription with employee counts
         const subscription = await Subscription.create({
             company: companyId,
             plan: plan._id,
@@ -358,7 +446,7 @@ export const verifyPayment = async (req, res) => {
                 name: plan.name,
                 price: plan.price,
                 discount: plan.discount,
-                finalPrice: plan.finalPrice,
+                finalPrice: totalPrice, // Store total price paid
                 validityDays: plan.validityDays,
                 features: plan.features.map((feature) => ({
                     key: feature.key,
@@ -373,7 +461,7 @@ export const verifyPayment = async (req, res) => {
                 orderId: razorpay_order_id,
                 paymentGateway: "RAZORPAY",
                 paymentStatus: "SUCCESS",
-                amountPaid: plan.finalPrice,
+                amountPaid: totalPrice,
                 currency: "INR",
                 paidAt: new Date(),
             },
@@ -381,6 +469,10 @@ export const verifyPayment = async (req, res) => {
             usage: {
                 employeesUsed: 0,
                 maxEmployees: plan.Max_Employees,
+                no_of_sales_person_employeesUsed: 0,
+                no_of_pro_sales_person_employeesUsed: 0,
+                no_of_sales_person_maxEmployees: salesCount,
+                no_of_pro_sales_person_maxEmployees: proSalesCount,
                 DATA_SEE: plan.data_see,
                 DATA_EXPORT: plan.data_export,
                 upgradeHistory: [],
@@ -388,13 +480,14 @@ export const verifyPayment = async (req, res) => {
             isActive: true,
         });
 
-        // Update payment log with subscription ID
+        // Update payment log
         await PaymentLog.findOneAndUpdate(
             { razorpayOrderId: razorpay_order_id },
             {
                 status: "SUCCESS",
                 razorpayPaymentId: razorpay_payment_id,
                 subscriptionId: subscription._id,
+                paymentCompletedAt: new Date(),
             }
         );
 
@@ -404,6 +497,17 @@ export const verifyPayment = async (req, res) => {
             data: {
                 subscription,
                 paymentId: razorpay_payment_id,
+                priceBreakdown: {
+                    basePrice: plan.finalPrice,
+                    salesCost: salesCount * 50,
+                    proSalesCost: proSalesCount * 2000,
+                    totalPaid: totalPrice,
+                },
+                employeeAllocation: {
+                    salesCount,
+                    proSalesCount,
+                    totalEmployees,
+                },
             },
         });
     } catch (error) {

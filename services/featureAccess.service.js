@@ -1,25 +1,5 @@
 // services/featureAccess.service.js
 
-/**
- * Check if company can create new employee based on subscription
- * @param {Object} subscription - The subscription object
- * @returns {boolean} - True if employee can be created
- */
-export const canCreateEmployee = (subscription) => {
-    if (!subscription) return false;
-    
-    // Check if subscription is active
-    if (subscription.status !== "ACTIVE") return false;
-    
-    // Check if subscription is expired
-    if (subscription.endDate < new Date()) return false;
-    
-    // Get employee limit from usage.maxEmployees
-    const employeeLimit = subscription.usage?.maxEmployees || 0;
-    const employeesUsed = subscription.usage?.employeesUsed || 0;
-    
-    return employeesUsed < employeeLimit;
-};
 
 /**
  * Check if subscription has access to DATA_SEE feature
@@ -73,57 +53,9 @@ export const hasFeatureAccess = (subscription, featureKey) => {
     }
 };
 
-/**
- * Get employee limit for the subscription
- * @param {Object} subscription - The subscription object
- * @returns {number} - Maximum employees allowed
- */
-export const getEmployeeLimit = (subscription) => {
-    if (!subscription) return 0;
-    return subscription.usage?.maxEmployees || 0;
-};
 
-/**
- * Get current employee count
- * @param {Object} subscription - The subscription object
- * @returns {number} - Current employees used
- */
-export const getCurrentEmployeeCount = (subscription) => {
-    if (!subscription) return 0;
-    return subscription.usage?.employeesUsed || 0;
-};
 
-/**
- * Check if subscription has remaining employee slots
- * @param {Object} subscription - The subscription object
- * @returns {number} - Remaining employee slots
- */
-export const getRemainingEmployeeSlots = (subscription) => {
-    if (!subscription) return 0;
-    
-    const limit = getEmployeeLimit(subscription);
-    const used = getCurrentEmployeeCount(subscription);
-    
-    return Math.max(0, limit - used);
-};
 
-/**
- * Check if subscription is nearing employee limit (e.g., 80% used)
- * @param {Object} subscription - The subscription object
- * @param {number} threshold - Percentage threshold (default: 80)
- * @returns {boolean} - True if nearing limit
- */
-export const isNearingEmployeeLimit = (subscription, threshold = 80) => {
-    if (!subscription) return false;
-    
-    const limit = getEmployeeLimit(subscription);
-    if (limit === 0) return true;
-    
-    const used = getCurrentEmployeeCount(subscription);
-    const percentageUsed = (used / limit) * 100;
-    
-    return percentageUsed >= threshold;
-};
 
 /**
  * Get all accessible features as an object from schema fields
@@ -173,15 +105,7 @@ export const canUpgradeEmployees = (subscription) => {
     return used >= limit && limit > 0;
 };
 
-/**
- * Get upgrade history for employees
- * @param {Object} subscription - The subscription object
- * @returns {Array} - Array of upgrade history entries
- */
-export const getUpgradeHistory = (subscription) => {
-    if (!subscription) return [];
-    return subscription.usage?.upgradeHistory || [];
-};
+
 
 /**
  * Check subscription status and return detailed info
@@ -220,55 +144,7 @@ export const getSubscriptionStatus = (subscription) => {
     };
 };
 
-/**
- * Validate subscription for API access
- * @param {Object} subscription - The subscription object
- * @returns {Object} - Validation result
- */
-export const validateSubscription = (subscription) => {
-    if (!subscription) {
-        return {
-            valid: false,
-            error: "NO_SUBSCRIPTION",
-            message: "No active subscription found"
-        };
-    }
-    
-    if (subscription.status !== "ACTIVE") {
-        return {
-            valid: false,
-            error: "INACTIVE_SUBSCRIPTION",
-            message: `Subscription is ${subscription.status.toLowerCase()}`,
-            status: subscription.status
-        };
-    }
-    
-    const now = new Date();
-    if (subscription.endDate < now) {
-        return {
-            valid: false,
-            error: "EXPIRED_SUBSCRIPTION",
-            message: "Subscription has expired",
-            endDate: subscription.endDate,
-            daysOverdue: Math.abs(Math.ceil((subscription.endDate - now) / (1000 * 60 * 60 * 24)))
-        };
-    }
-    
-    const daysRemaining = Math.ceil((subscription.endDate - now) / (1000 * 60 * 60 * 24));
-    
-    return {
-        valid: true,
-        message: "Subscription is active",
-        daysRemaining: daysRemaining,
-        planName: subscription.planSnapshot?.name,
-        features: {
-            dataSee: subscription.usage?.DATA_SEE || false,
-            dataExport: subscription.usage?.DATA_EXPORT || false,
-            maxEmployees: subscription.usage?.maxEmployees || 0,
-            employeesUsed: subscription.usage?.employeesUsed || 0
-        }
-    };
-};
+
 
 /**
  * Increment employee count
@@ -311,30 +187,392 @@ export const hasPlanType = (subscription, planType) => {
     return subscription.planSnapshot?.name?.toUpperCase() === planType.toUpperCase();
 };
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// services/featureAccess.service.js
+// ✅ TYPE-AWARE Feature Service for SaaS Subscription Management
+
 /**
- * Get subscription expiry warning
+ * Get employee limit based on type
+ * @param {Object} subscription - The subscription object
+ * @param {string} employeeType - "sales", "pro_sales", or "non_sales"
+ * @returns {number} - Maximum employees allowed for this type
+ */
+export const getEmployeeLimit = (subscription, employeeType = "non_sales") => {
+    if (!subscription || !subscription.usage) return 0;
+
+    const usage = subscription.usage;
+
+    switch (employeeType) {
+        case "sales":
+            return usage.no_of_sales_person_maxEmployees || 0;
+        case "pro_sales":
+            return usage.no_of_pro_sales_person_maxEmployees || 0;
+        default: // non_sales
+            return usage.maxEmployees || 0;
+    }
+};
+
+/**
+ * Get current employee count for a specific type
+ * @param {Object} subscription - The subscription object
+ * @param {string} employeeType - "sales", "pro_sales", or "non_sales"
+ * @returns {number} - Current employees of this type
+ */
+export const getCurrentEmployeeCount = (subscription, employeeType = "non_sales") => {
+    if (!subscription || !subscription.usage) return 0;
+
+    const usage = subscription.usage;
+
+    switch (employeeType) {
+        case "sales":
+            return usage.no_of_sales_person_employeesUsed || 0;
+        case "pro_sales":
+            return usage.no_of_pro_sales_person_employeesUsed || 0;
+        default: // non_sales (derived)
+            const total = usage.employeesUsed || 0;
+            const sales = usage.no_of_sales_person_employeesUsed || 0;
+            const proSales = usage.no_of_pro_sales_person_employeesUsed || 0;
+            return Math.max(0, total - sales - proSales);
+    }
+};
+
+/**
+ * Get total employees across all types
+ * @param {Object} subscription - The subscription object
+ * @returns {number} - Total employees
+ */
+export const getTotalEmployeeCount = (subscription) => {
+    if (!subscription || !subscription.usage) return 0;
+    return subscription.usage.employeesUsed || 0;
+};
+
+/**
+ * Get breakdown of employees by type
+ * @param {Object} subscription - The subscription object
+ * @returns {Object} - { total, sales, proSales, nonSales }
+ */
+export const getEmployeeBreakdown = (subscription) => {
+    if (!subscription || !subscription.usage) {
+        return {
+            total: 0,
+            sales: 0,
+            proSales: 0,
+            nonSales: 0
+        };
+    }
+
+    const usage = subscription.usage;
+    const total = usage.employeesUsed || 0;
+    const sales = usage.no_of_sales_person_employeesUsed || 0;
+    const proSales = usage.no_of_pro_sales_person_employeesUsed || 0;
+    const nonSales = Math.max(0, total - sales - proSales);
+
+    return {
+        total,
+        sales,
+        proSales,
+        nonSales
+    };
+};
+
+/**
+ * Get remaining slots for a specific employee type
+ * @param {Object} subscription - The subscription object
+ * @param {string} employeeType - "sales", "pro_sales", or "non_sales"
+ * @returns {number} - Remaining employee slots
+ */
+export const getRemainingEmployeeSlots = (subscription, employeeType = "non_sales") => {
+    const limit = getEmployeeLimit(subscription, employeeType);
+    const used = getCurrentEmployeeCount(subscription, employeeType);
+    return Math.max(0, limit - used);
+};
+
+/**
+ * Check if can create employee of specific type
+ * ✅ MAIN VALIDATION - use this in controllers
+ * @param {Object} subscription - The subscription object
+ * @param {string} employeeType - "sales", "pro_sales", or "non_sales"
+ * @returns {Object} - { canCreate: boolean, remaining: number, limit: number, message: string }
+ */
+export const canCreateEmployee = (subscription, employeeType = "non_sales") => {
+    if (!subscription) {
+        return {
+            canCreate: false,
+            remaining: 0,
+            limit: 0,
+            message: "No subscription found"
+        };
+    }
+
+    // Check subscription status
+    if (subscription.status !== "ACTIVE") {
+        return {
+            canCreate: false,
+            remaining: 0,
+            limit: 0,
+            message: `Subscription is ${subscription.status.toLowerCase()}`
+        };
+    }
+
+    // Check expiry
+    if (subscription.endDate < new Date()) {
+        return {
+            canCreate: false,
+            remaining: 0,
+            limit: 0,
+            message: "Subscription has expired"
+        };
+    }
+
+    const limit = getEmployeeLimit(subscription, employeeType);
+    const remaining = getRemainingEmployeeSlots(subscription, employeeType);
+
+    if (limit === 0) {
+        return {
+            canCreate: false,
+            remaining: 0,
+            limit: 0,
+            message: `No ${employeeType} employee slots in your plan`
+        };
+    }
+
+    if (remaining <= 0) {
+        return {
+            canCreate: false,
+            remaining: 0,
+            limit,
+            message: `${employeeType} employee limit reached. Upgrade to add more.`
+        };
+    }
+
+    return {
+        canCreate: true,
+        remaining,
+        limit,
+        message: "Can create employee"
+    };
+};
+
+/**
+ * Check if nearing employee limit for warning
+ * @param {Object} subscription - The subscription object
+ * @param {string} employeeType - "sales", "pro_sales", or "non_sales"
+ * @param {number} threshold - Percentage threshold (default: 80)
+ * @returns {Object} - { isNearing: boolean, percentage: number, remaining: number }
+ */
+export const isNearingEmployeeLimit = (subscription, employeeType = "non_sales", threshold = 80) => {
+    if (!subscription || !subscription.usage) {
+        return {
+            isNearing: false,
+            percentage: 0,
+            remaining: 0
+        };
+    }
+
+    const limit = getEmployeeLimit(subscription, employeeType);
+    if (limit === 0) return { isNearing: true, percentage: 100, remaining: 0 };
+
+    const used = getCurrentEmployeeCount(subscription, employeeType);
+    const percentage = (used / limit) * 100;
+    const remaining = Math.max(0, limit - used);
+
+    return {
+        isNearing: percentage >= threshold,
+        percentage: Math.round(percentage),
+        remaining
+    };
+};
+
+/**
+ * Get all limits and usage for dashboard display
+ * @param {Object} subscription - The subscription object
+ * @returns {Object} - Complete quota summary
+ */
+export const getQuotaSummary = (subscription) => {
+    if (!subscription || !subscription.usage) {
+        return {
+            valid: false,
+            message: "No subscription"
+        };
+    }
+
+    const usage = subscription.usage;
+    const total = usage.employeesUsed || 0;
+    const sales = usage.no_of_sales_person_employeesUsed || 0;
+    const proSales = usage.no_of_pro_sales_person_employeesUsed || 0;
+    const nonSales = Math.max(0, total - sales - proSales);
+
+    const salesLimit = usage.no_of_sales_person_maxEmployees || 0;
+    const proSalesLimit = usage.no_of_pro_sales_person_maxEmployees || 0;
+    const nonSalesLimit = usage.maxEmployees || 0;
+
+    return {
+        valid: subscription.status === "ACTIVE" && subscription.endDate >= new Date(),
+        total: {
+            used: total,
+            limit: total,
+            remaining: 0 // total is derived, always 0 remaining
+        },
+        sales: {
+            used: sales,
+            limit: salesLimit,
+            remaining: Math.max(0, salesLimit - sales),
+            percentage: salesLimit > 0 ? Math.round((sales / salesLimit) * 100) : 0
+        },
+        proSales: {
+            used: proSales,
+            limit: proSalesLimit,
+            remaining: Math.max(0, proSalesLimit - proSales),
+            percentage: proSalesLimit > 0 ? Math.round((proSales / proSalesLimit) * 100) : 0
+        },
+        nonSales: {
+            used: nonSales,
+            limit: nonSalesLimit,
+            remaining: Math.max(0, nonSalesLimit - nonSales),
+            percentage: nonSalesLimit > 0 ? Math.round((nonSales / nonSalesLimit) * 100) : 0
+        },
+        warnings: {
+            salesNearing: (sales / salesLimit) * 100 >= 80 && salesLimit > 0,
+            proSalesNearing: (proSales / proSalesLimit) * 100 >= 80 && proSalesLimit > 0,
+            nonSalesNearing: (nonSales / nonSalesLimit) * 100 >= 80 && nonSalesLimit > 0
+        }
+    };
+};
+
+/**
+ * Validate subscription for API access (generic)
+ * @param {Object} subscription - The subscription object
+ * @returns {Object} - Validation result
+ */
+export const validateSubscription = (subscription) => {
+    if (!subscription) {
+        return {
+            valid: false,
+            error: "NO_SUBSCRIPTION",
+            message: "No active subscription found"
+        };
+    }
+
+    if (subscription.status !== "ACTIVE") {
+        return {
+            valid: false,
+            error: "INACTIVE_SUBSCRIPTION",
+            message: `Subscription is ${subscription.status.toLowerCase()}`,
+            status: subscription.status
+        };
+    }
+
+    const now = new Date();
+    if (subscription.endDate < now) {
+        return {
+            valid: false,
+            error: "EXPIRED_SUBSCRIPTION",
+            message: "Subscription has expired",
+            endDate: subscription.endDate,
+            daysOverdue: Math.abs(Math.ceil((subscription.endDate - now) / (1000 * 60 * 60 * 24)))
+        };
+    }
+
+    const daysRemaining = Math.ceil((subscription.endDate - now) / (1000 * 60 * 60 * 24));
+
+    return {
+        valid: true,
+        message: "Subscription is active",
+        daysRemaining,
+        planName: subscription.planSnapshot?.name,
+        features: {
+            dataSee: subscription.usage?.DATA_SEE || false,
+            dataExport: subscription.usage?.DATA_EXPORT || false
+        }
+    };
+};
+
+
+
+/**
+ * Get upgrade history for specific type
+ * @param {Object} subscription - The subscription object
+ * @param {string} employeeType - "sales", "pro_sales", or "non_sales"
+ * @returns {Array} - Upgrade history
+ */
+export const getUpgradeHistory = (subscription, employeeType = null) => {
+    if (!subscription || !subscription.usage?.upgradeHistory) return [];
+
+    const history = subscription.usage.upgradeHistory || [];
+
+    if (!employeeType) return history;
+
+    return history.filter(h => h.employeeType === employeeType);
+};
+
+/**
+ * Calculate remaining days in subscription
+ * @param {Object} subscription - The subscription object
+ * @returns {number} - Days remaining
+ */
+export const getDaysRemaining = (subscription) => {
+    if (!subscription) return 0;
+
+    const now = new Date();
+    const remaining = Math.ceil((subscription.endDate - now) / (1000 * 60 * 60 * 24));
+
+    return Math.max(0, remaining);
+};
+
+/**
+ * Get expiry warning for subscription
  * @param {Object} subscription - The subscription object
  * @param {number} warningDays - Days before expiry to warn (default: 7)
  * @returns {Object} - Warning information
  */
 export const getExpiryWarning = (subscription, warningDays = 7) => {
-    const status = getSubscriptionStatus(subscription);
-    
-    if (!status.isActive) {
-        return {
-            showWarning: false,
-            message: status.message
-        };
-    }
-    
-    const showWarning = status.daysRemaining <= warningDays;
-    
+    const daysRemaining = getDaysRemaining(subscription);
+    const showWarning = daysRemaining <= warningDays && daysRemaining > 0;
+
     return {
-        showWarning: showWarning,
-        daysRemaining: status.daysRemaining,
-        message: showWarning 
-            ? `Your subscription will expire in ${status.daysRemaining} days. Please renew to continue using all features.`
-            : `Subscription valid for ${status.daysRemaining} more days`,
-        isExpiringSoon: showWarning
+        showWarning,
+        daysRemaining,
+        message: showWarning
+            ? `Your subscription will expire in ${daysRemaining} days. Please renew.`
+            : null,
+        isExpiring: showWarning
     };
+};
+
+/**
+ * Check if can downgrade employee type
+ * Used during employee deletion to ensure consistency
+ * @param {Object} subscription - The subscription object
+ * @param {string} employeeType - "sales", "pro_sales", or "non_sales"
+ * @returns {boolean} - Can decrement safely
+ */
+export const canDecrementEmployeeCount = (subscription, employeeType = "non_sales") => {
+    if (!subscription || !subscription.usage) return false;
+
+    const usage = subscription.usage;
+
+    switch (employeeType) {
+        case "sales":
+            return (usage.no_of_sales_person_employeesUsed || 0) > 0;
+        case "pro_sales":
+            return (usage.no_of_pro_sales_person_employeesUsed || 0) > 0;
+        default: // non_sales
+            return (usage.employeesUsed || 0) > 0;
+    }
 };

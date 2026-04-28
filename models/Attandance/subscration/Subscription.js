@@ -77,6 +77,22 @@ const subscriptionSchema = new mongoose.Schema({
             type: Number,
             default: 0,
         },
+        no_of_sales_person_employeesUsed: {
+            type: Number,
+            default: 0,
+        },
+        no_of_pro_sales_person_employeesUsed: {
+            type: Number,
+            default: 0,
+        },
+        no_of_sales_person_maxEmployees: {
+            type: Number,
+            default: 0,
+        },
+        no_of_pro_sales_person_maxEmployees: {
+            type: Number,
+            default: 0,
+        },
         maxEmployees: {
             type: Number,
             default: 0,

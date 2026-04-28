@@ -8,7 +8,14 @@ import PatnerProfile from "../../models/PatnerProfile.js";
 import Shift from "../../models/Attandance/Shift.js";
 import { getActiveSubscription } from "../../services/subscription.service.js";
 import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
-import { validateSubscription, canCreateEmployee, getEmployeeLimit, isNearingEmployeeLimit, getRemainingEmployeeSlots } from "../../services/featureAccess.service.js";
+import {
+    canCreateEmployee,
+    getEmployeeLimit,
+    getRemainingEmployeeSlots,
+    getEmployeeBreakdown,
+    isNearingEmployeeLimit,
+    getCurrentEmployeeCount
+} from "../../services/featureAccess.service.js";
 // controllers/companyController.js
 import { hasPlanType } from "../../services/featureAccess.service.js";
 
@@ -155,7 +162,7 @@ export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
 
 export const getEmployees = async (req, res) => {
     try {
-        const companyId = req.user?._id||req.user?.id;
+        const companyId = req.user?._id || req.user?.id;
 
         const status = req.query.status || "all";
 
@@ -422,34 +429,34 @@ export const getCompanyByUser = async (req, res) => {
 };
 
 /* --------------------------------------------------   */
-
 export const createEmployee = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-        /* ---------------------------------------------
-           1. Auth & Role Validation
-        ---------------------------------------------- */
-        // Multi-tenant resolution
-        let companyId;
-        companyId = req.user?._id || req.user?.id;
+        /* =============================================
+           1. AUTH & COMPANY RESOLUTION
+        ============================================= */
+        let companyId = req.user?._id || req.user?.id;
         const role = req.user?.role || req.user?.type;
 
-        if (role === 'user') {
-            companyId = req.user?.companyId || req.user?.companyId;
+        if (role === "user") {
+            companyId = req.user?.companyId;
         }
 
-        if (!companyId) throw new Error("Unauthorized");
+        if (!companyId) {
+            throw new Error("Unauthorized");
+        }
 
-        const allowedRoles = ["partner", 'user', "admin", "super_admin"];
+        // Validate role
+        const allowedRoles = ["partner", "user", "admin", "super_admin"];
         if (!allowedRoles.includes(role)) {
             throw new Error("Access denied");
         }
 
-        /* ---------------------------------------------
-           2. Input Validation
-        ---------------------------------------------- */
+        /* =============================================
+           2. INPUT VALIDATION
+        ============================================= */
         const {
             userId,
             shift,
@@ -460,15 +467,19 @@ export const createEmployee = async (req, res) => {
             salaryStructure,
             bankDetails,
             officeLocation,
-            employeeType,
+            employeeType = "non_sales",
             referalCode
         } = req.body;
 
+        // Required fields
         if (!userId) throw new Error("userId is required");
+        if (!["sales", "pro_sales", "non_sales"].includes(employeeType)) {
+            throw new Error("Invalid employeeType. Must be: sales, pro_sales, or non_sales");
+        }
 
-        /* ---------------------------------------------
-           3. Dependency Validation
-        ---------------------------------------------- */
+        /* =============================================
+           3. VALIDATE DEPENDENCIES
+        ============================================= */
         const user = await User.findById(userId).session(session);
         if (!user) throw new Error("User not found");
 
@@ -477,68 +488,51 @@ export const createEmployee = async (req, res) => {
             if (!shiftExists) throw new Error("Shift not found");
         }
 
-        /* ---------------------------------------------
-           4. Duplicate Employee Check
-        ---------------------------------------------- */
-        const existingEmployee = await Employee.findOne({
+        /* =============================================
+           4. PREVENT DUPLICATE EMPLOYEE
+        ============================================= */
+        const existing = await Employee.findOne({
             companyId,
             userId
         }).session(session);
 
-        if (existingEmployee) {
-            throw new Error("Employee already exists");
+        if (existing) {
+            throw new Error("Employee already exists for this user");
         }
 
-        /* ---------------------------------------------
-           5. Subscription Validation (USING FEATURE SERVICE)
-        ---------------------------------------------- */
-        const subscription = await getActiveSubscription(companyId, session);
-
-        // Use the feature service to validate subscription
-        const subscriptionStatus = validateSubscription(subscription);
-        if (!subscriptionStatus.valid) {
-            throw new Error(subscriptionStatus.message);
-        }
-
-        // Check if can create employee using the service
-        const canCreate = canCreateEmployee(subscription);
-        if (!canCreate) {
-            const remaining = getRemainingEmployeeSlots(subscription);
-            if (remaining === 0) {
-                throw new Error("Employee limit reached. Please upgrade your plan to add more employees.");
-            }
-            throw new Error("Cannot create employee due to subscription restrictions");
-        }
-
-        // Get real-time employee count (additional safety check)
-        const currentCount = await Employee.countDocuments({
-            companyId,
-            employmentStatus: "active"
+        /* =============================================
+           5. GET ACTIVE SUBSCRIPTION
+        ============================================= */
+        const subscription = await Subscription.findOne({
+            company: companyId,
+            status: "ACTIVE",
+            isActive: true,
+            endDate: { $gte: new Date() }
         }).session(session);
 
-        const employeeLimit = getEmployeeLimit(subscription);
-
-        if (currentCount >= employeeLimit) {
-            throw new Error(`Employee limit of ${employeeLimit} reached. Please upgrade your plan.`);
+        if (!subscription) {
+            throw new Error("No active subscription found");
         }
 
-        // Check if nearing limit for warning (optional)
-        const nearingLimit = isNearingEmployeeLimit(subscription, 80);
-        if (nearingLimit) {
-            // You can add a warning header or log this
-            console.warn(`Company ${companyId} is nearing employee limit: ${currentCount}/${employeeLimit}`);
+        /* =============================================
+           6. TYPE-AWARE LIMIT VALIDATION
+        ============================================= */
+        const validationResult = canCreateEmployee(subscription, employeeType);
+
+        if (!validationResult.canCreate) {
+            throw new Error(validationResult.message);
         }
 
-        /* ---------------------------------------------
-           6. Create Employee
-        ---------------------------------------------- */
+        /* =============================================
+           7. CREATE EMPLOYEE RECORD
+        ============================================= */
         const employeeData = {
             userId,
             companyId,
-            empCode,
+            empCode: empCode || `EMP-${Date.now()}`,
             employeeType,
             referalCode,
-            user_name,
+            user_name: user_name || user.name,
             jobInfo,
             shift,
             weeklyOff,
@@ -550,58 +544,168 @@ export const createEmployee = async (req, res) => {
 
         const [employee] = await Employee.create([employeeData], { session });
 
-        /* ---------------------------------------------
-           7. Update Usage Tracking
-        ---------------------------------------------- */
-        // Use direct update instead of subscription.save()
+        /* =============================================
+           8. UPDATE SUBSCRIPTION USAGE (TYPE-AWARE)
+        ============================================= */
+        // Always increment total
+        let incQuery = {
+            "usage.employeesUsed": 1
+        };
+
+        // Also increment type-specific counter
+        if (employeeType === "sales") {
+            incQuery["usage.no_of_sales_person_employeesUsed"] = 1;
+        } else if (employeeType === "pro_sales") {
+            incQuery["usage.no_of_pro_sales_person_employeesUsed"] = 1;
+        }
+        // non_sales → only total increments
+
         await Subscription.updateOne(
             { _id: subscription._id },
-            { $inc: { 'usage.employeesUsed': 1 } },
+            { $inc: incQuery },
             { session }
         );
 
-        // Update local subscription object for response
-        subscription.usage.employeesUsed = (subscription.usage?.employeesUsed || 0) + 1;
-
-        /* ---------------------------------------------
-           8. Commit Transaction
-        ---------------------------------------------- */
+        /* =============================================
+           9. COMMIT TRANSACTION
+        ============================================= */
         await session.commitTransaction();
 
-        // Prepare response with subscription info
+        /* =============================================
+           10. PREPARE RESPONSE WITH QUOTA INFO
+        ============================================= */
+        // Fetch updated usage for response
+        const breakdown = getEmployeeBreakdown({
+            usage: {
+                employeesUsed: (subscription.usage.employeesUsed || 0) + 1,
+                no_of_sales_person_employeesUsed:
+                    (subscription.usage.no_of_sales_person_employeesUsed || 0) +
+                    (employeeType === "sales" ? 1 : 0),
+                no_of_pro_sales_person_employeesUsed:
+                    (subscription.usage.no_of_pro_sales_person_employeesUsed || 0) +
+                    (employeeType === "pro_sales" ? 1 : 0)
+            }
+        });
+
+        const updatedSubscription = {
+            ...subscription.usage,
+            employeesUsed: (subscription.usage.employeesUsed || 0) + 1,
+            no_of_sales_person_employeesUsed:
+                (subscription.usage.no_of_sales_person_employeesUsed || 0) +
+                (employeeType === "sales" ? 1 : 0),
+            no_of_pro_sales_person_employeesUsed:
+                (subscription.usage.no_of_pro_sales_person_employeesUsed || 0) +
+                (employeeType === "pro_sales" ? 1 : 0)
+        };
+
+        const salesWarning = isNearingEmployeeLimit(
+            { usage: updatedSubscription },
+            "sales",
+            80
+        );
+        const proSalesWarning = isNearingEmployeeLimit(
+            { usage: updatedSubscription },
+            "pro_sales",
+            80
+        );
+        const nonSalesWarning = isNearingEmployeeLimit(
+            { usage: updatedSubscription },
+            "non_sales",
+            80
+        );
+
         const response = {
             success: true,
             message: "Employee created successfully",
-            data: employee,
-            subscription: {
-                employeesUsed: subscription.usage?.employeesUsed || 0,
-                employeeLimit: getEmployeeLimit(subscription),
-                remainingSlots: getRemainingEmployeeSlots(subscription),
-                nearingLimit: isNearingEmployeeLimit(subscription, 80)
-            }
+            data: {
+                _id: employee._id,
+                userId: employee.userId,
+                empCode: employee.empCode,
+                user_name: employee.user_name,
+                employeeType: employee.employeeType,
+                employmentStatus: employee.employmentStatus,
+                createdAt: employee.createdAt
+            },
+            quota: {
+                breakdown: {
+                    total: breakdown.total,
+                    sales: breakdown.sales,
+                    proSales: breakdown.proSales,
+                    nonSales: breakdown.nonSales
+                },
+                limits: {
+                    sales: getEmployeeLimit({ usage: updatedSubscription }, "sales"),
+                    proSales: getEmployeeLimit({ usage: updatedSubscription }, "pro_sales"),
+                    nonSales: getEmployeeLimit({ usage: updatedSubscription }, "non_sales")
+                },
+                remaining: {
+                    sales: getRemainingEmployeeSlots(
+                        { usage: updatedSubscription },
+                        "sales"
+                    ),
+                    proSales: getRemainingEmployeeSlots(
+                        { usage: updatedSubscription },
+                        "pro_sales"
+                    ),
+                    nonSales: getRemainingEmployeeSlots(
+                        { usage: updatedSubscription },
+                        "non_sales"
+                    )
+                }
+            },
+            warnings: []
         };
 
-        // Add warning if nearing limit
-        if (isNearingEmployeeLimit(subscription, 80)) {
-            response.warning = `You have used ${subscription.usage?.employeesUsed || 0} out of ${getEmployeeLimit(subscription)} employee slots. Consider upgrading your plan.`;
+        // Add warnings if nearing limits
+        if (salesWarning.isNearing) {
+            response.warnings.push({
+                type: "SALES_LIMIT_WARNING",
+                message: `Sales employees: ${breakdown.sales}/${getEmployeeLimit(
+                    { usage: updatedSubscription },
+                    "sales"
+                )} (${salesWarning.percentage}%)`
+            });
+        }
+
+        if (proSalesWarning.isNearing) {
+            response.warnings.push({
+                type: "PRO_SALES_LIMIT_WARNING",
+                message: `Pro Sales employees: ${breakdown.proSales}/${getEmployeeLimit(
+                    { usage: updatedSubscription },
+                    "pro_sales"
+                )} (${proSalesWarning.percentage}%)`
+            });
+        }
+
+        if (nonSalesWarning.isNearing) {
+            response.warnings.push({
+                type: "NON_SALES_LIMIT_WARNING",
+                message: `Non-Sales employees: ${breakdown.nonSales}/${getEmployeeLimit(
+                    { usage: updatedSubscription },
+                    "non_sales"
+                )} (${nonSalesWarning.percentage}%)`
+            });
         }
 
         return res.status(201).json(response);
 
     } catch (error) {
-        // Only abort transaction if session is still active and transaction is in progress
-        if (session && session.inTransaction()) {
+        // Abort transaction if still active
+        if (session.inTransaction()) {
             await session.abortTransaction();
         }
 
-        // Handle specific error cases
+        console.error("Create Employee Error:", error.message);
+
+        // Determine status code and error type
         let statusCode = 400;
-        let errorResponse = {
+        const errorResponse = {
             success: false,
-            message: error.message
+            message: error.message,
+            code: "CREATE_EMPLOYEE_ERROR"
         };
 
-        if (error.message.includes("limit reached")) {
+        if (error.message.includes("limit reached") || error.message.includes("Limit reached")) {
             statusCode = 403;
             errorResponse.code = "EMPLOYEE_LIMIT_REACHED";
         } else if (error.message.includes("subscription")) {
@@ -613,14 +717,18 @@ export const createEmployee = async (req, res) => {
         } else if (error.message.includes("not found")) {
             statusCode = 404;
             errorResponse.code = "NOT_FOUND";
+        } else if (error.message.includes("Invalid")) {
+            statusCode = 400;
+            errorResponse.code = "VALIDATION_ERROR";
+        } else if (error.message.includes("already exists")) {
+            statusCode = 409;
+            errorResponse.code = "DUPLICATE_EMPLOYEE";
         }
 
         return res.status(statusCode).json(errorResponse);
+
     } finally {
-        // Always end the session
-        if (session) {
-            session.endSession();
-        }
+        await session.endSession();
     }
 };
 
