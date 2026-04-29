@@ -477,7 +477,7 @@ export const punchIn = async (req, res) => {
       let session = await SalesSession.findOne({
         sessionId: finalSessionId,
         companyId,
-        status: "in_progress"
+        SalesStatus: "open"
       });
 
       if (!session) {
