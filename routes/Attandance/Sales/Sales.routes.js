@@ -19,6 +19,13 @@ import {
   getNearbyOpenSalesAdminOptimized,
   getTodayMeetings
 } from "../../../controllers/attandance/Sales/Sales.js";
+import {
+  getOpenSessions,
+  getTodayOpenSessions,
+  getNearestOpenSessions,
+  getFilteredOpenSessions,
+  getOpenSessionsStats
+} from "../../../controllers/attandance/Sales/SalesSession.controller.js";
 
 import authMiddleware from "../../../middlewares/authMiddleware.js";
 
@@ -170,5 +177,37 @@ router.get(
   authMiddleware,
   getTodayMeetings
 );
+
+
+router.get(
+  "/open-sessions",
+  authMiddleware,
+  getOpenSessions
+);
+
+router.get(
+  "/open-sessions/today",
+  authMiddleware,
+  getTodayOpenSessions
+);
+
+router.get(
+  "/open-sessions/nearest",
+  authMiddleware,
+  getNearestOpenSessions
+);
+
+router.post(
+  "/open-sessions/filter",
+  authMiddleware,
+  getFilteredOpenSessions
+);
+
+router.get(
+  "/open-sessions/stats",
+  authMiddleware,
+  getOpenSessionsStats
+);
+
 
 export default router;
