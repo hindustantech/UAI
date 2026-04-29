@@ -729,9 +729,9 @@ export const completeSalesForm = async (req, res) => {
     session.formCompleted = true;
 
     // Auto-complete only when user submits data
-    // if (session.status === "in_progress") {
-    //   session.status = "in_progress";
-    // }
+    if (session.status === "completed") {
+      session.status = "in_progress";
+    }
 
     await session.save();
 
@@ -1007,51 +1007,7 @@ export const punchOut = async (req, res) => {
   }
 };
 
-/**
- * VALIDATE AND UPSERT PUNCH-OUT
- * 
- * Alternative endpoint that checks if punch-out already exists
- * Useful for handling network retries
- * 
- * @param {Object} req - Express request
- * @param {Object} res - Express response
- */
-export const punchOutSafe = async (req, res) => {
-  try {
-    const { employeeId, companyId } = req.user;
-    const { sessionId, location, deviceInfo } = req.body;
 
-    if (!sessionId) {
-      return res.status(400).json({ error: "sessionId is required" });
-    }
-
-    // Check if already punched out
-    const existingSession = await SalesSession.findOne({
-      _id: sessionId,
-      companyId,
-      punchOutTime: { $exists: true, $ne: null }
-    });
-
-    if (existingSession) {
-      return res.status(200).json({
-        success: true,
-        message: "Already punched out (cached response)",
-        data: {
-          sessionId: existingSession._id,
-          punchOutTime: existingSession.punchOutTime,
-          duration: existingSession.duration
-        }
-      });
-    }
-
-    // Proceed with normal punch-out
-    return punchOut(req, res);
-
-  } catch (error) {
-    console.error("PunchOutSafe error:", error);
-    return res.status(500).json({ error: error.message });
-  }
-};
 
 export const getSessionSummary = async (req, res) => {
   try {
