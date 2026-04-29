@@ -6,6 +6,7 @@ import Attendance from "../../../models/Attandance/Attendance.js";
 import Shift from "../../../models/Attandance/Shift.js";
 import Holiday from "../../../models/Attandance/Holiday.js";
 import Employee from "../../../models/Attandance/Employee.js";
+import { v4 as uuidv4 } from 'uuid';
 
 
 
@@ -188,8 +189,9 @@ export const validateShiftTiming = (shiftStart, shiftEnd, punchTime, options = {
  * generateSessionId("507f1f77bcf86cd799439011")
  * // "507f1f77bcf86cd799439011-1713975600000-abc12345"
  */
+
 export const generateSessionId = (salesPersonId) => {
-  return `${salesPersonId}-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+  return `${salesPersonId}-${Date.now()}-${uuidv4()}`;
 };
 
 /**
