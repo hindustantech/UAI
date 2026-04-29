@@ -35,6 +35,11 @@ const planSchema = new mongoose.Schema({
     finalPrice: {
         type: Number,
     },
+    autocheckout: {
+        type: Boolean,
+        default: false,
+    },
+
     features_version: {
         UAI_Pro: {
             type: Boolean,
