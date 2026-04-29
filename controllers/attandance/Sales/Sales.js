@@ -605,7 +605,7 @@ export const completeSalesForm = async (req, res) => {
     let session = await SalesSession.findOne({ sessionId });
 
     // ========= RULE: BLOCK IF COMPLETED =========
-    if (session && session.status === "completed") {
+    if (session && session.SalesStatus === "closed") {
       return res.status(400).json({
         error: "Session already completed. You cannot modify it."
       });
