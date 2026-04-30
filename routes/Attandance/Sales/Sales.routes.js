@@ -177,6 +177,11 @@ router.get(
   authMiddleware,
   getTodayMeetings
 );
+router.get(
+  "/getTodayMeetingsAdmin",
+  authMiddleware,
+  getTodayMeetingsAdmin
+);
 
 
 router.get(
