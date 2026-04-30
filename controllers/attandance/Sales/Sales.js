@@ -499,7 +499,7 @@ export const punchIn = async (req, res) => {
           timestamp: now
         });
         session.lastPunchAt = now;
-
+        session.status = "in_progress";
         await session.save();
       }
 
