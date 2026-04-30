@@ -2388,6 +2388,8 @@ export const getSessionRoute = async (req, res) => {
 };
 
 // ========== GET ACTIVE SESSION ==========
+
+
 export const getActiveSessionAgg = async (req, res) => {
   try {
     const { salesPersonId } = req.query;
@@ -2409,9 +2411,44 @@ export const getActiveSessionAgg = async (req, res) => {
           ]
         }
       },
-      { $sort: { punchInTime: -1 } },
+
+      // 🔥 Extract latest visitLog
+      {
+        $addFields: {
+          latestVisit: {
+            $cond: [
+              { $gt: [{ $size: "$visitLogs" }, 0] },
+              { $arrayElemAt: ["$visitLogs", -1] },
+              null
+            ]
+          }
+        }
+      },
+
+      // 🔥 Compute effective punch-in
+      {
+        $addFields: {
+          effectivePunchIn: {
+            $cond: [
+              {
+                $and: [
+                  { $ne: ["$latestVisit", null] },
+                  { $ne: ["$latestVisit.punchInTime", null] },
+                  { $eq: ["$latestVisit.punchOutTime", null] }
+                ]
+              },
+              "$latestVisit.punchInTime",
+              "$punchInTime"
+            ]
+          }
+        }
+      },
+
+      // 🔥 Sort using computed value
+      { $sort: { effectivePunchIn: -1 } },
       { $limit: 1 },
 
+      // employee lookup
       {
         $lookup: {
           from: "users",
@@ -2422,6 +2459,7 @@ export const getActiveSessionAgg = async (req, res) => {
       },
       { $unwind: { path: "$employee", preserveNullAndEmptyArrays: true } },
 
+      // assignedTo lookup
       {
         $lookup: {
           from: "users",
@@ -2431,31 +2469,50 @@ export const getActiveSessionAgg = async (req, res) => {
         }
       },
 
+      // final projection
       {
         $project: {
           sessionId: 1,
-          punchInTime: 1,
-          punchInLocation: 1,
           status: 1,
+          customer: 1,
+          SalesStatus: 1,
+
+          // 🔥 IMPORTANT
+          punchInTime: "$effectivePunchIn",
+
+          punchInLocation: {
+            $cond: [
+              {
+                $and: [
+                  { $ne: ["$latestVisit", null] },
+                  { $eq: ["$latestVisit.punchOutTime", null] }
+                ]
+              },
+              "$latestVisit.punchInLocation",
+              "$punchInLocation"
+            ]
+          },
+
           "employee.name": 1,
           "employee.email": 1,
-          assignedTo: 1,
-          customer: 1,
-          SalesStatus: 1
+          assignedTo: 1
         }
       }
     ];
 
     const result = await SalesSession.aggregate(pipeline);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: result[0] || null
     });
 
   } catch (error) {
     console.error("getActiveSessionAgg error:", error);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
 };
 
