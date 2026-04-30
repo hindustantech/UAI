@@ -1343,7 +1343,21 @@ export const getSessionSummary = async (req, res) => {
 };
 
 
+export const formatDurationString = (seconds) => {
+  if (!seconds || isNaN(seconds)) return "0s";
 
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  return [
+    hrs ? `${hrs}h` : null,
+    mins ? `${mins}m` : null,
+    secs ? `${secs}s` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+};
 
 
 
