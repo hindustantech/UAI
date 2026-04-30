@@ -181,38 +181,50 @@ export const getNearestOpenSessions = async (req, res) => {
       });
     }
 
-    // if (!mongoose.Types.ObjectId.isValid(salesPersonId)) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "Invalid salesPersonId format"
-    //   });
-    // }
-
-    const objId = new mongoose.Types.ObjectId(salesPersonId);
-    const limitNum = Math.min(20, Math.max(1, parseInt(limit)));
-    const maxDist = Math.max(1000, parseInt(maxDistance));
-
-    // Fetch reference session with location
-    const refSession = await SalesSession.findOne({ sessionId })
-      .select("customer.location")
-      .lean()
-      .exec();
-
-    if (!refSession?.customer?.location) {
-      return res.status(404).json({
+    // Validate salesPersonId format
+    if (!mongoose.Types.ObjectId.isValid(salesPersonId)) {
+      return res.status(400).json({
         success: false,
-        message: "Reference session not found or missing location data"
+        message: "Invalid salesPersonId format"
       });
     }
 
-    const { coordinates } = refSession.customer.location;
+    const objId = new mongoose.Types.ObjectId(salesPersonId);
+    const limitNum = Math.min(20, Math.max(1, parseInt(limit) || 4));
+    const maxDist = Math.max(1000, parseInt(maxDistance) || 50000);
+
+    // Fetch reference session with punchInLocation
+    const refSession = await SalesSession.findOne({
+      sessionId: sessionId,
+      SalesStatus: "open" // Only consider open sessions as reference
+    })
+      .select("punchInLocation sessionId")
+      .lean()
+      .exec();
+
+    if (!refSession) {
+      return res.status(404).json({
+        success: false,
+        message: "Reference session not found"
+      });
+    }
+
+    if (!refSession.punchInLocation || !refSession.punchInLocation.coordinates) {
+      return res.status(404).json({
+        success: false,
+        message: "Reference session does not have punch-in location data"
+      });
+    }
+
+    const coordinates = refSession.punchInLocation.coordinates;
 
     // Validate coordinates
     if (
-      !coordinates ||
       !Array.isArray(coordinates) ||
       coordinates.length !== 2 ||
-      !coordinates.every(c => isFinite(c))
+      !coordinates.every(c => isFinite(c)) ||
+      coordinates[0] < -180 || coordinates[0] > 180 ||
+      coordinates[1] < -90 || coordinates[1] > 90
     ) {
       return res.status(400).json({
         success: false,
@@ -220,17 +232,22 @@ export const getNearestOpenSessions = async (req, res) => {
       });
     }
 
-    // Geospatial query for nearest open sessions
+    // Geospatial query for nearest open sessions based on punchInLocation
     const sessions = await SalesSession.find({
-      employeeId: objId,
-      assignedTo: objId,
+      // Find sessions assigned to or created by this sales person
+      $or: [
+        { employeeId: objId },
+        { assignedTo: objId },
+        { createdBy: objId }
+      ],
       SalesStatus: "open",
-      sessionId: { $ne: sessionId },
-      "customer.location": {
+      sessionId: { $ne: sessionId }, // Exclude the reference session
+      // CRITICAL FIX: Use the correct field name 'punchInLocation' (not refSession?.punchInLocation)
+      punchInLocation: {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: coordinates
+            coordinates: coordinates // [lng, lat]
           },
           $maxDistance: maxDist,
           $minDistance: 0
@@ -238,34 +255,74 @@ export const getNearestOpenSessions = async (req, res) => {
       }
     })
       .select(
-        "sessionId customer.companyName customer.contactName customer.phoneNumber customer.location SalesStatus status updatedAt createdAt"
+        "sessionId customer.companyName customer.contactName customer.phoneNumber customer.location punchInLocation punchInTime SalesStatus status updatedAt createdAt employeeId"
       )
       .limit(limitNum)
       .lean()
       .exec();
 
+    // Calculate distance for each session (in meters)
+    const sessionsWithDistance = sessions.map(session => {
+      let distance = null;
+      if (session.punchInLocation?.coordinates) {
+        distance = calculateDistance(
+          coordinates[1], coordinates[0], // ref lat, lng
+          session.punchInLocation.coordinates[1], // session lat
+          session.punchInLocation.coordinates[0]  // session lng
+        );
+      }
+
+      return {
+        ...session,
+        distanceInMeters: distance ? Math.round(distance) : null,
+        distanceInKm: distance ? (distance / 1000).toFixed(2) : null
+      };
+    });
+
+    // Sort by distance (nearest first) - though $near should already do this
+    sessionsWithDistance.sort((a, b) => {
+      if (a.distanceInMeters === null) return 1;
+      if (b.distanceInMeters === null) return -1;
+      return a.distanceInMeters - b.distanceInMeters;
+    });
+
     return res.status(200).json({
       success: true,
-      data: sessions,
-      count: sessions.length,
+      data: sessionsWithDistance,
+      count: sessionsWithDistance.length,
       metadata: {
         referenceSessionId: sessionId,
         referenceLocation: {
-          coordinates: coordinates,
-          type: "Point"
+          type: "Point",
+          coordinates: coordinates
         },
-        maxRadius: maxDist,
-        radiusKm: (maxDist / 1000).toFixed(2)
+        maxRadiusMeters: maxDist,
+        maxRadiusKm: (maxDist / 1000).toFixed(2),
+        searchPoint: {
+          latitude: coordinates[1],
+          longitude: coordinates[0]
+        }
       }
     });
+
   } catch (error) {
     console.error("Error in getNearestOpenSessions:", error.message, error.stack);
 
     // Handle specific MongoDB geospatial errors
-    if (error.message.includes("2dsphere") || error.code === 13034) {
+    if (error.message?.includes("2dsphere") || error.code === 13034) {
       return res.status(500).json({
         success: false,
-        message: "Geospatial index error. Ensure customer.location has 2dsphere index.",
+        message: "Geospatial index error. Ensure punchInLocation has a 2dsphere index.",
+        hint: "Run: db.salessessions.createIndex({ punchInLocation: '2dsphere' })",
+        error: process.env.NODE_ENV === "development" ? error.message : undefined
+      });
+    }
+
+    // Handle $near errors
+    if (error.message?.includes("$near") || error.code === 2) {
+      return res.status(500).json({
+        success: false,
+        message: "Geospatial query error. Make sure the 2dsphere index exists on punchInLocation.",
         error: process.env.NODE_ENV === "development" ? error.message : undefined
       });
     }
@@ -278,6 +335,217 @@ export const getNearestOpenSessions = async (req, res) => {
   }
 };
 
+/**
+ * Calculate distance between two points using Haversine formula
+ * @param {number} lat1 - Latitude of point 1
+ * @param {number} lon1 - Longitude of point 1
+ * @param {number} lat2 - Latitude of point 2
+ * @param {number} lon2 - Longitude of point 2
+ * @returns {number} Distance in meters
+ */
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371000; // Earth's radius in meters
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // Distance in meters
+}
+
+function toRadians(degrees) {
+  return degrees * (Math.PI / 180);
+}
+
+/**
+ * @desc    Get nearest open sessions for a company (company-scoped)
+ * @route   GET /api/sales/sessions/nearest-open
+ * @access  Private (Company specific - only sees their company's sessions)
+ */
+export const getCompanyNearestOpenSessions = async (req, res) => {
+  try {
+    const {
+      sessionId,
+      salesPersonId,
+      maxDistance = 50000,
+      limit = 4
+    } = req.query;
+
+    // Get company ID from authenticated user
+    const companyId = req.user?.companyId || req.user?._id;
+
+    if (!companyId) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Company ID not found."
+      });
+    }
+
+    if (!sessionId || !salesPersonId) {
+      return res.status(400).json({
+        success: false,
+        message: "Both sessionId and salesPersonId are required"
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(salesPersonId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid salesPersonId format"
+      });
+    }
+
+    const objId = new mongoose.Types.ObjectId(salesPersonId);
+    const limitNum = Math.min(20, Math.max(1, parseInt(limit) || 4));
+    const maxDist = Math.max(1000, parseInt(maxDistance) || 50000);
+
+    // First verify that the sales person belongs to this company
+    const Employee = (await import("../../../models/Attandance/Employee.js")).default;
+    const employee = await Employee.findOne({
+      userId: objId,
+      companyId: companyId,
+      employmentStatus: "active"
+    }).lean();
+
+    if (!employee) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Sales person does not belong to your company."
+      });
+    }
+
+    // Fetch reference session - MUST belong to the same company
+    const refSession = await SalesSession.findOne({
+      sessionId: sessionId,
+      companyId: companyId, // CRITICAL: Company scope
+      SalesStatus: "open"
+    })
+      .select("punchInLocation sessionId companyId")
+      .lean()
+      .exec();
+
+    if (!refSession) {
+      return res.status(404).json({
+        success: false,
+        message: "Reference session not found or does not belong to your company"
+      });
+    }
+
+    if (!refSession.punchInLocation?.coordinates) {
+      return res.status(404).json({
+        success: false,
+        message: "Reference session does not have punch-in location data"
+      });
+    }
+
+    const coordinates = refSession.punchInLocation.coordinates;
+
+    // Validate coordinates
+    if (
+      !Array.isArray(coordinates) ||
+      coordinates.length !== 2 ||
+      !coordinates.every(c => isFinite(c)) ||
+      coordinates[0] < -180 || coordinates[0] > 180 ||
+      coordinates[1] < -90 || coordinates[1] > 90
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid location coordinates in reference session"
+      });
+    }
+
+    // Query nearest open sessions WITHIN THE SAME COMPANY
+    const sessions = await SalesSession.find({
+      companyId: companyId, // CRITICAL: Company scope
+      $or: [
+        { employeeId: objId },
+        { assignedTo: objId },
+        { createdBy: objId }
+      ],
+      SalesStatus: "open",
+      sessionId: { $ne: sessionId },
+      punchInLocation: { // Fixed: Use correct field name
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: coordinates
+          },
+          $maxDistance: maxDist,
+          $minDistance: 0
+        }
+      }
+    })
+      .select(
+        "sessionId customer.companyName customer.contactName customer.phoneNumber " +
+        "customer.location punchInLocation punchInTime SalesStatus status " +
+        "updatedAt createdAt employeeId"
+      )
+      .limit(limitNum)
+      .lean()
+      .exec();
+
+    // Calculate distances
+    const sessionsWithDistance = sessions.map(session => {
+      let distance = null;
+      if (session.punchInLocation?.coordinates) {
+        distance = calculateDistance(
+          coordinates[1], coordinates[0],
+          session.punchInLocation.coordinates[1],
+          session.punchInLocation.coordinates[0]
+        );
+      }
+
+      return {
+        ...session,
+        distanceInMeters: distance ? Math.round(distance) : null,
+        distanceInKm: distance ? (distance / 1000).toFixed(2) : null
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: sessionsWithDistance,
+      count: sessionsWithDistance.length,
+      metadata: {
+        companyId: companyId,
+        referenceSessionId: sessionId,
+        salesPersonId: salesPersonId,
+        employeeName: employee.user_name || 'Unknown',
+        employeeCode: employee.empCode || 'N/A',
+        referenceLocation: {
+          type: "Point",
+          coordinates: coordinates,
+          latitude: coordinates[1],
+          longitude: coordinates[0]
+        },
+        maxRadiusMeters: maxDist,
+        maxRadiusKm: (maxDist / 1000).toFixed(2)
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in getCompanyNearestOpenSessions:", error);
+
+    if (error.message?.includes("2dsphere") || error.code === 13034) {
+      return res.status(500).json({
+        success: false,
+        message: "Geospatial index error. Contact administrator.",
+        error: process.env.NODE_ENV === "development" ? error.message : undefined
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch nearest open sessions",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
+  }
+};
 /**
  * Get OPEN sessions with advanced filtering
  * - Filter by SalesStatus: "open"
