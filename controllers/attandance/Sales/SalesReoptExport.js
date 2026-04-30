@@ -1,12 +1,5 @@
-import { SalesSession } from "../../../models/Attandance/Salses/Salses.js";
-import { Parser } from "json2csv";
-import fs from "fs";
-import path from "path";
 import Employee from "../../../models/Attandance/Employee.js";
-
-
 import { SalesSession } from "../../../models/Attandance/Salses/Salses.js";
-import Employee from "../../../models/Attandance/Employee.js";
 import { Parser } from "json2csv";
 import fs from "fs";
 import path from "path";
