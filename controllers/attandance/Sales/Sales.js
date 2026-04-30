@@ -3302,3 +3302,77 @@ export const getTodayMeetings = async (req, res) => {
     });
   }
 };
+
+export const getTodayMeetingsAdmin = async (req, res) => {
+  try {
+    const companyId = req.user.id;
+
+    let { page = 1, limit = 10, userId } = req.query;
+
+    page = parseInt(page);
+    limit = parseInt(limit);
+
+    const skip = (page - 1) * limit;
+
+    const objectCompanyId = new mongoose.Types.ObjectId(companyId);
+
+    // optional user filter
+    let objectUserId = null;
+    if (userId) {
+      objectUserId = new mongoose.Types.ObjectId(userId);
+    }
+
+    // today range
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const baseQuery = {
+      companyId: objectCompanyId,
+      "nextMeeting.decided": true,
+      "nextMeeting.date": {
+        $gte: startOfDay,
+        $lte: endOfDay
+      }
+    };
+
+    // apply user filter only if passed
+    if (objectUserId) {
+      baseQuery.$or = [
+        { assignedTo: objectUserId },
+        { employeeId: objectUserId }
+      ];
+    }
+
+    const [sessions, total] = await Promise.all([
+      SalesSession.find(baseQuery)
+        .populate("assignedTo", "name email")
+        .populate("employeeId", "name email")
+        .sort({ "nextMeeting.time": 1 })
+        .skip(skip)
+        .limit(limit),
+
+      SalesSession.countDocuments(baseQuery)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      count: sessions.length,
+      data: sessions
+    });
+
+  } catch (error) {
+    console.error("Admin Today Meetings Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch today's meetings",
+      error: error.message
+    });
+  }
+};
