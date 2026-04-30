@@ -181,12 +181,12 @@ export const getNearestOpenSessions = async (req, res) => {
       });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(salesPersonId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid salesPersonId format"
-      });
-    }
+    // if (!mongoose.Types.ObjectId.isValid(salesPersonId)) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Invalid salesPersonId format"
+    //   });
+    // }
 
     const objId = new mongoose.Types.ObjectId(salesPersonId);
     const limitNum = Math.min(20, Math.max(1, parseInt(limit)));

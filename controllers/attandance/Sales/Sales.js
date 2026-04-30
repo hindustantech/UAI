@@ -8,7 +8,15 @@ import Holiday from "../../../models/Attandance/Holiday.js";
 import Employee from "../../../models/Attandance/Employee.js";
 import { v4 as uuidv4 } from 'uuid';
 
-
+const generateCustomer = () => {
+  const alphaNumaric = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let result = "";
+  const length = 8;
+  for (let i = 0; i < length; i++) {
+    result += alphaNumaric.charAt(Math.floor(Math.random() * alphaNumaric.length));
+  }
+  return result;
+};
 
 
 /**
