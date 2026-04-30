@@ -17,7 +17,8 @@ import {
   getTodaySessionsAll,
   getNearbySalesByLocation,
   getNearbyOpenSalesAdminOptimized,
-  getTodayMeetings
+  getTodayMeetings,
+  getTodayMeetingsAdmin
 } from "../../../controllers/attandance/Sales/Sales.js";
 import {
   getOpenSessions,
