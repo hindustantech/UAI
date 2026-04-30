@@ -1276,6 +1276,334 @@ export const getSessionDetails = async (req, res) => {
 // ========== GET ALL SESSIONS ==========
 
 
+// export const getSessions = async (req, res) => {
+//   try {
+//     // ================= EXTRACT QUERY PARAMETERS =================
+//     const {
+//       salesPersonId,
+//       status,
+//       SalesStatus,
+//       startDate,
+//       companyId,
+//       endDate,
+//       page = 1,
+//       limit = 10,
+//       includeLogs = "true",
+//       includeRoute = "false",
+//       sortBy = "punchInTime", // Field to sort by
+//       sortOrder = "-1" // -1 for descending, 1 for ascending
+//     } = req.query;
+
+//     // ================= COMPANY ISOLATION (MULTI-TENANCY) =================
+//     // Get companyId: prioritize query param, fallback to middleware
+//     let finalCompanyId = companyId || req.user?.companyId;
+
+//     if (!req.user || !finalCompanyId) {
+//       return res.status(401).json({
+//         success: false,
+//         message: "Unauthorized: Company ID not found"
+//       });
+//     }
+
+//     const employeeId = salesPersonId;
+
+//     // ================= BUILD QUERY OBJECT =================
+//     const query = { companyId: finalCompanyId };
+
+//     // Filter by employee/sales person
+//     if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
+//       query.employeeId = new mongoose.Types.ObjectId(employeeId);
+//     }
+
+//     // Filter by session status
+//     if (status && ["in_progress", "completed"].includes(status)) {
+//       query.status = status;
+//     }
+
+//     // Filter by sales status
+//     if (SalesStatus && ["open", "closed", "follow_up"].includes(SalesStatus)) {
+//       query.SalesStatus = SalesStatus;
+//     }
+
+//     // ================= DATE RANGE FILTERING (PROPER) =================
+//     if (startDate || endDate) {
+//       query.punchInTime = {};
+
+//       if (startDate) {
+//         const start = new Date(startDate);
+//         if (isNaN(start.getTime())) {
+//           return res.status(400).json({
+//             success: false,
+//             message: "Invalid startDate format. Use ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)"
+//           });
+//         }
+//         // Start of the day
+//         start.setHours(0, 0, 0, 0);
+//         query.punchInTime.$gte = start;
+//       }
+
+//       if (endDate) {
+//         const end = new Date(endDate);
+//         if (isNaN(end.getTime())) {
+//           return res.status(400).json({
+//             success: false,
+//             message: "Invalid endDate format. Use ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)"
+//           });
+//         }
+//         // End of the day
+//         end.setHours(23, 59, 59, 999);
+//         query.punchInTime.$lte = end;
+//       }
+//     }
+
+//     // ================= PAGINATION =================
+//     const pageNumber = Math.max(1, parseInt(page) || 1);
+//     const limitNumber = Math.max(1, Math.min(100, parseInt(limit) || 10));
+//     const skip = (pageNumber - 1) * limitNumber;
+
+//     // ================= SORTING =================
+//     const sortObj = {};
+//     const validSortFields = [
+//       "punchInTime",
+//       "createdAt",
+//       "updatedAt",
+//       "totalDistance",
+//       "status"
+//     ];
+//     const sortField = validSortFields.includes(sortBy) ? sortBy : "punchInTime";
+//     const order = sortOrder === "1" ? 1 : -1;
+//     sortObj[sortField] = order;
+
+//     // ================= BUILD MONGO QUERY =================
+//     let mongoQuery = SalesSession.find(query)
+//       .populate("employeeId", "name email phone")
+//       .populate("createdBy", "name email")
+//       .populate("companyId", "name")
+//       .populate("assignedTo", "name email")
+//       .sort(sortObj)
+//       .skip(skip)
+//       .limit(limitNumber)
+//       .lean();
+
+//     // ================= CONDITIONAL POPULATES FOR LOGS =================
+//     if (includeLogs === "true") {
+//       mongoQuery = mongoQuery
+//         .populate("visitLogs.userId", "name email")
+//         .populate("salesLogs.userId", "name email")
+//         .populate("meetingLogs.userId", "name email")
+//         .populate("visitNotes.userId", "name email");
+//     }
+
+//     // ================= EXECUTE QUERY =================
+//     const sessions = await mongoQuery.exec();
+//     const total = await SalesSession.countDocuments(query);
+
+//     // ================= HELPER: EXTRACT GEO COORDINATES =================
+//     const extractGeo = (geo) => {
+//       if (!geo || !geo.coordinates || geo.coordinates.length !== 2) {
+//         return null;
+//       }
+//       return {
+//         latitude: geo.coordinates[1],
+//         longitude: geo.coordinates[0],
+//         type: geo.type || "Point"
+//       };
+//     };
+
+//     // ================= HELPER: FORMAT DATE =================
+//     const formatDate = (date) => {
+//       if (!date) return null;
+//       return {
+//         iso: new Date(date).toISOString(),
+//         unix: new Date(date).getTime(),
+//         readable: new Date(date).toLocaleString("en-IN", {
+//           timeZone: "Asia/Kolkata",
+//           year: "numeric",
+//           month: "2-digit",
+//           day: "2-digit",
+//           hour: "2-digit",
+//           minute: "2-digit",
+//           second: "2-digit"
+//         })
+//       };
+//     };
+
+//     // ================= FORMAT RESPONSE =================
+//     const formatted = sessions.map((session) => {
+//       const formattedSession = {
+//         id: session.sessionId,
+
+//         // Status Fields
+//         status: session.status,
+//         SalesStatus: session.SalesStatus,
+//         formCompleted: session.formCompleted,
+
+//         // Customer Information
+//         customer: {
+//           companyName: session.customer?.companyName || "",
+//           contactName: session.customer?.contactName || "",
+//           phone: session.customer?.phoneNumber || "",
+//           address: session.customer?.address || "",
+//           landmark: session.customer?.landmark || "",
+//           location: extractGeo(session.customer?.location),
+//           shopPhoto: session.customer?.shopPhoto
+//             ? {
+//               url: session.customer.shopPhoto.url,
+//               fileName: session.customer.shopPhoto.fileName,
+//               uploadedAt: formatDate(session.customer.shopPhoto.uploadedAt)
+//             }
+//             : null
+//         },
+
+//         // User References
+//         employee: session.employeeId,
+//         createdBy: session.createdBy,
+//         assignedTo: session.assignedTo || [],
+//         company: session.companyId,
+
+//         // Punch Details
+//         punch: {
+//           inTime: formatDate(session.punchInTime),
+//           outTime: formatDate(session.punchOutTime),
+//           inLocation: extractGeo(session.punchInLocation),
+//           outLocation: extractGeo(session.punchOutLocation),
+//           outAddress: session.punchOutAddress || "",
+//           lastPunchAt: formatDate(session.lastPunchAt)
+//         },
+
+//         // Statistics
+//         stats: {
+//           totalDistance: session.totalDistance || 0,
+//           duration: session.duration || 0,
+//           visits: session.visitLogs?.length || 0,
+//           sales: session.salesLogs?.length || 0,
+//           meetings: session.meetingLogs?.length || 0,
+//           notes: session.visitNotes?.length || 0
+//         },
+
+//         // Next Meeting
+//         nextMeeting: session.nextMeeting
+//           ? {
+//             decided: session.nextMeeting.decided,
+//             date: formatDate(session.nextMeeting.date),
+//             time: session.nextMeeting.time,
+//             notes: session.nextMeeting.notes
+//           }
+//           : null,
+
+//         // Evidence
+//         evidence: {
+//           visitNotes: session.evidence?.visitNotes || "",
+//           visitPhoto: session.evidence?.visitPhoto
+//             ? {
+//               url: session.evidence.visitPhoto.url,
+//               fileName: session.evidence.visitPhoto.fileName,
+//               uploadedAt: formatDate(session.evidence.visitPhoto.uploadedAt)
+//             }
+//             : null
+//         },
+
+//         // Timestamps
+//         timestamps: {
+//           createdAt: formatDate(session.createdAt),
+//           updatedAt: formatDate(session.updatedAt)
+//         }
+//       };
+
+//       // ================= CONDITIONAL LOG INCLUSION =================
+//       if (includeLogs === "true") {
+//         formattedSession.visitLogs = (session.visitLogs || []).map((visit) => ({
+//           userId: visit.userId,
+//           punchInTime: formatDate(visit.punchInTime),
+//           punchOutTime: formatDate(visit.punchOutTime),
+//           punchInLocation: extractGeo(visit.punchInLocation),
+//           punchOutLocation: extractGeo(visit.punchOutLocation)
+//         }));
+
+//         formattedSession.salesLogs = (session.salesLogs || []).map((sale) => ({
+//           userId: sale.userId,
+//           dealStatus: sale.dealStatus,
+//           amount: sale.amount,
+//           paymentCollected: sale.paymentCollected,
+//           paymentMode: sale.paymentMode,
+//           note: sale.note,
+//           createdAt: formatDate(sale.createdAt)
+//         }));
+
+//         formattedSession.meetingLogs = (session.meetingLogs || []).map((meeting) => ({
+//           userId: meeting.userId,
+//           date: formatDate(meeting.date),
+//           time: meeting.time,
+//           notes: meeting.notes,
+//           createdAt: formatDate(meeting.createdAt)
+//         }));
+
+//         formattedSession.visitNotes = (session.visitNotes || []).map((note) => ({
+//           userId: note.userId,
+//           note: note.note,
+//           photo: note.photo
+//             ? {
+//               url: note.photo.url,
+//               fileName: note.photo.fileName,
+//               uploadedAt: formatDate(note.photo.uploadedAt)
+//             }
+//             : null,
+//           createdAt: formatDate(note.createdAt)
+//         }));
+//       }
+
+//       // ================= CONDITIONAL ROUTE INCLUSION =================
+//       if (includeRoute === "true") {
+//         formattedSession.routePath = (session.routePath || []).map((point) => ({
+//           userId: point.userId,
+//           location: extractGeo(point.location),
+//           timestamp: formatDate(point.timestamp),
+//           accuracy: point.accuracy,
+//           speed: point.speed,
+//           heading: point.heading
+//         }));
+//       }
+
+//       return formattedSession;
+//     });
+
+//     // ================= SUCCESS RESPONSE =================
+//     res.status(200).json({
+//       success: true,
+//       message: "Sessions retrieved successfully",
+//       count: formatted.length,
+//       data: formatted,
+//       pagination: {
+//         total,
+//         page: pageNumber,
+//         limit: limitNumber,
+//         pages: Math.ceil(total / limitNumber),
+//         hasNextPage: pageNumber < Math.ceil(total / limitNumber),
+//         hasPrevPage: pageNumber > 1
+//       },
+//       filters: {
+//         companyId: finalCompanyId.toString(),
+//         employeeId: employeeId || null,
+//         status: status || null,
+//         SalesStatus: SalesStatus || null,
+//         dateRange: {
+//           start: startDate || null,
+//           end: endDate || null
+//         }
+//       }
+//     });
+//   } catch (error) {
+//     console.error("GetSessions Error:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch sessions",
+//       error: error.message,
+//       stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+//     });
+//   }
+// };
+
+
 export const getSessions = async (req, res) => {
   try {
     // ================= EXTRACT QUERY PARAMETERS =================
@@ -1284,14 +1612,15 @@ export const getSessions = async (req, res) => {
       status,
       SalesStatus,
       startDate,
-      companyId,
       endDate,
+      companyId,
       page = 1,
       limit = 10,
       includeLogs = "true",
       includeRoute = "false",
       sortBy = "punchInTime", // Field to sort by
-      sortOrder = "-1" // -1 for descending, 1 for ascending
+      sortOrder = "-1", // -1 for descending, 1 for ascending
+      dateField = "punchInTime" // NEW: which date field to filter on (punchInTime, createdAt, updatedAt)
     } = req.query;
 
     // ================= COMPANY ISOLATION (MULTI-TENANCY) =================
@@ -1325,9 +1654,14 @@ export const getSessions = async (req, res) => {
       query.SalesStatus = SalesStatus;
     }
 
-    // ================= DATE RANGE FILTERING (PROPER) =================
+    // ================= DATE RANGE FILTERING (UPDATED - MULTI-FIELD SUPPORT) =================
+    // Validate dateField parameter
+    const validDateFields = ["punchInTime", "createdAt", "updatedAt"];
+    const selectedDateField = validDateFields.includes(dateField) ? dateField : "punchInTime";
+
+    // Create date filters for the selected field
     if (startDate || endDate) {
-      query.punchInTime = {};
+      query[selectedDateField] = {};
 
       if (startDate) {
         const start = new Date(startDate);
@@ -1339,7 +1673,7 @@ export const getSessions = async (req, res) => {
         }
         // Start of the day
         start.setHours(0, 0, 0, 0);
-        query.punchInTime.$gte = start;
+        query[selectedDateField].$gte = start;
       }
 
       if (endDate) {
@@ -1352,9 +1686,40 @@ export const getSessions = async (req, res) => {
         }
         // End of the day
         end.setHours(23, 59, 59, 999);
-        query.punchInTime.$lte = end;
+        query[selectedDateField].$lte = end;
       }
     }
+
+
+    if (startDate || endDate) {
+      const dateConditions = [];
+      
+      const createDateFilter = (field) => {
+        const filter = {};
+        if (startDate) {
+          const start = new Date(startDate);
+          start.setHours(0, 0, 0, 0);
+          filter.$gte = start;
+        }
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          filter.$lte = end;
+        }
+        return Object.keys(filter).length ? { [field]: filter } : null;
+      };
+      
+      const punchInFilter = createDateFilter("punchInTime");
+      const createdAtFilter = createDateFilter("createdAt");
+      const updatedAtFilter = createDateFilter("updatedAt");
+      
+      const filters = [punchInFilter, createdAtFilter, updatedAtFilter].filter(f => f !== null);
+      
+      if (filters.length > 0) {
+        query.$or = filters;
+      }
+    }
+    
 
     // ================= PAGINATION =================
     const pageNumber = Math.max(1, parseInt(page) || 1);
@@ -1587,6 +1952,7 @@ export const getSessions = async (req, res) => {
         status: status || null,
         SalesStatus: SalesStatus || null,
         dateRange: {
+          field: selectedDateField, // NEW: show which date field was filtered
           start: startDate || null,
           end: endDate || null
         }
@@ -1602,7 +1968,6 @@ export const getSessions = async (req, res) => {
     });
   }
 };
-
 // ========== GET COMPANY LEADS ==========
 export const getCompanyLeads = async (req, res) => {
   try {
