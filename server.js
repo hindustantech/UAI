@@ -64,7 +64,7 @@ app.use('/api/employee', employee);
 app.use('/api/categoryAdvertisment', categoryAdvertisment);
 app.use('/api/advertisements', advertisment);
 app.use('/api/ExportRoutes', ExportRoutes);
-app.use('/api/v1', SalesReoprts);
+app.use('/api/v1/sales/reports', SalesReoprts);
 // API routes
 app.use('/api/plan', planRoutes);
 app.use('/api/appsetting', appsettingroutes);
