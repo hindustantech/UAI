@@ -7,16 +7,8 @@ import Shift from "../../../models/Attandance/Shift.js";
 import Holiday from "../../../models/Attandance/Holiday.js";
 import Employee from "../../../models/Attandance/Employee.js";
 import { v4 as uuidv4 } from 'uuid';
+import { createCustomerWithUniqueId } from "../../../utils/nanoid.js";
 
-const generateCustomer = () => {
-  const alphaNumaric = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "";
-  const length = 8;
-  for (let i = 0; i < length; i++) {
-    result += alphaNumaric.charAt(Math.floor(Math.random() * alphaNumaric.length));
-  }
-  return result;
-};
 
 
 /**
@@ -631,6 +623,7 @@ export const completeSalesForm = async (req, res) => {
         employeeId: req.userId,
 
         customer: {
+          customerId: createCustomerWithUniqueId(),
           companyName: parsedCustomer?.companyName || "",
           contactName: parsedCustomer?.contactName || "",
           phoneNumber: parsedCustomer?.phoneNumber || "",
@@ -672,6 +665,7 @@ export const completeSalesForm = async (req, res) => {
     if (parsedCustomer) {
       session.customer = {
         ...session.customer,
+        customerId: session.customer.customerId || createCustomerWithUniqueId(),
         companyName: parsedCustomer.companyName || session.customer.companyName,
         contactName: parsedCustomer.contactName || session.customer.contactName,
         phoneNumber: parsedCustomer.phoneNumber || session.customer.phoneNumber,
@@ -1701,7 +1695,7 @@ export const getSessions = async (req, res) => {
 
     if (startDate || endDate) {
       const dateConditions = [];
-      
+
       const createDateFilter = (field) => {
         const filter = {};
         if (startDate) {
@@ -1716,18 +1710,18 @@ export const getSessions = async (req, res) => {
         }
         return Object.keys(filter).length ? { [field]: filter } : null;
       };
-      
+
       const punchInFilter = createDateFilter("punchInTime");
       const createdAtFilter = createDateFilter("createdAt");
       const updatedAtFilter = createDateFilter("updatedAt");
-      
+
       const filters = [punchInFilter, createdAtFilter, updatedAtFilter].filter(f => f !== null);
-      
+
       if (filters.length > 0) {
         query.$or = filters;
       }
     }
-    
+
 
     // ================= PAGINATION =================
     const pageNumber = Math.max(1, parseInt(page) || 1);
