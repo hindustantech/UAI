@@ -7,7 +7,7 @@ import Shift from "../../../models/Attandance/Shift.js";
 import Holiday from "../../../models/Attandance/Holiday.js";
 import Employee from "../../../models/Attandance/Employee.js";
 import { v4 as uuidv4 } from 'uuid';
-import { createCustomerWithUniqueId } from "../../../utils/nanoid.js";
+import { generateUniqueCustomerIdWithRetry } from "../../../utils/nanoid.js";
 
 
 
@@ -576,6 +576,182 @@ export const punchIn = async (req, res) => {
 
 
 // ========== COMPLETE SALES FORM ==========
+// export const completeSalesForm = async (req, res) => {
+//   try {
+//     const { sessionId } = req.params;
+
+//     const {
+//       customer,
+//       sales,
+//       nextMeeting,
+//       evidence,
+//       SalesStatus
+//     } = req.body;
+
+//     // ========= PARSE =========
+//     const parsedCustomer =
+//       typeof customer === "string" ? JSON.parse(customer) : customer;
+
+//     const parsedSales =
+//       typeof sales === "string" ? JSON.parse(sales) : sales;
+
+//     const parsedNextMeeting =
+//       typeof nextMeeting === "string" ? JSON.parse(nextMeeting) : nextMeeting;
+
+//     const parsedEvidence =
+//       typeof evidence === "string" ? JSON.parse(evidence) : evidence;
+
+//     // ========= FIND =========
+//     let session = await SalesSession.findOne({ sessionId });
+
+//     // ========= RULE: BLOCK IF COMPLETED =========
+//     if (session && session.SalesStatus === "closed") {
+//       return res.status(400).json({
+//         error: "Session already completed. You cannot modify it."
+//       });
+//     }
+
+//     // ========= CREATE =========
+//     if (!session) {
+//       const location = buildGeoPoint(parsedCustomer?.location);
+
+//       session = new SalesSession({
+//         sessionId: sessionId || `SS-${Date.now()}`,
+
+//         companyId: req.userId,
+//         createdBy: req.userId,
+//         employeeId: req.userId,
+
+//         customer: {
+//           customerId: createCustomerWithUniqueId(),
+//           companyName: parsedCustomer?.companyName || "",
+//           contactName: parsedCustomer?.contactName || "",
+//           phoneNumber: parsedCustomer?.phoneNumber || "",
+//           address: parsedCustomer?.address || "",
+//           landmark: parsedCustomer?.landmark || "",
+//           ...(location && { location })
+//         },
+
+//         punchInTime: new Date(),
+//         punchInLocation: location,
+
+//         visitLogs: location
+//           ? [
+//             {
+//               userId: req.userId,
+//               punchInLocation: location
+//             }
+//           ]
+//           : []
+//       });
+//     }
+
+//     // ========= FILES =========
+//     let shopPhoto = null;
+//     let visitPhoto = null;
+
+//     if (req.files?.shopPhoto) {
+//       shopPhoto = await uploadImage(req.files.shopPhoto[0], "sales/shop");
+//     }
+
+//     if (req.files?.visitPhoto) {
+//       visitPhoto = await uploadImage(req.files.visitPhoto[0], "sales/visit");
+//     }
+
+//     // ========= GEO =========
+//     const customerLocation = buildGeoPoint(parsedCustomer?.location);
+
+//     // ========= UPDATE CUSTOMER =========
+//     if (parsedCustomer) {
+//       session.customer = {
+//         ...session.customer,
+//         customerId: session.customer.customerId || createCustomerWithUniqueId(),
+//         companyName: parsedCustomer.companyName || session.customer.companyName,
+//         contactName: parsedCustomer.contactName || session.customer.contactName,
+//         phoneNumber: parsedCustomer.phoneNumber || session.customer.phoneNumber,
+//         address: parsedCustomer.address || session.customer.address,
+//         landmark: parsedCustomer.landmark || session.customer.landmark,
+//         ...(customerLocation && { location: customerLocation }),
+//         ...(shopPhoto && { shopPhoto })
+//       };
+//     }
+
+//     // ========= SALES LOG =========
+//     if (parsedSales) {
+//       session.salesLogs.push({
+//         userId: req.userId,
+//         dealStatus: parsedSales.dealStatus || "Negotiation",
+//         amount: Number(parsedSales.amount) || 0,
+//         paymentCollected: parsedSales.paymentCollected === true,
+//         paymentMode: parsedSales.paymentMode || null,
+//         note: parsedSales.note || ""
+//       });
+//     }
+
+//     // ========= MEETING =========
+//     if (parsedNextMeeting?.decided) {
+//       const meetingData = {
+//         userId: req.userId,
+//         date: parsedNextMeeting.date
+//           ? new Date(parsedNextMeeting.date)
+//           : undefined,
+//         time: parsedNextMeeting.time,
+//         notes: parsedNextMeeting.notes
+//       };
+
+//       session.nextMeeting = {
+//         decided: true,
+//         date: meetingData.date,
+//         time: meetingData.time,
+//         notes: meetingData.notes
+//       };
+
+//       session.meetingLogs.push(meetingData);
+//     }
+
+//     // ========= VISIT NOTES / EVIDENCE =========
+//     if (parsedEvidence?.visitNotes || visitPhoto) {
+//       session.visitNotes.push({
+//         userId: req.userId,
+//         note: parsedEvidence?.visitNotes || "",
+//         ...(visitPhoto && { photo: visitPhoto })
+//       });
+
+//       session.evidence = {
+//         visitNotes: parsedEvidence?.visitNotes || "",
+//         ...(visitPhoto && { visitPhoto })
+//       };
+//     }
+
+//     // ========= STATUS =========
+//     if (SalesStatus) {
+//       session.SalesStatus = SalesStatus;
+//     }
+
+//     session.formCompleted = true;
+
+//     // Auto-complete only when user submits data
+//     if (session.status === "completed") {
+//       session.status = "in_progress";
+//     }
+
+//     await session.save();
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Session processed successfully",
+//       data: session
+//     });
+
+//   } catch (err) {
+//     console.error("Upsert Session Error:", err);
+//     res.status(500).json({ error: err.message });
+//   }
+// };
+
+
+
+
 export const completeSalesForm = async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -596,7 +772,9 @@ export const completeSalesForm = async (req, res) => {
       typeof sales === "string" ? JSON.parse(sales) : sales;
 
     const parsedNextMeeting =
-      typeof nextMeeting === "string" ? JSON.parse(nextMeeting) : nextMeeting;
+      typeof nextMeeting === "string"
+        ? JSON.parse(nextMeeting)
+        : nextMeeting;
 
     const parsedEvidence =
       typeof evidence === "string" ? JSON.parse(evidence) : evidence;
@@ -604,7 +782,7 @@ export const completeSalesForm = async (req, res) => {
     // ========= FIND =========
     let session = await SalesSession.findOne({ sessionId });
 
-    // ========= RULE: BLOCK IF COMPLETED =========
+    // ========= BLOCK IF CLOSED =========
     if (session && session.SalesStatus === "closed") {
       return res.status(400).json({
         error: "Session already completed. You cannot modify it."
@@ -615,6 +793,8 @@ export const completeSalesForm = async (req, res) => {
     if (!session) {
       const location = buildGeoPoint(parsedCustomer?.location);
 
+      const customerId = await generateUniqueCustomerIdWithRetry(SalesSession);
+
       session = new SalesSession({
         sessionId: sessionId || `SS-${Date.now()}`,
 
@@ -623,7 +803,7 @@ export const completeSalesForm = async (req, res) => {
         employeeId: req.userId,
 
         customer: {
-          customerId: createCustomerWithUniqueId(),
+          customerId,
           companyName: parsedCustomer?.companyName || "",
           contactName: parsedCustomer?.contactName || "",
           phoneNumber: parsedCustomer?.phoneNumber || "",
@@ -663,12 +843,19 @@ export const completeSalesForm = async (req, res) => {
 
     // ========= UPDATE CUSTOMER =========
     if (parsedCustomer) {
+      if (!session.customer?.customerId) {
+        session.customer.customerId =
+          await generateUniqueCustomerIdWithRetry(SalesSession);
+      }
+
       session.customer = {
         ...session.customer,
-        customerId: session.customer.customerId || createCustomerWithUniqueId(),
-        companyName: parsedCustomer.companyName || session.customer.companyName,
-        contactName: parsedCustomer.contactName || session.customer.contactName,
-        phoneNumber: parsedCustomer.phoneNumber || session.customer.phoneNumber,
+        companyName:
+          parsedCustomer.companyName || session.customer.companyName,
+        contactName:
+          parsedCustomer.contactName || session.customer.contactName,
+        phoneNumber:
+          parsedCustomer.phoneNumber || session.customer.phoneNumber,
         address: parsedCustomer.address || session.customer.address,
         landmark: parsedCustomer.landmark || session.customer.landmark,
         ...(customerLocation && { location: customerLocation }),
@@ -676,7 +863,7 @@ export const completeSalesForm = async (req, res) => {
       };
     }
 
-    // ========= SALES LOG =========
+    // ========= SALES =========
     if (parsedSales) {
       session.salesLogs.push({
         userId: req.userId,
@@ -709,7 +896,7 @@ export const completeSalesForm = async (req, res) => {
       session.meetingLogs.push(meetingData);
     }
 
-    // ========= VISIT NOTES / EVIDENCE =========
+    // ========= EVIDENCE =========
     if (parsedEvidence?.visitNotes || visitPhoto) {
       session.visitNotes.push({
         userId: req.userId,
@@ -730,7 +917,6 @@ export const completeSalesForm = async (req, res) => {
 
     session.formCompleted = true;
 
-    // Auto-complete only when user submits data
     if (session.status === "completed") {
       session.status = "in_progress";
     }
@@ -742,13 +928,11 @@ export const completeSalesForm = async (req, res) => {
       message: "Session processed successfully",
       data: session
     });
-
   } catch (err) {
     console.error("Upsert Session Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
-
 // ================= GEO BUILDER =================
 const buildGeoPoint = (location) => {
   if (!location) return null;
