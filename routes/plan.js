@@ -19,5 +19,5 @@ router.put('/:id', updatePlan);                  // Update Plan
 router.delete('/:id', deletePlan);               // Delete Plan
 router.patch('/toggle/:id', togglePlanStatus);   // Toggle Active/Inactive
 // Toggle Active/Inactive
-router.patch('/auto-checkout/:id', toggleAutoCheckout); // Toggle Auto Check-Out
+router.patch('/auto-checkout/:planId', toggleAutoCheckout); // Toggle Auto Check-Out
 export default router;
