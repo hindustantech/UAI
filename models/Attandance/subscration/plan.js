@@ -5,7 +5,7 @@ const featureSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
-    value: {
+    value: {    
         type: mongoose.Schema.Types.Mixed,
         required: true,
     },

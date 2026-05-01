@@ -391,3 +391,43 @@ export const getAllPlans = async (req, res) => {
         });
     }
 };
+
+
+export const toggleAutoCheckout = async (req, res) => {
+    try {
+        const { planId } = req.params;
+
+        const plan = await Plan.findByIdAndUpdate(
+            planId,
+            [
+                {
+                    $set: {
+                        auto_check_out: { $not: "$auto_check_out" },
+                    },
+                },
+            ],
+            { new: true }
+        );
+
+        if (!plan) {
+            return res.status(404).json({
+                success: false,
+                message: "Plan not found",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Auto checkout ${plan.auto_check_out ? "enabled" : "disabled"
+                } successfully`,
+            data: plan,
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: error.message,
+        });
+    }
+};
