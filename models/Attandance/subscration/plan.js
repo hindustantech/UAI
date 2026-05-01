@@ -35,7 +35,7 @@ const planSchema = new mongoose.Schema({
     finalPrice: {
         type: Number,
     },
-    autocheckout: {
+    auto_check_out: {
         type: Boolean,
         default: false,
     },
