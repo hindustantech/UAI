@@ -3,7 +3,7 @@ import AppSettings from '../models/appsessting.js';
 // Create app settings
 export const createAppSettings = async (req, res) => {
   try {
-    const { color } = req.body;
+    const { color,link } = req.body;
 
     if (!color) {
       return res.status(400).json({
@@ -21,7 +21,7 @@ export const createAppSettings = async (req, res) => {
       });
     }
 
-    const newSettings = new AppSettings({ color });
+    const newSettings = new AppSettings({ color, link });
     await newSettings.save();
 
     res.status(201).json({
@@ -68,7 +68,7 @@ export const getAppSettings = async (req, res) => {
 // Update app settings
 export const updateAppSettings = async (req, res) => {
   try {
-    const { color } = req.body;
+    const { color, link } = req.body;
 
     if (!color) {
       return res.status(400).json({
@@ -79,7 +79,7 @@ export const updateAppSettings = async (req, res) => {
 
     const updatedSettings = await AppSettings.findOneAndUpdate(
       {},
-      { color },
+      { color, link },
       { new: true, upsert: true }
     );
 

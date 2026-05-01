@@ -6,13 +6,13 @@ const appSettingsSchema = new mongoose.Schema({
     required: true,
     default: "#000000" // Default to black if not specified
   },
- link: {
+  link: {
     type: String,
     required: false,
     default: "https://www.uaihr.com"
-   } 
-     // Default link if not specified
-}, {  
+  }
+  // Default link if not specified
+}, {
   timestamps: true
 });
 
