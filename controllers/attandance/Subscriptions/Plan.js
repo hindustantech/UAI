@@ -395,39 +395,45 @@ export const getAllPlans = async (req, res) => {
 
 export const toggleAutoCheckout = async (req, res) => {
     try {
-        const { planId } = req.params;
+        console.log("params:", req.params);
+        console.log("body:", req.body);
+        console.log("query:", req.query);
 
-        const plan = await Plan.findByIdAndUpdate(
-            planId,
-            [
-                {
-                    $set: {
-                        auto_check_out: { $not: "$auto_check_out" },
-                    },
-                },
-            ],
-            { new: true }
-        );
+        const planId = req.params.planId || req.body.planId || req.query.planId;
+
+        if (!planId) {
+            return res.status(400).json({
+                success: false,
+                message: "planId is missing",
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(planId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid planId format",
+            });
+        }
+
+        const plan = await Plan.findById(planId);
 
         if (!plan) {
             return res.status(404).json({
                 success: false,
-                message: "Plan not found",
+                message: "Plan not found in DB",
             });
         }
 
-        return res.status(200).json({
+        plan.auto_check_out = !plan.auto_check_out;
+        await plan.save();
+
+        res.json({
             success: true,
-            message: `Auto checkout ${plan.auto_check_out ? "enabled" : "disabled"
-                } successfully`,
             data: plan,
         });
 
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: "Server error",
-            error: error.message,
-        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: err.message });
     }
 };
