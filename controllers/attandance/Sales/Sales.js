@@ -575,181 +575,6 @@ export const punchIn = async (req, res) => {
 };
 
 
-// ========== COMPLETE SALES FORM ==========
-// export const completeSalesForm = async (req, res) => {
-//   try {
-//     const { sessionId } = req.params;
-
-//     const {
-//       customer,
-//       sales,
-//       nextMeeting,
-//       evidence,
-//       SalesStatus
-//     } = req.body;
-
-//     // ========= PARSE =========
-//     const parsedCustomer =
-//       typeof customer === "string" ? JSON.parse(customer) : customer;
-
-//     const parsedSales =
-//       typeof sales === "string" ? JSON.parse(sales) : sales;
-
-//     const parsedNextMeeting =
-//       typeof nextMeeting === "string" ? JSON.parse(nextMeeting) : nextMeeting;
-
-//     const parsedEvidence =
-//       typeof evidence === "string" ? JSON.parse(evidence) : evidence;
-
-//     // ========= FIND =========
-//     let session = await SalesSession.findOne({ sessionId });
-
-//     // ========= RULE: BLOCK IF COMPLETED =========
-//     if (session && session.SalesStatus === "closed") {
-//       return res.status(400).json({
-//         error: "Session already completed. You cannot modify it."
-//       });
-//     }
-
-//     // ========= CREATE =========
-//     if (!session) {
-//       const location = buildGeoPoint(parsedCustomer?.location);
-
-//       session = new SalesSession({
-//         sessionId: sessionId || `SS-${Date.now()}`,
-
-//         companyId: req.userId,
-//         createdBy: req.userId,
-//         employeeId: req.userId,
-
-//         customer: {
-//           customerId: createCustomerWithUniqueId(),
-//           companyName: parsedCustomer?.companyName || "",
-//           contactName: parsedCustomer?.contactName || "",
-//           phoneNumber: parsedCustomer?.phoneNumber || "",
-//           address: parsedCustomer?.address || "",
-//           landmark: parsedCustomer?.landmark || "",
-//           ...(location && { location })
-//         },
-
-//         punchInTime: new Date(),
-//         punchInLocation: location,
-
-//         visitLogs: location
-//           ? [
-//             {
-//               userId: req.userId,
-//               punchInLocation: location
-//             }
-//           ]
-//           : []
-//       });
-//     }
-
-//     // ========= FILES =========
-//     let shopPhoto = null;
-//     let visitPhoto = null;
-
-//     if (req.files?.shopPhoto) {
-//       shopPhoto = await uploadImage(req.files.shopPhoto[0], "sales/shop");
-//     }
-
-//     if (req.files?.visitPhoto) {
-//       visitPhoto = await uploadImage(req.files.visitPhoto[0], "sales/visit");
-//     }
-
-//     // ========= GEO =========
-//     const customerLocation = buildGeoPoint(parsedCustomer?.location);
-
-//     // ========= UPDATE CUSTOMER =========
-//     if (parsedCustomer) {
-//       session.customer = {
-//         ...session.customer,
-//         customerId: session.customer.customerId || createCustomerWithUniqueId(),
-//         companyName: parsedCustomer.companyName || session.customer.companyName,
-//         contactName: parsedCustomer.contactName || session.customer.contactName,
-//         phoneNumber: parsedCustomer.phoneNumber || session.customer.phoneNumber,
-//         address: parsedCustomer.address || session.customer.address,
-//         landmark: parsedCustomer.landmark || session.customer.landmark,
-//         ...(customerLocation && { location: customerLocation }),
-//         ...(shopPhoto && { shopPhoto })
-//       };
-//     }
-
-//     // ========= SALES LOG =========
-//     if (parsedSales) {
-//       session.salesLogs.push({
-//         userId: req.userId,
-//         dealStatus: parsedSales.dealStatus || "Negotiation",
-//         amount: Number(parsedSales.amount) || 0,
-//         paymentCollected: parsedSales.paymentCollected === true,
-//         paymentMode: parsedSales.paymentMode || null,
-//         note: parsedSales.note || ""
-//       });
-//     }
-
-//     // ========= MEETING =========
-//     if (parsedNextMeeting?.decided) {
-//       const meetingData = {
-//         userId: req.userId,
-//         date: parsedNextMeeting.date
-//           ? new Date(parsedNextMeeting.date)
-//           : undefined,
-//         time: parsedNextMeeting.time,
-//         notes: parsedNextMeeting.notes
-//       };
-
-//       session.nextMeeting = {
-//         decided: true,
-//         date: meetingData.date,
-//         time: meetingData.time,
-//         notes: meetingData.notes
-//       };
-
-//       session.meetingLogs.push(meetingData);
-//     }
-
-//     // ========= VISIT NOTES / EVIDENCE =========
-//     if (parsedEvidence?.visitNotes || visitPhoto) {
-//       session.visitNotes.push({
-//         userId: req.userId,
-//         note: parsedEvidence?.visitNotes || "",
-//         ...(visitPhoto && { photo: visitPhoto })
-//       });
-
-//       session.evidence = {
-//         visitNotes: parsedEvidence?.visitNotes || "",
-//         ...(visitPhoto && { visitPhoto })
-//       };
-//     }
-
-//     // ========= STATUS =========
-//     if (SalesStatus) {
-//       session.SalesStatus = SalesStatus;
-//     }
-
-//     session.formCompleted = true;
-
-//     // Auto-complete only when user submits data
-//     if (session.status === "completed") {
-//       session.status = "in_progress";
-//     }
-
-//     await session.save();
-
-//     res.status(200).json({
-//       success: true,
-//       message: "Session processed successfully",
-//       data: session
-//     });
-
-//   } catch (err) {
-//     console.error("Upsert Session Error:", err);
-//     res.status(500).json({ error: err.message });
-//   }
-// };
-
-
 
 
 export const completeSalesForm = async (req, res) => {
@@ -779,10 +604,84 @@ export const completeSalesForm = async (req, res) => {
     const parsedEvidence =
       typeof evidence === "string" ? JSON.parse(evidence) : evidence;
 
+    // ========= VALIDATION (NEW) =========
+
+    // 1. Customer Required
+    if (!parsedCustomer) {
+      return res.status(400).json({
+        error: "Customer details are required"
+      });
+    }
+
+    const {
+      companyName,
+      contactName,
+      phoneNumber,
+      address
+    } = parsedCustomer;
+
+    const errors = {};
+
+    if (!companyName || companyName.trim() === "") {
+      errors.companyName = "Company name is required";
+    }
+
+    if (!contactName || contactName.trim() === "") {
+      errors.contactName = "Contact name is required";
+    }
+
+    if (!phoneNumber || phoneNumber.trim() === "") {
+      errors.phoneNumber = "Phone number is required";
+    } else if (!/^[6-9]\d{9}$/.test(phoneNumber)) {
+      errors.phoneNumber = "Invalid phone number format";
+    }
+
+    if (!address || address.trim() === "") {
+      errors.address = "Address is required";
+    }
+
+    // Final check
+    if (Object.keys(errors).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors
+      });
+    }
+
+    // Basic phone validation (India)
+    if (!/^[6-9]\d{9}$/.test(phoneNumber)) {
+      return res.status(400).json({
+        error: "Invalid phone number format"
+      });
+    }
+
+    // 2. Image Validation (IMPORTANT)
+    const shopFiles = req.files?.shopPhoto || [];
+    const visitFiles = req.files?.visitPhoto || [];
+
+    if (shopFiles.length === 0) {
+      return res.status(400).json({
+        error: "At least 1 shop image is required"
+      });
+    }
+
+    if (visitFiles.length === 0) {
+      return res.status(400).json({
+        error: "At least 1 visit image is required"
+      });
+    }
+
+    // Max 4 safety (even though multer has it)
+    if (shopFiles.length > 4 || visitFiles.length > 4) {
+      return res.status(400).json({
+        error: "Maximum 4 images allowed per field"
+      });
+    }
+
     // ========= FIND =========
     let session = await SalesSession.findOne({ sessionId });
 
-    // ========= BLOCK IF CLOSED =========
     if (session && session.SalesStatus === "closed") {
       return res.status(400).json({
         error: "Session already completed. You cannot modify it."
@@ -793,75 +692,56 @@ export const completeSalesForm = async (req, res) => {
     if (!session) {
       const location = buildGeoPoint(parsedCustomer?.location);
 
-      const customerId = await generateUniqueCustomerIdWithRetry(SalesSession);
+      const customerId =
+        await generateUniqueCustomerIdWithRetry(SalesSession);
 
       session = new SalesSession({
         sessionId: sessionId || `SS-${Date.now()}`,
-
         companyId: req.userId,
         createdBy: req.userId,
         employeeId: req.userId,
 
         customer: {
           customerId,
-          companyName: parsedCustomer?.companyName || "",
-          contactName: parsedCustomer?.contactName || "",
-          phoneNumber: parsedCustomer?.phoneNumber || "",
-          address: parsedCustomer?.address || "",
+          companyName,
+          contactName,
+          phoneNumber,
+          address,
           landmark: parsedCustomer?.landmark || "",
           ...(location && { location })
         },
 
         punchInTime: new Date(),
-        punchInLocation: location,
-
-        visitLogs: location
-          ? [
-            {
-              userId: req.userId,
-              punchInLocation: location
-            }
-          ]
-          : []
+        punchInLocation: location
       });
     }
 
-    // ========= FILES =========
-    let shopPhoto = null;
-    let visitPhoto = null;
+    // ========= FILE UPLOAD =========
+    let shopPhotos = await Promise.all(
+      shopFiles.map(file =>
+        uploadImage(file, "sales/shop")
+      )
+    );
 
-    if (req.files?.shopPhoto) {
-      shopPhoto = await uploadImage(req.files.shopPhoto[0], "sales/shop");
-    }
-
-    if (req.files?.visitPhoto) {
-      visitPhoto = await uploadImage(req.files.visitPhoto[0], "sales/visit");
-    }
-
-    // ========= GEO =========
-    const customerLocation = buildGeoPoint(parsedCustomer?.location);
+    let visitPhotos = await Promise.all(
+      visitFiles.map(file =>
+        uploadImage(file, "sales/visit")
+      )
+    );
 
     // ========= UPDATE CUSTOMER =========
-    if (parsedCustomer) {
-      if (!session.customer?.customerId) {
-        session.customer.customerId =
-          await generateUniqueCustomerIdWithRetry(SalesSession);
-      }
+    const customerLocation = buildGeoPoint(parsedCustomer?.location);
 
-      session.customer = {
-        ...session.customer,
-        companyName:
-          parsedCustomer.companyName || session.customer.companyName,
-        contactName:
-          parsedCustomer.contactName || session.customer.contactName,
-        phoneNumber:
-          parsedCustomer.phoneNumber || session.customer.phoneNumber,
-        address: parsedCustomer.address || session.customer.address,
-        landmark: parsedCustomer.landmark || session.customer.landmark,
-        ...(customerLocation && { location: customerLocation }),
-        ...(shopPhoto && { shopPhoto })
-      };
-    }
+    session.customer = {
+      ...session.customer,
+      companyName,
+      contactName,
+      phoneNumber,
+      address,
+      landmark: parsedCustomer?.landmark || "",
+      ...(customerLocation && { location: customerLocation }),
+      shopPhoto: shopPhotos // ARRAY
+    };
 
     // ========= SALES =========
     if (parsedSales) {
@@ -897,18 +777,16 @@ export const completeSalesForm = async (req, res) => {
     }
 
     // ========= EVIDENCE =========
-    if (parsedEvidence?.visitNotes || visitPhoto) {
-      session.visitNotes.push({
-        userId: req.userId,
-        note: parsedEvidence?.visitNotes || "",
-        ...(visitPhoto && { photo: visitPhoto })
-      });
+    session.visitNotes.push({
+      userId: req.userId,
+      note: parsedEvidence?.visitNotes || "",
+      photo: visitPhotos // ARRAY
+    });
 
-      session.evidence = {
-        visitNotes: parsedEvidence?.visitNotes || "",
-        ...(visitPhoto && { visitPhoto })
-      };
-    }
+    session.evidence = {
+      visitNotes: parsedEvidence?.visitNotes || "",
+      visitPhoto: visitPhotos[0] // preview
+    };
 
     // ========= STATUS =========
     if (SalesStatus) {
@@ -917,10 +795,6 @@ export const completeSalesForm = async (req, res) => {
 
     session.formCompleted = true;
 
-    if (session.status === "completed") {
-      session.status = "in_progress";
-    }
-
     await session.save();
 
     res.status(200).json({
@@ -928,6 +802,7 @@ export const completeSalesForm = async (req, res) => {
       message: "Session processed successfully",
       data: session
     });
+
   } catch (err) {
     console.error("Upsert Session Error:", err);
     res.status(500).json({ error: err.message });

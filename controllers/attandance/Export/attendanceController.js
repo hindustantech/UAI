@@ -1132,7 +1132,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
 
         /* ── Send ── */
         res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        res.setHeader("Content-Disposition", `attachment; filename=attendance_summary_${startDate}_to_${endDate}.xlsx`);
+        res.setHeader("Content-Disposition", `attachment; filename=attendance_salary_${startDate}_to_${endDate}.xlsx`);
         await wb.xlsx.write(res);
         return res.end();
 
