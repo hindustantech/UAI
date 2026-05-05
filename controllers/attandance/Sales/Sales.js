@@ -2586,9 +2586,11 @@ export const getMyAssignedSessions = async (req, res) => {
 };
 
 // ========== GET TODAY'S SESSIONS ALL (COMPANY WIDE) ==========
+
+
 export const getTodaySessionsAll = async (req, res) => {
   try {
-    const {
+    let {
       companyId,
       salesPersonId,
       status,
@@ -2596,26 +2598,45 @@ export const getTodaySessionsAll = async (req, res) => {
       limit = 10
     } = req.query;
 
-    if (!companyId) {
+    // ================= VALIDATION =================
+    if (!companyId || !mongoose.Types.ObjectId.isValid(companyId)) {
       return res.status(400).json({
         success: false,
-        message: "companyId is required"
+        message: "Valid companyId is required"
       });
     }
 
+    if (salesPersonId && !mongoose.Types.ObjectId.isValid(salesPersonId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid salesPersonId"
+      });
+    }
+
+    page = Math.max(1, Number(page));
+    limit = Math.max(1, Number(limit));
+
     const parsedCompanyId = new mongoose.Types.ObjectId(companyId);
 
-    // ===== TODAY RANGE =====
-    const startOfDay = new Date();
+    // ================= IST DATE RANGE =================
+    const now = new Date();
+
+    const startOfDay = new Date(
+      now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+    );
     startOfDay.setHours(0, 0, 0, 0);
 
-    const endOfDay = new Date();
+    const endOfDay = new Date(startOfDay);
     endOfDay.setHours(23, 59, 59, 999);
 
-    // ===== QUERY =====
+    // ================= QUERY =================
     const query = {
       companyId: parsedCompanyId,
-      punchInTime: { $gte: startOfDay, $lte: endOfDay }
+      punchInTime: {
+        $ne: null,
+        $gte: startOfDay,
+        $lte: endOfDay
+      }
     };
 
     if (salesPersonId) {
@@ -2626,58 +2647,56 @@ export const getTodaySessionsAll = async (req, res) => {
       query.status = status;
     }
 
-    const skip = (Number(page) - 1) * Number(limit);
+    const skip = (page - 1) * limit;
 
-    // ===== PARALLEL EXECUTION =====
-    const [sessions, total] = await Promise.all([
+    // ================= DB CALL =================
+    const [sessions, total, statsRaw] = await Promise.all([
       SalesSession.find(query)
         .populate("employeeId", "name email")
         .populate("companyId", "name")
         .sort({ punchInTime: -1 })
         .skip(skip)
-        .limit(Number(limit))
+        .limit(limit)
         .lean(),
 
-      SalesSession.countDocuments(query)
+      SalesSession.countDocuments(query),
+
+      SalesSession.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 }
+          }
+        }
+      ])
     ]);
 
-    // ===== OPTIONAL STATS =====
-    const stats = await SalesSession.aggregate([
-      {
-        $match: {
-          companyId: parsedCompanyId,
-          punchInTime: { $gte: startOfDay, $lte: endOfDay }
-        }
-      },
-      {
-        $group: {
-          _id: "$status",
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-
-    const formattedStats = {
+    // ================= STATS FORMAT =================
+    const stats = {
       total: 0,
       inProgress: 0,
       completed: 0
     };
 
-    stats.forEach(s => {
-      formattedStats.total += s.count;
-      if (s._id === "in_progress") formattedStats.inProgress = s.count;
-      if (s._id === "completed") formattedStats.completed = s.count;
+    statsRaw.forEach(s => {
+      stats.total += s.count;
+      if (s._id === "in_progress") stats.inProgress = s.count;
+      if (s._id === "completed") stats.completed = s.count;
     });
 
-    // ===== RESPONSE =====
+    // ================= RESPONSE =================
     return res.status(200).json({
       success: true,
-      date: startOfDay,
-      stats: formattedStats,
+      dateRange: {
+        startOfDay,
+        endOfDay
+      },
+      stats,
       pagination: {
         total,
-        page: Number(page),
-        limit: Number(limit),
+        page,
+        limit,
         pages: Math.ceil(total / limit)
       },
       data: sessions
