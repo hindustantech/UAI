@@ -924,7 +924,7 @@ export const punchOut = async (req, res) => {
     if (!activeSession) {
       throw new Error("Session not found or already completed");
     }
-    if(!activeSession.formCompleted){
+    if (!activeSession.formCompleted) {
       throw new Error("Before punching out, please complete the sales form.");
     }
     if (!activeSession.punchInTime) {
@@ -1855,17 +1855,25 @@ export const getSessions = async (req, res) => {
     // ================= HELPER: FORMAT DATE =================
     const formatDate = (date) => {
       if (!date) return null;
+
+      const d = new Date(date);
+
       return {
-        iso: new Date(date).toISOString(),
-        unix: new Date(date).getTime(),
-        readable: new Date(date).toLocaleString("en-IN", {
+        iso: d.toLocaleString("sv-SE", {
+          timeZone: "Asia/Kolkata"
+        }).replace(" ", "T") + "+05:30", // IST ISO-like
+
+        unix: d.getTime(), // always UTC internally (correct)
+
+        readable: d.toLocaleString("en-IN", {
           timeZone: "Asia/Kolkata",
           year: "numeric",
           month: "2-digit",
           day: "2-digit",
           hour: "2-digit",
           minute: "2-digit",
-          second: "2-digit"
+          second: "2-digit",
+          hour12: true
         })
       };
     };
