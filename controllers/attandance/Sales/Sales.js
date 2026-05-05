@@ -1857,16 +1857,38 @@ export const getSessions = async (req, res) => {
       if (!date) return null;
 
       const d = new Date(date);
+      if (isNaN(d.getTime())) return null;
+
+      const timeZone = "Asia/Kolkata";
+
+      // Get IST date parts using Intl.DateTimeFormat
+      const getISTParts = () => {
+        const formatter = new Intl.DateTimeFormat("en-IN", {
+          timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+          fractionalSecondDigits: 3 // For milliseconds
+        });
+
+        return formatter.formatToParts(d);
+      };
+
+      const parts = getISTParts();
+      const getPart = (type) => parts.find(p => p.type === type)?.value || "00";
 
       return {
-        iso: d.toLocaleString("sv-SE", {
-          timeZone: "Asia/Kolkata"
-        }).replace(" ", "T") + "+05:30", // IST ISO-like
+        iso: `${getPart("year")}-${getPart("month")}-${getPart("day")}T` +
+          `${getPart("hour")}:${getPart("minute")}:${getPart("second")}.${getPart("fractionalSecond") || "000"}+05:30`,
 
-        unix: d.getTime(), // always UTC internally (correct)
+        unix: d.getTime(),
 
         readable: d.toLocaleString("en-IN", {
-          timeZone: "Asia/Kolkata",
+          timeZone,
           year: "numeric",
           month: "2-digit",
           day: "2-digit",
@@ -1877,6 +1899,7 @@ export const getSessions = async (req, res) => {
         })
       };
     };
+
 
     // ================= FORMAT RESPONSE =================
     const formatted = sessions.map((session) => {
