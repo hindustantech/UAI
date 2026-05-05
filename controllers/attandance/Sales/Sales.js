@@ -1853,22 +1853,53 @@ export const getSessions = async (req, res) => {
     };
 
     // ================= HELPER: FORMAT DATE =================
-   
     const formatDate = (date) => {
-      if (!date) return "-";
+      if (!date) return null;
 
-      try {
-        return new Date(date).toLocaleTimeString("en-IN", {
-          timeZone: "Asia/Kolkata",   // Force IST
+      const d = new Date(date);
+      if (isNaN(d.getTime())) return null;
+
+      const timeZone = "Asia/Kolkata";
+
+      // Get IST date parts using Intl.DateTimeFormat
+      const getISTParts = () => {
+        const formatter = new Intl.DateTimeFormat("en-IN", {
+          timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
           hour: "2-digit",
           minute: "2-digit",
-          hour12: true
+          second: "2-digit",
+          hour12: false,
+          fractionalSecondDigits: 3 // For milliseconds
         });
-      } catch (err) {
-        console.error("formatTime error:", err);
-        return "-";
-      }
+
+        return formatter.formatToParts(d);
+      };
+
+      const parts = getISTParts();
+      const getPart = (type) => parts.find(p => p.type === type)?.value || "00";
+
+      return {
+        iso: `${getPart("year")}-${getPart("month")}-${getPart("day")}T` +
+          `${getPart("hour")}:${getPart("minute")}:${getPart("second")}.${getPart("fractionalSecond") || "000"}+05:30`,
+
+        unix: d.getTime(),
+
+        readable: d.toLocaleString("en-IN", {
+          timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true
+        })
+      };
     };
+   
 
     // ================= FORMAT RESPONSE =================
     const formatted = sessions.map((session) => {
