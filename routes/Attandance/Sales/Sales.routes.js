@@ -121,7 +121,7 @@ router.get(
 );
 // 6. GET SESSION ROUTE - Get route path for a session
 router.get(
-  "/getSessionRoutes/:sessionId/route",
+  "/getSessionRoutes/route",
   authMiddleware,
   getSessionRoutes
 );
