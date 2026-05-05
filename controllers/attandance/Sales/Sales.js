@@ -1852,54 +1852,27 @@ export const getSessions = async (req, res) => {
       };
     };
 
+
     // ================= HELPER: FORMAT DATE =================
+
     const formatDate = (date) => {
-      if (!date) return null;
+      if (!date) return "-";
 
-      const d = new Date(date);
-      if (isNaN(d.getTime())) return null;
-
-      const timeZone = "Asia/Kolkata";
-
-      // Get IST date parts using Intl.DateTimeFormat
-      const getISTParts = () => {
-        const formatter = new Intl.DateTimeFormat("en-IN", {
-          timeZone,
-          year: "numeric",
-          month: "2-digit",
+      try {
+        return new Date(date).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
           day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
           hour: "2-digit",
           minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
-          fractionalSecondDigits: 3 // For milliseconds
-        });
-
-        return formatter.formatToParts(d);
-      };
-
-      const parts = getISTParts();
-      const getPart = (type) => parts.find(p => p.type === type)?.value || "00";
-
-      return {
-        iso: `${getPart("year")}-${getPart("month")}-${getPart("day")}T` +
-          `${getPart("hour")}:${getPart("minute")}:${getPart("second")}.${getPart("fractionalSecond") || "000"}+05:30`,
-
-        unix: d.getTime(),
-
-        readable: d.toLocaleString("en-IN", {
-          timeZone,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
           hour12: true
-        })
-      };
+        });
+      } catch (err) {
+        console.error("formatDateTime error:", err);
+        return "-";
+      }
     };
-   
 
     // ================= FORMAT RESPONSE =================
     const formatted = sessions.map((session) => {
