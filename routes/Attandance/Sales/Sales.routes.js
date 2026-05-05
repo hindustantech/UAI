@@ -91,8 +91,8 @@ router.put(
   "/complete-form/:sessionId",
   authMiddleware,
   upload.fields([
-    { name: 'shopPhoto', maxCount: 1 },     // Shop/business photo
-    { name: 'visitPhoto', maxCount: 1 }     // Visit evidence photo
+    { name: 'shopPhoto', maxCount: 4 },     // Shop/business photo
+    { name: 'visitPhoto', maxCount: 4 }     // Visit evidence photo
   ]),
   completeSalesForm
 );
