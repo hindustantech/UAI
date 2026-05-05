@@ -2268,6 +2268,119 @@ export const getSessionRoute = async (req, res) => {
   }
 };
 
+
+
+export const getSessionRoutes = async (req, res) => {
+  try {
+    const { employeeId, type, date } = req.query;
+
+    let filter = {};
+
+    // Sales person filter
+    if (employeeId) {
+      filter.employeeId = employeeId;
+    }
+
+    // Date helper
+    const getDateRange = (baseDate) => {
+      const start = new Date(baseDate);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(baseDate);
+      end.setHours(23, 59, 59, 999);
+
+      return { start, end };
+    };
+
+    // Apply date filter on punchInTime
+    if (type === "today") {
+      const { start, end } = getDateRange(new Date());
+      filter.punchInTime = { $gte: start, $lte: end };
+    }
+
+    if (type === "yesterday") {
+      const y = new Date();
+      y.setDate(y.getDate() - 1);
+      const { start, end } = getDateRange(y);
+      filter.punchInTime = { $gte: start, $lte: end };
+    }
+
+    if (date) {
+      const { start, end } = getDateRange(new Date(date));
+      filter.punchInTime = { $gte: start, $lte: end };
+    }
+
+    // Fetch with populate (sales person)
+    const sessions = await SalesSession.find(filter)
+      .populate("employeeId", "name email phoneNumber") // adjust fields as per User schema
+      .sort({ punchInTime: -1 })
+      .lean();
+
+    if (!sessions.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No routes found"
+      });
+    }
+
+    const routes = sessions.map((session) => ({
+      sessionId: session.sessionId,
+
+      // ================= SALES PERSON =================
+      salesPerson: {
+        id: session.employeeId?._id,
+        name: session.employeeId?.name,
+        email: session.employeeId?.email,
+        phone: session.employeeId?.phoneNumber
+      },
+
+      // ================= CUSTOMER =================
+      customer: {
+        customerId: session.customer?.customerId,
+        companyName: session.customer?.companyName,
+        contactName: session.customer?.contactName,
+        phoneNumber: session.customer?.phoneNumber,
+        address: session.customer?.address,
+        landmark: session.customer?.landmark,
+        location: session.customer?.location
+      },
+
+      // ================= SESSION =================
+      punchInTime: session.punchInTime,
+      punchOutTime: session.punchOutTime,
+      punchIn: session.punchInLocation,
+      punchOut: session.punchOutLocation,
+
+      // ================= ROUTE POINTS =================
+      routePoints: session.routePath?.map((point, index) => ({
+        pointNo: index + 1,
+        lat: point.location?.coordinates[1],
+        lng: point.location?.coordinates[0],
+        time: point.timestamp,
+        speed: point.speed,
+        accuracy: point.accuracy
+      })) || [],
+
+      // ================= STATS =================
+      stats: {
+        totalDistance: session.totalDistance,
+        duration: session.duration,
+        numberOfPoints: session.routePath?.length || 0
+      }
+    }));
+
+    res.status(200).json({
+      success: true,
+      count: routes.length,
+      routes
+    });
+
+  } catch (error) {
+    console.error("GetSessionRoute error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // ========== GET ACTIVE SESSION ==========
 
 

@@ -18,6 +18,7 @@ import {
   getNearbySalesByLocation,
   getNearbyOpenSalesAdminOptimized,
   getTodayMeetings,
+  getSessionRoutes,
   getTodayMeetingsAdmin
 } from "../../../controllers/attandance/Sales/Sales.js";
 import {
@@ -117,6 +118,12 @@ router.get(
   "/session/:sessionId/route",
   authMiddleware,
   getSessionRoute
+);
+// 6. GET SESSION ROUTE - Get route path for a session
+router.get(
+  "/getSessionRoutes/:sessionId/route",
+  authMiddleware,
+  getSessionRoutes
 );
 
 // 7. GET ALL SESSIONS - With filters and pagination
