@@ -99,7 +99,7 @@ export const activateEmployee = async (req, res) => {
 
 export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
     try {
-        let { page = 1, limit = 10 } = req.query;
+        let { page = 1, limit = 10, employeeType } = req.query;
 
         const companyId = req.user.id;
 
@@ -116,9 +116,13 @@ export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
 
         const filter = {
             companyId,
-            employeeType: "sales",
             employmentStatus: "active"
         };
+
+        // dynamic filter
+        if (employeeType && employeeType.trim() !== "") {
+            filter.employeeType = employeeType;
+        }
 
         const projection = {
             _id: 0,
@@ -150,7 +154,7 @@ export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("getSalesEmployees error:", error);
+        console.error("getEmployees error:", error);
 
         return res.status(500).json({
             success: false,
@@ -1011,7 +1015,7 @@ export const updateEmployee = async (req, res) => {
         }
 
         if (employeeType) {
-            if (!["non_sales", "sales",'pro_sales'].includes(employeeType)) {
+            if (!["non_sales", "sales", 'pro_sales'].includes(employeeType)) {
                 return res.status(400).json({
                     success: false,
                     message: "Invalid employeeType value",
