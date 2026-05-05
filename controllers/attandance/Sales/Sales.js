@@ -924,7 +924,9 @@ export const punchOut = async (req, res) => {
     if (!activeSession) {
       throw new Error("Session not found or already completed");
     }
-
+    if(!activeSession.formCompleted){
+      throw new Error("Before punching out, please complete the sales form.");
+    }
     if (!activeSession.punchInTime) {
       throw new Error("Punch-in missing");
     }
