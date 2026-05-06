@@ -1683,28 +1683,37 @@ export const getSessionDetails = async (req, res) => {
 
 export const getSessions = async (req, res) => {
   try {
-    // ================= EXTRACT QUERY PARAMETERS =================
+    // ================= QUERY PARAMS =================
     const {
       salesPersonId,
       status,
       SalesStatus,
       startDate,
       endDate,
+      singleDate,
       companyId,
+
+      // FILTERS
+      filterType, // today | yesterday | week | month
+
+      // PAGINATION
       page = 1,
       limit = 10,
+
+      // OPTIONS
       includeLogs = "true",
       includeRoute = "false",
+
+      // SORTING
       sortBy = "punchInTime",
       sortOrder = "-1",
 
-      // NEW FILTERS
-      filterType, // today | yesterday | week | month
+      // DATE FIELD
       dateField = "punchInTime"
     } = req.query;
 
     // ================= COMPANY VALIDATION =================
-    let finalCompanyId = companyId || req.user?.companyId;
+    const finalCompanyId = companyId || req.user?.companyId;
 
     if (!req.user || !finalCompanyId) {
       return res.status(401).json({
@@ -1713,25 +1722,34 @@ export const getSessions = async (req, res) => {
       });
     }
 
-    const employeeId = salesPersonId;
-
-    // ================= BUILD QUERY =================
+    // ================= QUERY OBJECT =================
     const query = {
       companyId: finalCompanyId
     };
 
     // ================= EMPLOYEE FILTER =================
-    if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
-      query.employeeId = new mongoose.Types.ObjectId(employeeId);
+    if (
+      salesPersonId &&
+      mongoose.Types.ObjectId.isValid(salesPersonId)
+    ) {
+      query.employeeId = new mongoose.Types.ObjectId(
+        salesPersonId
+      );
     }
 
-    // ================= STATUS FILTER =================
-    if (status && ["in_progress", "completed"].includes(status)) {
+    // ================= SESSION STATUS FILTER =================
+    if (
+      status &&
+      ["in_progress", "completed"].includes(status)
+    ) {
       query.status = status;
     }
 
     // ================= SALES STATUS FILTER =================
-    if (SalesStatus && ["open", "closed", "follow_up"].includes(SalesStatus)) {
+    if (
+      SalesStatus &&
+      ["open", "closed", "follow_up"].includes(SalesStatus)
+    ) {
       query.SalesStatus = SalesStatus;
     }
 
@@ -1742,16 +1760,37 @@ export const getSessions = async (req, res) => {
       "updatedAt"
     ];
 
-    const selectedDateField = validDateFields.includes(dateField)
+    const selectedDateField = validDateFields.includes(
+      dateField
+    )
       ? dateField
       : "punchInTime";
 
-    // ================= DATE FILTER =================
-    let start;
-    let end;
+    // ================= DATE FILTER LOGIC =================
+    let start = null;
+    let end = null;
 
-    // -------- TODAY FILTER --------
-    if (filterType === "today") {
+    // -------- SINGLE DATE --------
+    if (singleDate) {
+      const selectedDate = new Date(singleDate);
+
+      if (isNaN(selectedDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid singleDate format. Use YYYY-MM-DD"
+        });
+      }
+
+      start = new Date(selectedDate);
+      start.setHours(0, 0, 0, 0);
+
+      end = new Date(selectedDate);
+      end.setHours(23, 59, 59, 999);
+    }
+
+    // -------- TODAY --------
+    else if (filterType === "today") {
       start = new Date();
       start.setHours(0, 0, 0, 0);
 
@@ -1759,7 +1798,7 @@ export const getSessions = async (req, res) => {
       end.setHours(23, 59, 59, 999);
     }
 
-    // -------- YESTERDAY FILTER --------
+    // -------- YESTERDAY --------
     else if (filterType === "yesterday") {
       start = new Date();
       start.setDate(start.getDate() - 1);
@@ -1770,13 +1809,17 @@ export const getSessions = async (req, res) => {
       end.setHours(23, 59, 59, 999);
     }
 
-    // -------- THIS WEEK FILTER --------
+    // -------- THIS WEEK --------
     else if (filterType === "week") {
       start = new Date();
 
-      // Monday as first day
-      const day = start.getDay();
-      const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+      const currentDay = start.getDay();
+
+      // Monday start
+      const diff =
+        start.getDate() -
+        currentDay +
+        (currentDay === 0 ? -6 : 1);
 
       start.setDate(diff);
       start.setHours(0, 0, 0, 0);
@@ -1785,7 +1828,7 @@ export const getSessions = async (req, res) => {
       end.setHours(23, 59, 59, 999);
     }
 
-    // -------- THIS MONTH FILTER --------
+    // -------- THIS MONTH --------
     else if (filterType === "month") {
       start = new Date(
         new Date().getFullYear(),
@@ -1854,8 +1897,6 @@ export const getSessions = async (req, res) => {
     const skip = (pageNumber - 1) * limitNumber;
 
     // ================= SORTING =================
-    const sortObj = {};
-
     const validSortFields = [
       "punchInTime",
       "createdAt",
@@ -1864,13 +1905,15 @@ export const getSessions = async (req, res) => {
       "status"
     ];
 
-    const sortField = validSortFields.includes(sortBy)
+    const finalSortField = validSortFields.includes(sortBy)
       ? sortBy
       : "punchInTime";
 
-    const order = sortOrder === "1" ? 1 : -1;
+    const finalSortOrder = sortOrder === "1" ? 1 : -1;
 
-    sortObj[sortField] = order;
+    const sortObj = {
+      [finalSortField]: finalSortOrder
+    };
 
     // ================= BUILD QUERY =================
     let mongoQuery = SalesSession.find(query)
@@ -1897,7 +1940,7 @@ export const getSessions = async (req, res) => {
 
     const total = await SalesSession.countDocuments(query);
 
-    // ================= DATE FORMATTER =================
+    // ================= FORMAT DATE =================
     const formatDate = (date) => {
       if (!date) return "-";
 
@@ -1912,11 +1955,12 @@ export const getSessions = async (req, res) => {
           hour12: true
         });
       } catch (err) {
+        console.error("Date format error:", err);
         return "-";
       }
     };
 
-    // ================= GEO FORMATTER =================
+    // ================= EXTRACT GEO =================
     const extractGeo = (geo) => {
       if (
         !geo ||
@@ -1933,50 +1977,252 @@ export const getSessions = async (req, res) => {
       };
     };
 
-    // ================= RESPONSE FORMAT =================
-    const formatted = sessions.map((session) => ({
-      id: session.sessionId,
+    // ================= FORMAT RESPONSE =================
+    const formatted = sessions.map((session) => {
+      const formattedSession = {
+        id: session.sessionId,
 
-      status: session.status,
-      SalesStatus: session.SalesStatus,
+        // STATUS
+        status: session.status,
+        SalesStatus: session.SalesStatus,
+        formCompleted: session.formCompleted,
 
-      customer: {
-        companyName: session.customer?.companyName || "",
-        contactName: session.customer?.contactName || "",
-        phone: session.customer?.phoneNumber || "",
-        address: session.customer?.address || "",
-        landmark: session.customer?.landmark || "",
-        location: extractGeo(session.customer?.location)
-      },
+        // CUSTOMER
+        customer: {
+          companyName:
+            session.customer?.companyName || "",
 
-      employee: session.employeeId,
-      createdBy: session.createdBy,
-      assignedTo: session.assignedTo || [],
-      company: session.companyId,
+          contactName:
+            session.customer?.contactName || "",
 
-      punch: {
-        inTime: formatDate(session.punchInTime),
-        outTime: formatDate(session.punchOutTime),
-        inLocation: extractGeo(session.punchInLocation),
-        outLocation: extractGeo(session.punchOutLocation),
-        lastPunchAt: formatDate(session.lastPunchAt)
-      },
+          phone:
+            session.customer?.phoneNumber || "",
 
-      stats: {
-        totalDistance: session.totalDistance || 0,
-        visits: session.visitLogs?.length || 0,
-        sales: session.salesLogs?.length || 0,
-        meetings: session.meetingLogs?.length || 0
-      },
+          address:
+            session.customer?.address || "",
 
-      timestamps: {
-        createdAt: formatDate(session.createdAt),
-        updatedAt: formatDate(session.updatedAt)
+          landmark:
+            session.customer?.landmark || "",
+
+          location: extractGeo(
+            session.customer?.location
+          ),
+
+          shopPhoto: session.customer?.shopPhoto
+            ? {
+              url: session.customer.shopPhoto.url,
+              fileName:
+                session.customer.shopPhoto.fileName,
+              uploadedAt: formatDate(
+                session.customer.shopPhoto
+                  .uploadedAt
+              )
+            }
+            : null
+        },
+
+        // USERS
+        employee: session.employeeId,
+        createdBy: session.createdBy,
+        assignedTo: session.assignedTo || [],
+        company: session.companyId,
+
+        // PUNCH DETAILS
+        punch: {
+          inTime: formatDate(session.punchInTime),
+
+          outTime: formatDate(
+            session.punchOutTime
+          ),
+
+          inLocation: extractGeo(
+            session.punchInLocation
+          ),
+
+          outLocation: extractGeo(
+            session.punchOutLocation
+          ),
+
+          outAddress:
+            session.punchOutAddress || "",
+
+          lastPunchAt: formatDate(
+            session.lastPunchAt
+          )
+        },
+
+        // STATS
+        stats: {
+          totalDistance:
+            session.totalDistance || 0,
+
+          duration: session.duration || 0,
+
+          visits:
+            session.visitLogs?.length || 0,
+
+          sales:
+            session.salesLogs?.length || 0,
+
+          meetings:
+            session.meetingLogs?.length || 0,
+
+          notes:
+            session.visitNotes?.length || 0
+        },
+
+        // NEXT MEETING
+        nextMeeting: session.nextMeeting
+          ? {
+            decided:
+              session.nextMeeting.decided,
+
+            date: formatDate(
+              session.nextMeeting.date
+            ),
+
+            time:
+              session.nextMeeting.time,
+
+            notes:
+              session.nextMeeting.notes
+          }
+          : null,
+
+        // EVIDENCE
+        evidence: {
+          visitNotes:
+            session.evidence?.visitNotes || "",
+
+          visitPhoto: session.evidence
+            ?.visitPhoto
+            ? {
+              url:
+                session.evidence.visitPhoto.url,
+
+              fileName:
+                session.evidence.visitPhoto
+                  .fileName,
+
+              uploadedAt: formatDate(
+                session.evidence.visitPhoto
+                  .uploadedAt
+              )
+            }
+            : null
+        },
+
+        // TIMESTAMPS
+        timestamps: {
+          createdAt: formatDate(
+            session.createdAt
+          ),
+
+          updatedAt: formatDate(
+            session.updatedAt
+          )
+        }
+      };
+
+      // ================= VISIT LOGS =================
+      if (includeLogs === "true") {
+        formattedSession.visitLogs = (
+          session.visitLogs || []
+        ).map((visit) => ({
+          userId: visit.userId,
+
+          punchInTime: formatDate(
+            visit.punchInTime
+          ),
+
+          punchOutTime: formatDate(
+            visit.punchOutTime
+          ),
+
+          punchInLocation: extractGeo(
+            visit.punchInLocation
+          ),
+
+          punchOutLocation: extractGeo(
+            visit.punchOutLocation
+          )
+        }));
+
+        formattedSession.salesLogs = (
+          session.salesLogs || []
+        ).map((sale) => ({
+          userId: sale.userId,
+          dealStatus: sale.dealStatus,
+          amount: sale.amount,
+          paymentCollected:
+            sale.paymentCollected,
+          paymentMode: sale.paymentMode,
+          note: sale.note,
+          createdAt: formatDate(
+            sale.createdAt
+          )
+        }));
+
+        formattedSession.meetingLogs = (
+          session.meetingLogs || []
+        ).map((meeting) => ({
+          userId: meeting.userId,
+          date: formatDate(meeting.date),
+          time: meeting.time,
+          notes: meeting.notes,
+          createdAt: formatDate(
+            meeting.createdAt
+          )
+        }));
+
+        formattedSession.visitNotes = (
+          session.visitNotes || []
+        ).map((note) => ({
+          userId: note.userId,
+          note: note.note,
+
+          photo: note.photo
+            ? {
+              url: note.photo.url,
+              fileName: note.photo.fileName,
+              uploadedAt: formatDate(
+                note.photo.uploadedAt
+              )
+            }
+            : null,
+
+          createdAt: formatDate(
+            note.createdAt
+          )
+        }));
       }
-    }));
+
+      // ================= ROUTE =================
+      if (includeRoute === "true") {
+        formattedSession.routePath = (
+          session.routePath || []
+        ).map((point) => ({
+          userId: point.userId,
+
+          location: extractGeo(
+            point.location
+          ),
+
+          timestamp: formatDate(
+            point.timestamp
+          ),
+
+          accuracy: point.accuracy,
+          speed: point.speed,
+          heading: point.heading
+        }));
+      }
+
+      return formattedSession;
+    });
 
     // ================= SUCCESS RESPONSE =================
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Sessions retrieved successfully",
 
@@ -1989,15 +2235,18 @@ export const getSessions = async (req, res) => {
         page: pageNumber,
         limit: limitNumber,
         pages: Math.ceil(total / limitNumber),
+
         hasNextPage:
-          pageNumber < Math.ceil(total / limitNumber),
+          pageNumber <
+          Math.ceil(total / limitNumber),
+
         hasPrevPage: pageNumber > 1
       },
 
       filters: {
         companyId: finalCompanyId.toString(),
 
-        employeeId: employeeId || null,
+        employeeId: salesPersonId || null,
 
         status: status || null,
 
@@ -2005,9 +2254,13 @@ export const getSessions = async (req, res) => {
 
         filterType: filterType || null,
 
+        singleDate: singleDate || null,
+
         dateRange: {
           field: selectedDateField,
+
           start: start || null,
+
           end: end || null
         }
       }
@@ -2015,10 +2268,15 @@ export const getSessions = async (req, res) => {
   } catch (error) {
     console.error("GetSessions Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch sessions",
-      error: error.message
+      error: error.message,
+
+      stack:
+        process.env.NODE_ENV === "development"
+          ? error.stack
+          : undefined
     });
   }
 };
