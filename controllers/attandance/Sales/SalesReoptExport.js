@@ -4,7 +4,364 @@ import { Parser } from "json2csv";
 import fs from "fs";
 import path from "path";
 import mongoose from "mongoose";
+import csvWriter from "csv-writer";
 
+
+
+/* ============================================================
+HELPER : HAVERSINE DISTANCE
+============================================================ */
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371; // KM
+
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a =
+        Math.sin(dLat / 2) *
+        Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return Number((R * c).toFixed(2));
+};
+
+/* ============================================================
+EXPORT SALES REPORT
+============================================================ */
+export const exportSalesPersonReport = async (req, res) => {
+    try {
+
+        const {
+            companyId,
+            salesPersonId,
+            fromDate,
+            toDate
+        } = req.query;
+
+        /* ============================================================
+        VALIDATION
+        ============================================================ */
+
+        if (!companyId || !salesPersonId) {
+            return res.status(400).json({
+                success: false,
+                message: "companyId and salesPersonId are required"
+            });
+        }
+
+        /* ============================================================
+        DATE FILTER
+        ============================================================ */
+
+        let dateFilter = {};
+
+        if (fromDate || toDate) {
+
+            dateFilter.punchInTime = {};
+
+            if (fromDate) {
+                dateFilter.punchInTime.$gte = new Date(
+                    new Date(fromDate).setHours(0, 0, 0, 0)
+                );
+            }
+
+            if (toDate) {
+                dateFilter.punchInTime.$lte = new Date(
+                    new Date(toDate).setHours(23, 59, 59, 999)
+                );
+            }
+        }
+
+        /* ============================================================
+        GET EMPLOYEE
+        ============================================================ */
+
+        const employee = await Employee.findOne({
+            companyId,
+            userId: salesPersonId
+        }).populate("userId", "name");
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "Employee not found"
+            });
+        }
+
+        /* ============================================================
+        GET SESSIONS
+        ============================================================ */
+
+        const sessions = await SalesSession.find({
+
+            companyId,
+
+            $or: [
+                { employeeId: salesPersonId },
+                { assignedTo: salesPersonId },
+                { createdBy: salesPersonId }
+            ],
+
+            ...dateFilter
+
+        })
+            .sort({ punchInTime: 1 })
+            .lean();
+
+        if (!sessions.length) {
+            return res.status(404).json({
+                success: false,
+                message: "No sessions found"
+            });
+        }
+
+        /* ============================================================
+        BUILD EXPORT ROWS
+        ============================================================ */
+
+        let exportRows = [];
+
+        let previousLocation = null;
+
+        let srNo = 1;
+
+        for (const session of sessions) {
+
+            const customer = session.customer || {};
+
+            const visitLogs = session.visitLogs || [];
+
+            const salesLogs = session.salesLogs || [];
+
+            const meetingLogs = session.meetingLogs || [];
+
+            for (const log of visitLogs) {
+
+                /* ============================================================
+                ONLY THIS SALESPERSON VISITS
+                ============================================================ */
+
+                if (
+                    log.userId &&
+                    log.userId.toString() !== salesPersonId.toString()
+                ) {
+                    continue;
+                }
+
+                /* ============================================================
+                DISTANCE CALCULATION
+                ============================================================ */
+
+                const punchInCoords =
+                    log?.punchInLocation?.coordinates || [];
+
+                const punchOutCoords =
+                    log?.punchOutLocation?.coordinates || [];
+
+                let visitDistance = 0;
+
+                if (
+                    punchInCoords.length === 2 &&
+                    punchOutCoords.length === 2
+                ) {
+
+                    visitDistance = calculateDistance(
+                        punchInCoords[1],
+                        punchInCoords[0],
+                        punchOutCoords[1],
+                        punchOutCoords[0]
+                    );
+                }
+
+                let previousDistance = 0;
+
+                if (
+                    previousLocation &&
+                    punchInCoords.length === 2
+                ) {
+
+                    previousDistance = calculateDistance(
+                        previousLocation.lat,
+                        previousLocation.lng,
+                        punchInCoords[1],
+                        punchInCoords[0]
+                    );
+                }
+
+                /* ============================================================
+                SAVE CURRENT LOCATION
+                ============================================================ */
+
+                if (punchOutCoords.length === 2) {
+
+                    previousLocation = {
+                        lat: punchOutCoords[1],
+                        lng: punchOutCoords[0]
+                    };
+                }
+
+                /* ============================================================
+                SALES DATA
+                ============================================================ */
+
+                const firstSalesLog = salesLogs[0] || {};
+
+                const firstMeetingLog = meetingLogs[0] || {};
+
+                /* ============================================================
+                CALL GENERATION
+                ============================================================ */
+
+                const callGeneration =
+                    session?.assignedTo?.some(
+                        id => id.toString() === salesPersonId.toString()
+                    )
+                        ? "Transferred"
+                        : "Own";
+
+                /* ============================================================
+                PUSH ROW
+                ============================================================ */
+
+                exportRows.push({
+
+                    "S.N": srNo++,
+
+                    "Call Id":
+                        session.sessionId || "-",
+
+                    "Date":
+                        log?.punchInTime
+                            ? new Date(log.punchInTime)
+                                .toLocaleDateString()
+                            : "-",
+
+                    "Sales Person Name":
+                        employee?.userId?.name ||
+                        employee?.user_name ||
+                        "-",
+
+                    "Call Generation":
+                        callGeneration,
+
+                    "Check In":
+                        log?.punchInTime
+                            ? new Date(log.punchInTime)
+                                .toLocaleTimeString()
+                            : "-",
+
+                    "Check Out":
+                        log?.punchOutTime
+                            ? new Date(log.punchOutTime)
+                                .toLocaleTimeString()
+                            : "-",
+
+                    "Distance Between CheckIn & CheckOut (KM)":
+                        visitDistance,
+
+                    "Distance From Previous Call (KM)":
+                        previousDistance,
+
+                    "Company Name":
+                        customer.companyName || "-",
+
+                    "Contact Person":
+                        customer.contactName || "-",
+
+                    "Contact Number":
+                        customer.phoneNumber || "-",
+
+                    "Customer Address":
+                        customer.address || "-",
+
+                    "Sales Service Outcome":
+                        firstSalesLog?.dealStatus || "-",
+
+                    "Payment":
+                        firstSalesLog?.paymentCollected
+                            ? "Collected"
+                            : "Pending",
+
+                    "Amount":
+                        firstSalesLog?.amount || 0,
+
+                    "Payment Mode":
+                        firstSalesLog?.paymentMode || "-",
+
+                    "Sales Status":
+                        session?.SalesStatus || "-",
+
+                    "Next Meeting Date":
+                        session?.nextMeeting?.date
+                            ? new Date(session.nextMeeting.date)
+                                .toLocaleDateString()
+                            : "-",
+
+                    "Meeting Notes":
+                        firstMeetingLog?.notes || "-",
+
+                    "Session Status":
+                        session?.status || "-"
+                });
+            }
+        }
+
+        /* ============================================================
+        CSV PARSER
+        ============================================================ */
+
+        const fields = Object.keys(exportRows[0]);
+
+        const json2csvParser = new Parser({ fields });
+
+        const csv = json2csvParser.parse(exportRows);
+
+        /* ============================================================
+        EXPORT DIRECTORY
+        ============================================================ */
+
+        const exportDir = path.join(process.cwd(), "exports");
+
+        if (!fs.existsSync(exportDir)) {
+            fs.mkdirSync(exportDir);
+        }
+
+        /* ============================================================
+        FILE PATH
+        ============================================================ */
+
+        const fileName = `sales_report_${Date.now()}.csv`;
+
+        const filePath = path.join(exportDir, fileName);
+
+        /* ============================================================
+        WRITE FILE
+        ============================================================ */
+
+        fs.writeFileSync(filePath, csv);
+
+        /* ============================================================
+        DOWNLOAD FILE
+        ============================================================ */
+
+        return res.download(filePath, fileName);
+
+    } catch (error) {
+
+        console.error("EXPORT ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to export report",
+            error: error.message
+        });
+    }
+};
 /**
  * @desc    Export Sales Reports (Company-specific data only)
  * @route   GET /api/sales/reports/export
