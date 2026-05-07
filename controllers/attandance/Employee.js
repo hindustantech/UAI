@@ -112,6 +112,7 @@ export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
 
         page = Math.max(1, Number(page));
         limit = Math.min(50, Number(limit));
+
         const skip = (page - 1) * limit;
 
         const filter = {
@@ -119,10 +120,22 @@ export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
             employmentStatus: "active"
         };
 
-        // dynamic filter
+        // ================= EMPLOYEE TYPE FILTER =================
+
+        // Default -> sales + pro_sales
+        let employeeTypes = ["sales", "pro_sales"];
+
+        // If user passes query param
         if (employeeType && employeeType.trim() !== "") {
-            filter.employeeType = employeeType;
+            employeeTypes = employeeType
+                .split(",")
+                .map(type => type.trim())
+                .filter(Boolean);
         }
+
+        filter.employeeType = {
+            $in: employeeTypes
+        };
 
         const projection = {
             _id: 0,
@@ -130,6 +143,7 @@ export const getSalesEmployeesByCompanyPaginated = async (req, res) => {
             user_name: 1,
             empCode: 1,
             role: 1,
+            employeeType: 1,
             "jobInfo.designation": 1
         };
 
