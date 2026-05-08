@@ -115,8 +115,8 @@ export const exportSalesPersonReport = async (req, res) => {
         ============================================================ */
 
         const employee = await Employee.findOne({
-            companyId: mongoose.Types.ObjectId(companyIdStr),
-            userId: mongoose.Types.ObjectId(salesPersonIdStr)
+            companyId: new mongoose.Types.ObjectId(companyIdStr),
+            userId: new mongoose.Types.ObjectId(salesPersonIdStr)
         }).populate("userId", "name");
 
         if (!employee) {
@@ -131,11 +131,11 @@ export const exportSalesPersonReport = async (req, res) => {
         ============================================================ */
 
         const sessions = await SalesSession.find({
-            companyId: mongoose.Types.ObjectId(companyIdStr),
+            companyId: new mongoose.Types.ObjectId(companyIdStr),
             $or: [
-                { employeeId: mongoose.Types.ObjectId(salesPersonIdStr) },
-                { assignedTo: mongoose.Types.ObjectId(salesPersonIdStr) },
-                { createdBy: mongoose.Types.ObjectId(salesPersonIdStr) }
+                { employeeId: new mongoose.Types.ObjectId(salesPersonIdStr) },
+                { assignedTo: new mongoose.Types.ObjectId(salesPersonIdStr) },
+                { createdBy: new mongoose.Types.ObjectId(salesPersonIdStr) }
             ],
             ...dateFilter
         })
