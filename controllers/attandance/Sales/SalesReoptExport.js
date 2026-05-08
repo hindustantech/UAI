@@ -4,9 +4,10 @@ import { Parser } from "json2csv";
 import fs from "fs";
 import path from "path";
 import mongoose from "mongoose";
-import csvWriter from "csv-writer";
+import { fileURLToPath } from "url";
 
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /* ============================================================
 HELPER : HAVERSINE DISTANCE
@@ -34,14 +35,10 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 EXPORT SALES REPORT
 ============================================================ */
 export const exportSalesPersonReport = async (req, res) => {
-    try {
+    let filePath = null;
 
-        const {
-            companyId,
-            salesPersonId,
-            fromDate,
-            toDate
-        } = req.query;
+    try {
+        const { companyId, salesPersonId, fromDate, toDate } = req.query;
 
         /* ============================================================
         VALIDATION
@@ -61,7 +58,6 @@ export const exportSalesPersonReport = async (req, res) => {
         let dateFilter = {};
 
         if (fromDate || toDate) {
-
             dateFilter.punchInTime = {};
 
             if (fromDate) {
@@ -98,17 +94,13 @@ export const exportSalesPersonReport = async (req, res) => {
         ============================================================ */
 
         const sessions = await SalesSession.find({
-
             companyId,
-
             $or: [
                 { employeeId: salesPersonId },
                 { assignedTo: salesPersonId },
                 { createdBy: salesPersonId }
             ],
-
             ...dateFilter
-
         })
             .sort({ punchInTime: 1 })
             .lean();
@@ -125,23 +117,16 @@ export const exportSalesPersonReport = async (req, res) => {
         ============================================================ */
 
         let exportRows = [];
-
         let previousLocation = null;
-
         let srNo = 1;
 
         for (const session of sessions) {
-
             const customer = session.customer || {};
-
             const visitLogs = session.visitLogs || [];
-
             const salesLogs = session.salesLogs || [];
-
             const meetingLogs = session.meetingLogs || [];
 
             for (const log of visitLogs) {
-
                 /* ============================================================
                 ONLY THIS SALESPERSON VISITS
                 ============================================================ */
@@ -157,19 +142,12 @@ export const exportSalesPersonReport = async (req, res) => {
                 DISTANCE CALCULATION
                 ============================================================ */
 
-                const punchInCoords =
-                    log?.punchInLocation?.coordinates || [];
-
-                const punchOutCoords =
-                    log?.punchOutLocation?.coordinates || [];
+                const punchInCoords = log?.punchInLocation?.coordinates || [];
+                const punchOutCoords = log?.punchOutLocation?.coordinates || [];
 
                 let visitDistance = 0;
 
-                if (
-                    punchInCoords.length === 2 &&
-                    punchOutCoords.length === 2
-                ) {
-
+                if (punchInCoords.length === 2 && punchOutCoords.length === 2) {
                     visitDistance = calculateDistance(
                         punchInCoords[1],
                         punchInCoords[0],
@@ -180,11 +158,7 @@ export const exportSalesPersonReport = async (req, res) => {
 
                 let previousDistance = 0;
 
-                if (
-                    previousLocation &&
-                    punchInCoords.length === 2
-                ) {
-
+                if (previousLocation && punchInCoords.length === 2) {
                     previousDistance = calculateDistance(
                         previousLocation.lat,
                         previousLocation.lng,
@@ -198,7 +172,6 @@ export const exportSalesPersonReport = async (req, res) => {
                 ============================================================ */
 
                 if (punchOutCoords.length === 2) {
-
                     previousLocation = {
                         lat: punchOutCoords[1],
                         lng: punchOutCoords[0]
@@ -210,105 +183,70 @@ export const exportSalesPersonReport = async (req, res) => {
                 ============================================================ */
 
                 const firstSalesLog = salesLogs[0] || {};
-
                 const firstMeetingLog = meetingLogs[0] || {};
 
                 /* ============================================================
                 CALL GENERATION
                 ============================================================ */
 
-                const callGeneration =
-                    session?.assignedTo?.some(
-                        id => id.toString() === salesPersonId.toString()
-                    )
-                        ? "Transferred"
-                        : "Own";
+                const callGeneration = session?.assignedTo?.some(
+                    id => id.toString() === salesPersonId.toString()
+                )
+                    ? "Transferred"
+                    : "Own";
 
                 /* ============================================================
                 PUSH ROW
                 ============================================================ */
 
                 exportRows.push({
-
                     "S.N": srNo++,
-
-                    "Call Id":
-                        session.sessionId || "-",
-
-                    "Date":
-                        log?.punchInTime
-                            ? new Date(log.punchInTime)
-                                .toLocaleDateString()
-                            : "-",
-
+                    "Call Id": session.sessionId || "-",
+                    "Date": log?.punchInTime
+                        ? new Date(log.punchInTime).toLocaleDateString()
+                        : "-",
                     "Sales Person Name":
                         employee?.userId?.name ||
                         employee?.user_name ||
                         "-",
-
-                    "Call Generation":
-                        callGeneration,
-
-                    "Check In":
-                        log?.punchInTime
-                            ? new Date(log.punchInTime)
-                                .toLocaleTimeString()
-                            : "-",
-
-                    "Check Out":
-                        log?.punchOutTime
-                            ? new Date(log.punchOutTime)
-                                .toLocaleTimeString()
-                            : "-",
-
-                    "Distance Between CheckIn & CheckOut (KM)":
-                        visitDistance,
-
-                    "Distance From Previous Call (KM)":
-                        previousDistance,
-
-                    "Company Name":
-                        customer.companyName || "-",
-
-                    "Contact Person":
-                        customer.contactName || "-",
-
-                    "Contact Number":
-                        customer.phoneNumber || "-",
-
-                    "Customer Address":
-                        customer.address || "-",
-
-                    "Sales Service Outcome":
-                        firstSalesLog?.dealStatus || "-",
-
-                    "Payment":
-                        firstSalesLog?.paymentCollected
-                            ? "Collected"
-                            : "Pending",
-
-                    "Amount":
-                        firstSalesLog?.amount || 0,
-
-                    "Payment Mode":
-                        firstSalesLog?.paymentMode || "-",
-
-                    "Sales Status":
-                        session?.SalesStatus || "-",
-
-                    "Next Meeting Date":
-                        session?.nextMeeting?.date
-                            ? new Date(session.nextMeeting.date)
-                                .toLocaleDateString()
-                            : "-",
-
-                    "Meeting Notes":
-                        firstMeetingLog?.notes || "-",
-
-                    "Session Status":
-                        session?.status || "-"
+                    "Call Generation": callGeneration,
+                    "Check In": log?.punchInTime
+                        ? new Date(log.punchInTime).toLocaleTimeString()
+                        : "-",
+                    "Check Out": log?.punchOutTime
+                        ? new Date(log.punchOutTime).toLocaleTimeString()
+                        : "-",
+                    "Distance Between CheckIn & CheckOut (KM)": visitDistance,
+                    "Distance From Previous Call (KM)": previousDistance,
+                    "Company Name": customer.companyName || "-",
+                    "Contact Person": customer.contactName || "-",
+                    "Contact Number": customer.phoneNumber || "-",
+                    "Customer Address": customer.address || "-",
+                    "Sales Service Outcome": firstSalesLog?.dealStatus || "-",
+                    "Payment": firstSalesLog?.paymentCollected
+                        ? "Collected"
+                        : "Pending",
+                    "Amount": firstSalesLog?.amount || 0,
+                    "Payment Mode": firstSalesLog?.paymentMode || "-",
+                    "Sales Status": session?.SalesStatus || "-",
+                    "Next Meeting Date": session?.nextMeeting?.date
+                        ? new Date(session.nextMeeting.date).toLocaleDateString()
+                        : "-",
+                    "Meeting Notes": firstMeetingLog?.notes || "-",
+                    "Session Status": session?.status || "-"
                 });
             }
+        }
+
+        /* ============================================================
+        VALIDATION: CHECK IF ROWS EXIST
+        ============================================================ */
+
+        if (exportRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "No data available for export"
+            });
         }
 
         /* ============================================================
@@ -316,44 +254,97 @@ export const exportSalesPersonReport = async (req, res) => {
         ============================================================ */
 
         const fields = Object.keys(exportRows[0]);
-
         const json2csvParser = new Parser({ fields });
-
         const csv = json2csvParser.parse(exportRows);
 
         /* ============================================================
         EXPORT DIRECTORY
         ============================================================ */
 
+        // Use temp directory or create exports folder in project root
         const exportDir = path.join(process.cwd(), "exports");
 
+        // Create directory if it doesn't exist
         if (!fs.existsSync(exportDir)) {
-            fs.mkdirSync(exportDir);
+            fs.mkdirSync(exportDir, { recursive: true });
         }
 
         /* ============================================================
-        FILE PATH
+        FILE PATH & NAME
         ============================================================ */
 
-        const fileName = `sales_report_${Date.now()}.csv`;
-
-        const filePath = path.join(exportDir, fileName);
+        const timestamp = Date.now();
+        const fileName = `sales_report_${salesPersonId}_${timestamp}.csv`;
+        filePath = path.join(exportDir, fileName);
 
         /* ============================================================
         WRITE FILE
         ============================================================ */
 
-        fs.writeFileSync(filePath, csv);
+        fs.writeFileSync(filePath, csv, { encoding: "utf-8" });
+
+        // Verify file was created
+        if (!fs.existsSync(filePath)) {
+            return res.status(500).json({
+                success: false,
+                message: "Failed to create export file"
+            });
+        }
 
         /* ============================================================
-        DOWNLOAD FILE
+        SET RESPONSE HEADERS
         ============================================================ */
 
-        return res.download(filePath, fileName);
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="${fileName}"`
+        );
+        res.setHeader("Content-Length", Buffer.byteLength(csv, "utf-8"));
+
+        /* ============================================================
+        SEND FILE
+        ============================================================ */
+
+        const fileStream = fs.createReadStream(filePath, { encoding: "utf-8" });
+
+        fileStream.on("error", (err) => {
+            console.error("STREAM ERROR:", err);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    message: "Error reading file"
+                });
+            }
+        });
+
+        fileStream.pipe(res);
+
+        /* ============================================================
+        CLEANUP: DELETE FILE AFTER SENDING
+        ============================================================ */
+
+        res.on("finish", () => {
+            try {
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            } catch (err) {
+                console.error("CLEANUP ERROR:", err);
+            }
+        });
 
     } catch (error) {
-
         console.error("EXPORT ERROR:", error);
+
+        // Cleanup file if error occurs
+        try {
+            if (filePath && fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+        } catch (cleanupErr) {
+            console.error("CLEANUP ERROR:", cleanupErr);
+        }
 
         return res.status(500).json({
             success: false,
