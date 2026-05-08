@@ -38,27 +38,64 @@ const router = express.Router();
 const storage = multer.memoryStorage();
 
 // ✅ Improved file validation
-const fileFilter = (req, file, cb) => {
-  const allowedMimeTypes = [
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/jpg",
-    "application/octet-stream" // ✅ TEMP allow
-  ];
 
-  const allowedExtensions = [".jpg", ".jpeg", ".png", ".webp"];
 
-  const ext = file.originalname.toLowerCase().match(/\.[0-9a-z]+$/)?.[0];
+export const fileFilter = (req, file, cb) => {
+  try {
+    const allowedMimeTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/jpg",
+      "application/octet-stream"
+    ];
 
-  if (
-    allowedMimeTypes.includes(file.mimetype) &&
-    allowedExtensions.includes(ext)
-  ) {
-    return cb(null, true);
+    const allowedExtensions = [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp"
+    ];
+
+    // safer extension extraction
+    const ext = path
+      .extname(file.originalname || "")
+      .toLowerCase();
+
+    const mimeType = (file.mimetype || "").toLowerCase();
+
+    const isMimeValid =
+      allowedMimeTypes.includes(mimeType);
+
+    // if extension missing from mobile/whatsapp uploads
+    const isExtValid =
+      !ext || allowedExtensions.includes(ext);
+
+    if (isMimeValid && isExtValid) {
+      return cb(null, true);
+    }
+
+    return cb(
+      {
+        status: 400,
+        success: false,
+        message:
+          "Invalid file type. Only JPG, PNG, and WEBP images are allowed.",
+        error: `INVALID_FILE_TYPE: ${mimeType}`
+      },
+      false
+    );
+  } catch (error) {
+    return cb(
+      {
+        status: 500,
+        success: false,
+        message: "File validation failed",
+        error: error.message
+      },
+      false
+    );
   }
-
-  return cb(new Error(`INVALID_FILE_TYPE: ${file.mimetype}`), false);
 };
 
 // ✅ Limits
