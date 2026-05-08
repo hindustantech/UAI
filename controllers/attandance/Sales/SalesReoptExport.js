@@ -32,22 +32,27 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 /* ============================================================
-CONVERT MONGODB ID TO STRING
+SAFE STRING CONVERSION - FIX FOR TYPE ERRORS
 ============================================================ */
-const convertMongoIdToString = (obj) => {
-    if (typeof obj !== "object" || obj === null) {
-        return obj;
-    }
-
-    const converted = {};
-    for (const key in obj) {
-        if (obj[key] && typeof obj[key].toString === "function") {
-            converted[key] = obj[key].toString();
-        } else {
-            converted[key] = obj[key];
+const safeString = (value, defaultValue = "-") => {
+    if (value === null || value === undefined) return defaultValue;
+    if (typeof value === 'object') {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return defaultValue;
         }
     }
-    return converted;
+    return String(value);
+};
+
+/* ============================================================
+SAFE NUMBER CONVERSION
+============================================================ */
+const safeNumber = (value, defaultValue = 0) => {
+    if (value === null || value === undefined) return defaultValue;
+    const num = Number(value);
+    return isNaN(num) ? defaultValue : num;
 };
 
 /* ============================================================
@@ -70,9 +75,18 @@ export const exportSalesPersonReport = async (req, res) => {
             });
         }
 
-        // Convert IDs to strings
-        const companyIdStr = companyId.toString();
-        const salesPersonIdStr = salesPersonId.toString();
+        // Convert IDs to strings safely
+        const companyIdStr = safeString(companyId);
+        const salesPersonIdStr = safeString(salesPersonId);
+
+        // Validate MongoDB ObjectIds
+        if (!mongoose.Types.ObjectId.isValid(companyIdStr) ||
+            !mongoose.Types.ObjectId.isValid(salesPersonIdStr)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid companyId or salesPersonId format"
+            });
+        }
 
         /* ============================================================
         DATE FILTER
@@ -184,7 +198,7 @@ export const exportSalesPersonReport = async (req, res) => {
                         }
 
                         /* ============================================================
-                        DISTANCE CALCULATION
+                        DISTANCE CALCULATION - FIXED WITH SAFE NUMBER CONVERSION
                         ============================================================ */
 
                         const punchInCoords =
@@ -200,12 +214,18 @@ export const exportSalesPersonReport = async (req, res) => {
                             Array.isArray(punchOutCoords) &&
                             punchOutCoords.length === 2
                         ) {
-                            visitDistance = calculateDistance(
-                                parseFloat(punchInCoords[1]),
-                                parseFloat(punchInCoords[0]),
-                                parseFloat(punchOutCoords[1]),
-                                parseFloat(punchOutCoords[0])
-                            );
+                            // FIXED: Ensure coordinates are properly parsed as numbers
+                            const lat1 = parseFloat(punchInCoords[1]);
+                            const lon1 = parseFloat(punchInCoords[0]);
+                            const lat2 = parseFloat(punchOutCoords[1]);
+                            const lon2 = parseFloat(punchOutCoords[0]);
+
+                            if (!isNaN(lat1) && !isNaN(lon1) &&
+                                !isNaN(lat2) && !isNaN(lon2)) {
+                                visitDistance = calculateDistance(
+                                    lat1, lon1, lat2, lon2
+                                );
+                            }
                         }
 
                         let previousDistance = 0;
@@ -215,12 +235,17 @@ export const exportSalesPersonReport = async (req, res) => {
                             Array.isArray(punchInCoords) &&
                             punchInCoords.length === 2
                         ) {
-                            previousDistance = calculateDistance(
-                                previousLocation.lat,
-                                previousLocation.lng,
-                                parseFloat(punchInCoords[1]),
-                                parseFloat(punchInCoords[0])
-                            );
+                            const currentLat = parseFloat(punchInCoords[1]);
+                            const currentLon = parseFloat(punchInCoords[0]);
+
+                            if (!isNaN(currentLat) && !isNaN(currentLon)) {
+                                previousDistance = calculateDistance(
+                                    previousLocation.lat,
+                                    previousLocation.lng,
+                                    currentLat,
+                                    currentLon
+                                );
+                            }
                         }
 
                         /* ============================================================
@@ -231,10 +256,15 @@ export const exportSalesPersonReport = async (req, res) => {
                             Array.isArray(punchOutCoords) &&
                             punchOutCoords.length === 2
                         ) {
-                            previousLocation = {
-                                lat: parseFloat(punchOutCoords[1]),
-                                lng: parseFloat(punchOutCoords[0])
-                            };
+                            const outLat = parseFloat(punchOutCoords[1]);
+                            const outLon = parseFloat(punchOutCoords[0]);
+
+                            if (!isNaN(outLat) && !isNaN(outLon)) {
+                                previousLocation = {
+                                    lat: outLat,
+                                    lng: outLon
+                                };
+                            }
                         }
 
                         /* ============================================================
@@ -245,19 +275,23 @@ export const exportSalesPersonReport = async (req, res) => {
                         const firstMeetingLog = meetingLogs[0] || {};
 
                         /* ============================================================
-                        CALL GENERATION
+                        CALL GENERATION - FIXED LOGIC
                         ============================================================ */
 
-                        const callGeneration = Array.isArray(
-                            session?.assignedTo
-                        )
-                            ? session.assignedTo.some(
-                                id =>
-                                    id.toString() === salesPersonIdStr
-                            )
-                                ? "Transferred"
-                                : "Own"
-                            : "Own";
+                        let callGeneration = "Own"; // Default value
+
+                        if (Array.isArray(session?.assignedTo)) {
+                            const isAssigned = session.assignedTo.some(
+                                id => {
+                                    try {
+                                        return id && id.toString() === salesPersonIdStr;
+                                    } catch {
+                                        return false;
+                                    }
+                                }
+                            );
+                            callGeneration = isAssigned ? "Transferred" : "Own";
+                        }
 
                         /* ============================================================
                         FORMAT DATES & TIMES SAFELY
@@ -274,68 +308,58 @@ export const exportSalesPersonReport = async (req, res) => {
                                 ? new Date(session.nextMeeting.date)
                                 : null;
 
+                        // Validate dates
+                        const isValidDate = (date) => {
+                            return date instanceof Date && !isNaN(date.getTime());
+                        };
+
                         /* ============================================================
-                        PUSH ROW
+                        PUSH ROW - ALL VALUES AS STRINGS TO PREVENT TYPE ERRORS
                         ============================================================ */
 
                         exportRows.push({
                             "S.N": String(srNo++),
-                            "Call Id": String(session.sessionId || "-"),
-                            "Date": punchInTime
+                            "Call Id": safeString(session.sessionId, "-"),
+                            "Date": isValidDate(punchInTime)
                                 ? punchInTime.toLocaleDateString("en-IN")
                                 : "-",
-                            "Sales Person Name": String(
+                            "Sales Person Name": safeString(
                                 employee?.userId?.name ||
-                                employee?.user_name ||
-                                "-"
+                                employee?.user_name
                             ),
-                            "Call Generation": String(callGeneration),
-                            "Check In": punchInTime
+                            "Call Generation": safeString(callGeneration),
+                            "Check In": isValidDate(punchInTime)
                                 ? punchInTime.toLocaleTimeString("en-IN")
                                 : "-",
-                            "Check Out": punchOutTime
+                            "Check Out": isValidDate(punchOutTime)
                                 ? punchOutTime.toLocaleTimeString("en-IN")
                                 : "-",
-                            "Distance Between CheckIn & CheckOut (KM)": String(
-                                visitDistance
+                            "Distance Between CheckIn & CheckOut (KM)":
+                                String(safeNumber(visitDistance)),
+                            "Distance From Previous Call (KM)":
+                                String(safeNumber(previousDistance)),
+                            "Company Name": safeString(customer.companyName),
+                            "Contact Person": safeString(customer.contactName),
+                            "Contact Number": safeString(customer.phoneNumber),
+                            "Customer Address": safeString(customer.address),
+                            "Sales Service Outcome": safeString(
+                                firstSalesLog?.dealStatus
                             ),
-                            "Distance From Previous Call (KM)": String(
-                                previousDistance
+                            "Payment": firstSalesLog?.paymentCollected
+                                ? "Collected"
+                                : "Pending",
+                            "Amount": String(safeNumber(firstSalesLog?.amount)),
+                            "Payment Mode": safeString(
+                                firstSalesLog?.paymentMode
                             ),
-                            "Company Name": String(
-                                customer.companyName || "-"
-                            ),
-                            "Contact Person": String(
-                                customer.contactName || "-"
-                            ),
-                            "Contact Number": String(
-                                customer.phoneNumber || "-"
-                            ),
-                            "Customer Address": String(
-                                customer.address || "-"
-                            ),
-                            "Sales Service Outcome": String(
-                                firstSalesLog?.dealStatus || "-"
-                            ),
-                            "Payment": String(
-                                firstSalesLog?.paymentCollected
-                                    ? "Collected"
-                                    : "Pending"
-                            ),
-                            "Amount": String(firstSalesLog?.amount || "0"),
-                            "Payment Mode": String(
-                                firstSalesLog?.paymentMode || "-"
-                            ),
-                            "Sales Status": String(
-                                session?.SalesStatus || "-"
-                            ),
-                            "Next Meeting Date": nextMeetingDate
+                            "Sales Status": safeString(session?.SalesStatus),
+                            "Next Meeting Date": isValidDate(nextMeetingDate)
                                 ? nextMeetingDate.toLocaleDateString("en-IN")
                                 : "-",
-                            "Meeting Notes": String(
-                                firstMeetingLog?.notes || "-"
+                            "Meeting Notes": safeString(
+                                firstMeetingLog?.notes
                             ),
-                            "Session Status": String(session?.status || "-")
+                            "Session Status": safeString(session?.status)
                         });
                     } catch (logError) {
                         console.error("Error processing log:", logError);
@@ -360,7 +384,7 @@ export const exportSalesPersonReport = async (req, res) => {
         }
 
         /* ============================================================
-        CSV PARSER - FORCE CSV FORMAT
+        CSV PARSER - ENSURE ALL FIELDS ARE STRINGS
         ============================================================ */
 
         const fields = Object.keys(exportRows[0]);
@@ -369,12 +393,19 @@ export const exportSalesPersonReport = async (req, res) => {
             fields,
             header: true,
             delimiter: ",",
-            quote: '"'
+            quote: '"',
+            // Add escape character handling
+            escapedQuote: '""'
         });
 
         let csv = "";
         try {
             csv = json2csvParser.parse(exportRows);
+
+            // Add BOM for Excel compatibility
+            const BOM = '\uFEFF';
+            csv = BOM + csv;
+
         } catch (parseError) {
             console.error("CSV PARSE ERROR:", parseError);
             return res.status(500).json({
@@ -395,22 +426,23 @@ export const exportSalesPersonReport = async (req, res) => {
         }
 
         /* ============================================================
-        FILE PATH - FORCE .CSV EXTENSION
+        FILE PATH
         ============================================================ */
 
         const timestamp = Date.now();
-        const fileName = `sales_report_${salesPersonIdStr}_${timestamp}.csv`; // MUST end with .csv
+        const sanitizedFileName = `sales_report_${salesPersonIdStr}_${timestamp}.csv`
+            .replace(/[^a-zA-Z0-9_.-]/g, '_'); // Sanitize filename
 
-        filePath = path.join(exportDir, fileName);
+        filePath = path.join(exportDir, sanitizedFileName);
 
         /* ============================================================
-        WRITE FILE
+        WRITE FILE WITH PROPER ENCODING
         ============================================================ */
 
-        fs.writeFileSync(filePath, csv, { encoding: "utf-8" });
+        fs.writeFileSync(filePath, csv, { encoding: "utf8" });
 
-        // Verify file was created
-        if (!fs.existsSync(filePath)) {
+        // Verify file was created and has content
+        if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
             return res.status(500).json({
                 success: false,
                 message: "Failed to create export file"
@@ -418,26 +450,24 @@ export const exportSalesPersonReport = async (req, res) => {
         }
 
         /* ============================================================
-        SET RESPONSE HEADERS - CRITICAL FOR CSV
+        SET RESPONSE HEADERS
         ============================================================ */
 
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader(
             "Content-Disposition",
-            `attachment; filename="${fileName}"`
+            `attachment; filename="${sanitizedFileName}"`
         );
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT");
-        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-        res.setHeader("Pragma", "no-cache");
-        res.setHeader("Expires", "0");
+        res.setHeader("Content-Length", fs.statSync(filePath).size);
+        res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
 
         /* ============================================================
         SEND FILE
         ============================================================ */
 
         const fileStream = fs.createReadStream(filePath, {
-            encoding: "utf-8"
+            encoding: "utf-8",
+            highWaterMark: 64 * 1024 // 64KB chunks for better performance
         });
 
         fileStream.on("error", (err) => {
@@ -451,19 +481,20 @@ export const exportSalesPersonReport = async (req, res) => {
             }
         });
 
-        fileStream.pipe(res);
+        // Use pipeline for better error handling
+        const { pipeline } = await import('stream');
+        pipeline(fileStream, res, (err) => {
+            if (err) {
+                console.error("PIPELINE ERROR:", err);
+            }
 
-        /* ============================================================
-        CLEANUP: DELETE FILE AFTER SENDING
-        ============================================================ */
-
-        res.on("finish", () => {
+            // Cleanup after sending
             try {
                 if (fs.existsSync(filePath)) {
                     fs.unlinkSync(filePath);
                 }
-            } catch (err) {
-                console.error("CLEANUP ERROR:", err);
+            } catch (cleanupErr) {
+                console.error("CLEANUP ERROR:", cleanupErr);
             }
         });
 
