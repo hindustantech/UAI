@@ -32,6 +32,25 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 /* ============================================================
+CONVERT MONGODB ID TO STRING
+============================================================ */
+const convertMongoIdToString = (obj) => {
+    if (typeof obj !== "object" || obj === null) {
+        return obj;
+    }
+
+    const converted = {};
+    for (const key in obj) {
+        if (obj[key] && typeof obj[key].toString === "function") {
+            converted[key] = obj[key].toString();
+        } else {
+            converted[key] = obj[key];
+        }
+    }
+    return converted;
+};
+
+/* ============================================================
 EXPORT SALES REPORT
 ============================================================ */
 export const exportSalesPersonReport = async (req, res) => {
@@ -51,6 +70,10 @@ export const exportSalesPersonReport = async (req, res) => {
             });
         }
 
+        // Convert IDs to strings
+        const companyIdStr = companyId.toString();
+        const salesPersonIdStr = salesPersonId.toString();
+
         /* ============================================================
         DATE FILTER
         ============================================================ */
@@ -61,14 +84,28 @@ export const exportSalesPersonReport = async (req, res) => {
             dateFilter.punchInTime = {};
 
             if (fromDate) {
+                const fromDateObj = new Date(fromDate);
+                if (isNaN(fromDateObj.getTime())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Invalid fromDate format"
+                    });
+                }
                 dateFilter.punchInTime.$gte = new Date(
-                    new Date(fromDate).setHours(0, 0, 0, 0)
+                    fromDateObj.setHours(0, 0, 0, 0)
                 );
             }
 
             if (toDate) {
+                const toDateObj = new Date(toDate);
+                if (isNaN(toDateObj.getTime())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Invalid toDate format"
+                    });
+                }
                 dateFilter.punchInTime.$lte = new Date(
-                    new Date(toDate).setHours(23, 59, 59, 999)
+                    toDateObj.setHours(23, 59, 59, 999)
                 );
             }
         }
@@ -78,8 +115,8 @@ export const exportSalesPersonReport = async (req, res) => {
         ============================================================ */
 
         const employee = await Employee.findOne({
-            companyId,
-            userId: salesPersonId
+            companyId: mongoose.Types.ObjectId(companyIdStr),
+            userId: mongoose.Types.ObjectId(salesPersonIdStr)
         }).populate("userId", "name");
 
         if (!employee) {
@@ -94,18 +131,18 @@ export const exportSalesPersonReport = async (req, res) => {
         ============================================================ */
 
         const sessions = await SalesSession.find({
-            companyId,
+            companyId: mongoose.Types.ObjectId(companyIdStr),
             $or: [
-                { employeeId: salesPersonId },
-                { assignedTo: salesPersonId },
-                { createdBy: salesPersonId }
+                { employeeId: mongoose.Types.ObjectId(salesPersonIdStr) },
+                { assignedTo: mongoose.Types.ObjectId(salesPersonIdStr) },
+                { createdBy: mongoose.Types.ObjectId(salesPersonIdStr) }
             ],
             ...dateFilter
         })
             .sort({ punchInTime: 1 })
             .lean();
 
-        if (!sessions.length) {
+        if (!sessions || sessions.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: "No sessions found"
@@ -121,120 +158,193 @@ export const exportSalesPersonReport = async (req, res) => {
         let srNo = 1;
 
         for (const session of sessions) {
-            const customer = session.customer || {};
-            const visitLogs = session.visitLogs || [];
-            const salesLogs = session.salesLogs || [];
-            const meetingLogs = session.meetingLogs || [];
+            try {
+                const customer = session.customer || {};
+                const visitLogs = Array.isArray(session.visitLogs)
+                    ? session.visitLogs
+                    : [];
+                const salesLogs = Array.isArray(session.salesLogs)
+                    ? session.salesLogs
+                    : [];
+                const meetingLogs = Array.isArray(session.meetingLogs)
+                    ? session.meetingLogs
+                    : [];
 
-            for (const log of visitLogs) {
-                /* ============================================================
-                ONLY THIS SALESPERSON VISITS
-                ============================================================ */
+                for (const log of visitLogs) {
+                    try {
+                        /* ============================================================
+                        ONLY THIS SALESPERSON VISITS
+                        ============================================================ */
 
-                if (
-                    log.userId &&
-                    log.userId.toString() !== salesPersonId.toString()
-                ) {
-                    continue;
+                        if (
+                            log.userId &&
+                            log.userId.toString() !== salesPersonIdStr
+                        ) {
+                            continue;
+                        }
+
+                        /* ============================================================
+                        DISTANCE CALCULATION
+                        ============================================================ */
+
+                        const punchInCoords =
+                            log?.punchInLocation?.coordinates || [];
+                        const punchOutCoords =
+                            log?.punchOutLocation?.coordinates || [];
+
+                        let visitDistance = 0;
+
+                        if (
+                            Array.isArray(punchInCoords) &&
+                            punchInCoords.length === 2 &&
+                            Array.isArray(punchOutCoords) &&
+                            punchOutCoords.length === 2
+                        ) {
+                            visitDistance = calculateDistance(
+                                parseFloat(punchInCoords[1]),
+                                parseFloat(punchInCoords[0]),
+                                parseFloat(punchOutCoords[1]),
+                                parseFloat(punchOutCoords[0])
+                            );
+                        }
+
+                        let previousDistance = 0;
+
+                        if (
+                            previousLocation &&
+                            Array.isArray(punchInCoords) &&
+                            punchInCoords.length === 2
+                        ) {
+                            previousDistance = calculateDistance(
+                                previousLocation.lat,
+                                previousLocation.lng,
+                                parseFloat(punchInCoords[1]),
+                                parseFloat(punchInCoords[0])
+                            );
+                        }
+
+                        /* ============================================================
+                        SAVE CURRENT LOCATION
+                        ============================================================ */
+
+                        if (
+                            Array.isArray(punchOutCoords) &&
+                            punchOutCoords.length === 2
+                        ) {
+                            previousLocation = {
+                                lat: parseFloat(punchOutCoords[1]),
+                                lng: parseFloat(punchOutCoords[0])
+                            };
+                        }
+
+                        /* ============================================================
+                        SALES DATA
+                        ============================================================ */
+
+                        const firstSalesLog = salesLogs[0] || {};
+                        const firstMeetingLog = meetingLogs[0] || {};
+
+                        /* ============================================================
+                        CALL GENERATION
+                        ============================================================ */
+
+                        const callGeneration = Array.isArray(
+                            session?.assignedTo
+                        )
+                            ? session.assignedTo.some(
+                                id =>
+                                    id.toString() === salesPersonIdStr
+                            )
+                                ? "Transferred"
+                                : "Own"
+                            : "Own";
+
+                        /* ============================================================
+                        FORMAT DATES & TIMES SAFELY
+                        ============================================================ */
+
+                        const punchInTime = log?.punchInTime
+                            ? new Date(log.punchInTime)
+                            : null;
+                        const punchOutTime = log?.punchOutTime
+                            ? new Date(log.punchOutTime)
+                            : null;
+                        const nextMeetingDate =
+                            session?.nextMeeting?.date
+                                ? new Date(session.nextMeeting.date)
+                                : null;
+
+                        /* ============================================================
+                        PUSH ROW
+                        ============================================================ */
+
+                        exportRows.push({
+                            "S.N": String(srNo++),
+                            "Call Id": String(session.sessionId || "-"),
+                            "Date": punchInTime
+                                ? punchInTime.toLocaleDateString("en-IN")
+                                : "-",
+                            "Sales Person Name": String(
+                                employee?.userId?.name ||
+                                employee?.user_name ||
+                                "-"
+                            ),
+                            "Call Generation": String(callGeneration),
+                            "Check In": punchInTime
+                                ? punchInTime.toLocaleTimeString("en-IN")
+                                : "-",
+                            "Check Out": punchOutTime
+                                ? punchOutTime.toLocaleTimeString("en-IN")
+                                : "-",
+                            "Distance Between CheckIn & CheckOut (KM)": String(
+                                visitDistance
+                            ),
+                            "Distance From Previous Call (KM)": String(
+                                previousDistance
+                            ),
+                            "Company Name": String(
+                                customer.companyName || "-"
+                            ),
+                            "Contact Person": String(
+                                customer.contactName || "-"
+                            ),
+                            "Contact Number": String(
+                                customer.phoneNumber || "-"
+                            ),
+                            "Customer Address": String(
+                                customer.address || "-"
+                            ),
+                            "Sales Service Outcome": String(
+                                firstSalesLog?.dealStatus || "-"
+                            ),
+                            "Payment": String(
+                                firstSalesLog?.paymentCollected
+                                    ? "Collected"
+                                    : "Pending"
+                            ),
+                            "Amount": String(firstSalesLog?.amount || "0"),
+                            "Payment Mode": String(
+                                firstSalesLog?.paymentMode || "-"
+                            ),
+                            "Sales Status": String(
+                                session?.SalesStatus || "-"
+                            ),
+                            "Next Meeting Date": nextMeetingDate
+                                ? nextMeetingDate.toLocaleDateString("en-IN")
+                                : "-",
+                            "Meeting Notes": String(
+                                firstMeetingLog?.notes || "-"
+                            ),
+                            "Session Status": String(session?.status || "-")
+                        });
+                    } catch (logError) {
+                        console.error("Error processing log:", logError);
+                        continue;
+                    }
                 }
-
-                /* ============================================================
-                DISTANCE CALCULATION
-                ============================================================ */
-
-                const punchInCoords = log?.punchInLocation?.coordinates || [];
-                const punchOutCoords = log?.punchOutLocation?.coordinates || [];
-
-                let visitDistance = 0;
-
-                if (punchInCoords.length === 2 && punchOutCoords.length === 2) {
-                    visitDistance = calculateDistance(
-                        punchInCoords[1],
-                        punchInCoords[0],
-                        punchOutCoords[1],
-                        punchOutCoords[0]
-                    );
-                }
-
-                let previousDistance = 0;
-
-                if (previousLocation && punchInCoords.length === 2) {
-                    previousDistance = calculateDistance(
-                        previousLocation.lat,
-                        previousLocation.lng,
-                        punchInCoords[1],
-                        punchInCoords[0]
-                    );
-                }
-
-                /* ============================================================
-                SAVE CURRENT LOCATION
-                ============================================================ */
-
-                if (punchOutCoords.length === 2) {
-                    previousLocation = {
-                        lat: punchOutCoords[1],
-                        lng: punchOutCoords[0]
-                    };
-                }
-
-                /* ============================================================
-                SALES DATA
-                ============================================================ */
-
-                const firstSalesLog = salesLogs[0] || {};
-                const firstMeetingLog = meetingLogs[0] || {};
-
-                /* ============================================================
-                CALL GENERATION
-                ============================================================ */
-
-                const callGeneration = session?.assignedTo?.some(
-                    id => id.toString() === salesPersonId.toString()
-                )
-                    ? "Transferred"
-                    : "Own";
-
-                /* ============================================================
-                PUSH ROW
-                ============================================================ */
-
-                exportRows.push({
-                    "S.N": srNo++,
-                    "Call Id": session.sessionId || "-",
-                    "Date": log?.punchInTime
-                        ? new Date(log.punchInTime).toLocaleDateString()
-                        : "-",
-                    "Sales Person Name":
-                        employee?.userId?.name ||
-                        employee?.user_name ||
-                        "-",
-                    "Call Generation": callGeneration,
-                    "Check In": log?.punchInTime
-                        ? new Date(log.punchInTime).toLocaleTimeString()
-                        : "-",
-                    "Check Out": log?.punchOutTime
-                        ? new Date(log.punchOutTime).toLocaleTimeString()
-                        : "-",
-                    "Distance Between CheckIn & CheckOut (KM)": visitDistance,
-                    "Distance From Previous Call (KM)": previousDistance,
-                    "Company Name": customer.companyName || "-",
-                    "Contact Person": customer.contactName || "-",
-                    "Contact Number": customer.phoneNumber || "-",
-                    "Customer Address": customer.address || "-",
-                    "Sales Service Outcome": firstSalesLog?.dealStatus || "-",
-                    "Payment": firstSalesLog?.paymentCollected
-                        ? "Collected"
-                        : "Pending",
-                    "Amount": firstSalesLog?.amount || 0,
-                    "Payment Mode": firstSalesLog?.paymentMode || "-",
-                    "Sales Status": session?.SalesStatus || "-",
-                    "Next Meeting Date": session?.nextMeeting?.date
-                        ? new Date(session.nextMeeting.date).toLocaleDateString()
-                        : "-",
-                    "Meeting Notes": firstMeetingLog?.notes || "-",
-                    "Session Status": session?.status || "-"
-                });
+            } catch (sessionError) {
+                console.error("Error processing session:", sessionError);
+                continue;
             }
         }
 
@@ -242,7 +352,7 @@ export const exportSalesPersonReport = async (req, res) => {
         VALIDATION: CHECK IF ROWS EXIST
         ============================================================ */
 
-        if (exportRows.length === 0) {
+        if (!exportRows || exportRows.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: "No data available for export"
@@ -250,31 +360,47 @@ export const exportSalesPersonReport = async (req, res) => {
         }
 
         /* ============================================================
-        CSV PARSER
+        CSV PARSER - FORCE CSV FORMAT
         ============================================================ */
 
         const fields = Object.keys(exportRows[0]);
-        const json2csvParser = new Parser({ fields });
-        const csv = json2csvParser.parse(exportRows);
+
+        const json2csvParser = new Parser({
+            fields,
+            header: true,
+            delimiter: ",",
+            quote: '"'
+        });
+
+        let csv = "";
+        try {
+            csv = json2csvParser.parse(exportRows);
+        } catch (parseError) {
+            console.error("CSV PARSE ERROR:", parseError);
+            return res.status(500).json({
+                success: false,
+                message: "Failed to parse CSV",
+                error: parseError.message
+            });
+        }
 
         /* ============================================================
         EXPORT DIRECTORY
         ============================================================ */
 
-        // Use temp directory or create exports folder in project root
         const exportDir = path.join(process.cwd(), "exports");
 
-        // Create directory if it doesn't exist
         if (!fs.existsSync(exportDir)) {
             fs.mkdirSync(exportDir, { recursive: true });
         }
 
         /* ============================================================
-        FILE PATH & NAME
+        FILE PATH - FORCE .CSV EXTENSION
         ============================================================ */
 
         const timestamp = Date.now();
-        const fileName = `sales_report_${salesPersonId}_${timestamp}.csv`;
+        const fileName = `sales_report_${salesPersonIdStr}_${timestamp}.csv`; // MUST end with .csv
+
         filePath = path.join(exportDir, fileName);
 
         /* ============================================================
@@ -292,7 +418,7 @@ export const exportSalesPersonReport = async (req, res) => {
         }
 
         /* ============================================================
-        SET RESPONSE HEADERS
+        SET RESPONSE HEADERS - CRITICAL FOR CSV
         ============================================================ */
 
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -300,20 +426,27 @@ export const exportSalesPersonReport = async (req, res) => {
             "Content-Disposition",
             `attachment; filename="${fileName}"`
         );
-        res.setHeader("Content-Length", Buffer.byteLength(csv, "utf-8"));
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT");
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
 
         /* ============================================================
         SEND FILE
         ============================================================ */
 
-        const fileStream = fs.createReadStream(filePath, { encoding: "utf-8" });
+        const fileStream = fs.createReadStream(filePath, {
+            encoding: "utf-8"
+        });
 
         fileStream.on("error", (err) => {
             console.error("STREAM ERROR:", err);
             if (!res.headersSent) {
                 res.status(500).json({
                     success: false,
-                    message: "Error reading file"
+                    message: "Error reading file",
+                    error: err.message
                 });
             }
         });
