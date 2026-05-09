@@ -8,7 +8,7 @@ import { SalesSession } from "../../../models/Attandance/Salses/Salses.js";
  * - Optimized with proper indexing and lean queries
  * - Returns paginated results for better performance
  */
-export const getOpenSessions = async (req, res) => {
+export const   getOpenSessions = async (req, res) => {
   try {
     const { salesPersonId, page = 1, limit = 20 } = req.query;
 

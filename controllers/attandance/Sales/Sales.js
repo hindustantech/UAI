@@ -2100,7 +2100,7 @@ export const getSessionRoutes = async (req, res) => {
     // Fetch with populate (sales person)
     const sessions = await SalesSession.find(filter)
       .populate("employeeId", "name email phoneNumber") // adjust fields as per User schema
-      .sort({ punchInTime: -1 })
+      .sort({ punchInTime: 1 })
       .lean();
 
     if (!sessions.length) {
