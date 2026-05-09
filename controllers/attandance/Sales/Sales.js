@@ -581,6 +581,22 @@ export const completeSalesForm = async (req, res) => {
   try {
     const { sessionId } = req.params;
 
+    // ========= VALIDATE REQUEST FIRST =========
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Session ID is required"
+      });
+    }
+
+    // Check if files exist
+    if (!req.files) {
+      return res.status(400).json({
+        success: false,
+        error: "No files uploaded"
+      });
+    }
+
     const {
       customer,
       sales,
@@ -589,26 +605,26 @@ export const completeSalesForm = async (req, res) => {
       SalesStatus
     } = req.body;
 
-    // ========= PARSE =========
-    const parsedCustomer =
-      typeof customer === "string" ? JSON.parse(customer) : customer;
+    // ========= SAFE PARSE =========
+    let parsedCustomer, parsedSales, parsedNextMeeting, parsedEvidence;
 
-    const parsedSales =
-      typeof sales === "string" ? JSON.parse(sales) : sales;
+    try {
+      parsedCustomer = typeof customer === "string" ? JSON.parse(customer) : customer;
+      parsedSales = typeof sales === "string" ? JSON.parse(sales) : sales;
+      parsedNextMeeting = typeof nextMeeting === "string" ? JSON.parse(nextMeeting) : nextMeeting;
+      parsedEvidence = typeof evidence === "string" ? JSON.parse(evidence) : evidence;
+    } catch (parseError) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid JSON format in request body",
+        details: parseError.message
+      });
+    }
 
-    const parsedNextMeeting =
-      typeof nextMeeting === "string"
-        ? JSON.parse(nextMeeting)
-        : nextMeeting;
-
-    const parsedEvidence =
-      typeof evidence === "string" ? JSON.parse(evidence) : evidence;
-
-    // ========= VALIDATION (NEW) =========
-
-    // 1. Customer Required
+    // ========= VALIDATION =========
     if (!parsedCustomer) {
       return res.status(400).json({
+        success: false,
         error: "Customer details are required"
       });
     }
@@ -622,25 +638,18 @@ export const completeSalesForm = async (req, res) => {
 
     const errors = {};
 
-    if (!companyName || companyName.trim() === "") {
-      errors.companyName = "Company name is required";
-    }
+    // Field validations
+    if (!companyName?.trim()) errors.companyName = "Company name is required";
+    if (!contactName?.trim()) errors.contactName = "Contact name is required";
+    if (!address?.trim()) errors.address = "Address is required";
 
-    if (!contactName || contactName.trim() === "") {
-      errors.contactName = "Contact name is required";
-    }
-
-    if (!phoneNumber || phoneNumber.trim() === "") {
+    // Phone validation
+    if (!phoneNumber?.trim()) {
       errors.phoneNumber = "Phone number is required";
-    } else if (!/^[6-9]\d{9}$/.test(phoneNumber)) {
+    } else if (typeof phoneNumber === 'string' && !/^[6-9]\d{9}$/.test(phoneNumber)) {
       errors.phoneNumber = "Invalid phone number format";
     }
 
-    if (!address || address.trim() === "") {
-      errors.address = "Address is required";
-    }
-
-    // Final check
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({
         success: false,
@@ -649,154 +658,190 @@ export const completeSalesForm = async (req, res) => {
       });
     }
 
-    // Basic phone validation (India)
-    if (!/^[6-9]\d{9}$/.test(phoneNumber)) {
-      return res.status(400).json({
-        error: "Invalid phone number format"
-      });
-    }
-
-    // 2. Image Validation (IMPORTANT)
+    // ========= IMAGE VALIDATION =========
     const shopFiles = req.files?.shopPhoto || [];
     const visitFiles = req.files?.visitPhoto || [];
 
-    if (shopFiles.length === 0) {
+    if (!shopFiles.length) {
       return res.status(400).json({
+        success: false,
         error: "At least 1 shop image is required"
       });
     }
 
-    if (visitFiles.length === 0) {
+    if (!visitFiles.length) {
       return res.status(400).json({
+        success: false,
         error: "At least 1 visit image is required"
       });
     }
 
-    // Max 4 safety (even though multer has it)
     if (shopFiles.length > 4 || visitFiles.length > 4) {
       return res.status(400).json({
+        success: false,
         error: "Maximum 4 images allowed per field"
       });
     }
 
-    // ========= FIND =========
-    let session = await SalesSession.findOne({ sessionId });
+    // ========= FIND OR CREATE SESSION =========
+    let session;
+
+    try {
+      session = await SalesSession.findOne({ sessionId });
+    } catch (dbError) {
+      console.error("Database query error:", dbError);
+      return res.status(500).json({
+        success: false,
+        error: "Database error while finding session"
+      });
+    }
 
     if (session && session.SalesStatus === "closed") {
       return res.status(400).json({
+        success: false,
         error: "Session already completed. You cannot modify it."
       });
     }
 
-    // ========= CREATE =========
+    // ========= CREATE NEW SESSION IF NEEDED =========
     if (!session) {
-      const location = buildGeoPoint(parsedCustomer?.location);
+      try {
+        const location = buildGeoPoint(parsedCustomer?.location);
+        const customerId = await generateUniqueCustomerIdWithRetry(SalesSession);
 
-      const customerId =
-        await generateUniqueCustomerIdWithRetry(SalesSession);
+        session = new SalesSession({
+          sessionId: sessionId || `SS-${Date.now()}`,
+          companyId: req.userId,
+          createdBy: req.userId,
+          employeeId: req.userId,
 
-      session = new SalesSession({
-        sessionId: sessionId || `SS-${Date.now()}`,
-        companyId: req.userId,
-        createdBy: req.userId,
-        employeeId: req.userId,
+          customer: {
+            customerId,
+            companyName,
+            contactName,
+            phoneNumber,
+            address,
+            landmark: parsedCustomer?.landmark || "",
+            ...(location && { location })
+          },
 
-        customer: {
-          customerId,
-          companyName,
-          contactName,
-          phoneNumber,
-          address,
-          landmark: parsedCustomer?.landmark || "",
-          ...(location && { location })
-        },
+          punchInTime: new Date(),
+          punchInLocation: location
+        });
+      } catch (createError) {
+        console.error("Session creation error:", createError);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to create session",
+          details: createError.message
+        });
+      }
+    }
 
-        punchInTime: new Date(),
-        punchInLocation: location
+    // ========= FILE UPLOAD WITH ERROR HANDLING =========
+    let shopPhotos = [];
+    let visitPhotos = [];
+
+    try {
+      shopPhotos = await Promise.all(
+        shopFiles.map(file => uploadImage(file, "sales/shop"))
+      );
+    } catch (uploadError) {
+      console.error("Shop photo upload error:", uploadError);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to upload shop photos"
       });
     }
 
-    // ========= FILE UPLOAD =========
-    let shopPhotos = await Promise.all(
-      shopFiles.map(file =>
-        uploadImage(file, "sales/shop")
-      )
-    );
-
-    let visitPhotos = await Promise.all(
-      visitFiles.map(file =>
-        uploadImage(file, "sales/visit")
-      )
-    );
-
-    // ========= UPDATE CUSTOMER =========
-    const customerLocation = buildGeoPoint(parsedCustomer?.location);
-
-    session.customer = {
-      ...session.customer,
-      companyName,
-      contactName,
-      phoneNumber,
-      address,
-      landmark: parsedCustomer?.landmark || "",
-      ...(customerLocation && { location: customerLocation }),
-      shopPhoto: shopPhotos // ARRAY
-    };
-
-    // ========= SALES =========
-    if (parsedSales) {
-      session.salesLogs.push({
-        userId: req.userId,
-        dealStatus: parsedSales.dealStatus || "Negotiation",
-        amount: Number(parsedSales.amount) || 0,
-        paymentCollected: parsedSales.paymentCollected === true,
-        paymentMode: parsedSales.paymentMode || null,
-        note: parsedSales.note || ""
+    try {
+      visitPhotos = await Promise.all(
+        visitFiles.map(file => uploadImage(file, "sales/visit"))
+      );
+    } catch (uploadError) {
+      console.error("Visit photo upload error:", uploadError);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to upload visit photos"
       });
     }
 
-    // ========= MEETING =========
-    if (parsedNextMeeting?.decided) {
-      const meetingData = {
+    // ========= UPDATE SESSION DATA =========
+    try {
+      const customerLocation = buildGeoPoint(parsedCustomer?.location);
+
+      session.customer = {
+        ...session.customer,
+        companyName,
+        contactName,
+        phoneNumber,
+        address,
+        landmark: parsedCustomer?.landmark || "",
+        ...(customerLocation && { location: customerLocation }),
+        shopPhoto: shopPhotos
+      };
+
+      // Sales logs
+      if (parsedSales) {
+        session.salesLogs.push({
+          userId: req.userId,
+          dealStatus: parsedSales.dealStatus || "Negotiation",
+          amount: Number(parsedSales.amount) || 0,
+          paymentCollected: parsedSales.paymentCollected === true,
+          paymentMode: parsedSales.paymentMode || null,
+          note: parsedSales.note || ""
+        });
+      }
+
+      // Next meeting
+      if (parsedNextMeeting?.decided) {
+        const meetingData = {
+          userId: req.userId,
+          date: parsedNextMeeting.date ? new Date(parsedNextMeeting.date) : undefined,
+          time: parsedNextMeeting.time,
+          notes: parsedNextMeeting.notes
+        };
+
+        session.nextMeeting = {
+          decided: true,
+          date: meetingData.date,
+          time: meetingData.time,
+          notes: meetingData.notes
+        };
+
+        session.meetingLogs.push(meetingData);
+      }
+
+      // Evidence
+      session.visitNotes.push({
         userId: req.userId,
-        date: parsedNextMeeting.date
-          ? new Date(parsedNextMeeting.date)
-          : undefined,
-        time: parsedNextMeeting.time,
-        notes: parsedNextMeeting.notes
+        note: parsedEvidence?.visitNotes || "",
+        photo: visitPhotos
+      });
+
+      session.evidence = {
+        visitNotes: parsedEvidence?.visitNotes || "",
+        visitPhoto: visitPhotos[0]
       };
 
-      session.nextMeeting = {
-        decided: true,
-        date: meetingData.date,
-        time: meetingData.time,
-        notes: meetingData.notes
-      };
+      // Status
+      if (SalesStatus) {
+        session.SalesStatus = SalesStatus;
+      }
 
-      session.meetingLogs.push(meetingData);
+      session.formCompleted = true;
+
+      await session.save();
+    } catch (updateError) {
+      console.error("Session update error:", updateError);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to update session",
+        details: updateError.message
+      });
     }
 
-    // ========= EVIDENCE =========
-    session.visitNotes.push({
-      userId: req.userId,
-      note: parsedEvidence?.visitNotes || "",
-      photo: visitPhotos // ARRAY
-    });
-
-    session.evidence = {
-      visitNotes: parsedEvidence?.visitNotes || "",
-      visitPhoto: visitPhotos[0] // preview
-    };
-
-    // ========= STATUS =========
-    if (SalesStatus) {
-      session.SalesStatus = SalesStatus;
-    }
-
-    session.formCompleted = true;
-
-    await session.save();
-
+    // ========= SUCCESS RESPONSE =========
     res.status(200).json({
       success: true,
       message: "Session processed successfully",
@@ -804,8 +849,18 @@ export const completeSalesForm = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Upsert Session Error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("Upsert Session Error:", {
+      message: err.message,
+      stack: err.stack,
+      body: req.body,
+      files: req.files ? Object.keys(req.files) : 'no files',
+      userId: req.userId
+    });
+
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
   }
 };
 // ================= GEO BUILDER =================
@@ -1352,334 +1407,6 @@ export const getSessionDetails = async (req, res) => {
 
 // ========== GET ALL SESSIONS ==========
 
-
-// export const getSessions = async (req, res) => {
-//   try {
-//     // ================= EXTRACT QUERY PARAMETERS =================
-//     const {
-//       salesPersonId,
-//       status,
-//       SalesStatus,
-//       startDate,
-//       companyId,
-//       endDate,
-//       page = 1,
-//       limit = 10,
-//       includeLogs = "true",
-//       includeRoute = "false",
-//       sortBy = "punchInTime", // Field to sort by
-//       sortOrder = "-1" // -1 for descending, 1 for ascending
-//     } = req.query;
-
-//     // ================= COMPANY ISOLATION (MULTI-TENANCY) =================
-//     // Get companyId: prioritize query param, fallback to middleware
-//     let finalCompanyId = companyId || req.user?.companyId;
-
-//     if (!req.user || !finalCompanyId) {
-//       return res.status(401).json({
-//         success: false,
-//         message: "Unauthorized: Company ID not found"
-//       });
-//     }
-
-//     const employeeId = salesPersonId;
-
-//     // ================= BUILD QUERY OBJECT =================
-//     const query = { companyId: finalCompanyId };
-
-//     // Filter by employee/sales person
-//     if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
-//       query.employeeId = new mongoose.Types.ObjectId(employeeId);
-//     }
-
-//     // Filter by session status
-//     if (status && ["in_progress", "completed"].includes(status)) {
-//       query.status = status;
-//     }
-
-//     // Filter by sales status
-//     if (SalesStatus && ["open", "closed", "follow_up"].includes(SalesStatus)) {
-//       query.SalesStatus = SalesStatus;
-//     }
-
-//     // ================= DATE RANGE FILTERING (PROPER) =================
-//     if (startDate || endDate) {
-//       query.punchInTime = {};
-
-//       if (startDate) {
-//         const start = new Date(startDate);
-//         if (isNaN(start.getTime())) {
-//           return res.status(400).json({
-//             success: false,
-//             message: "Invalid startDate format. Use ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)"
-//           });
-//         }
-//         // Start of the day
-//         start.setHours(0, 0, 0, 0);
-//         query.punchInTime.$gte = start;
-//       }
-
-//       if (endDate) {
-//         const end = new Date(endDate);
-//         if (isNaN(end.getTime())) {
-//           return res.status(400).json({
-//             success: false,
-//             message: "Invalid endDate format. Use ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)"
-//           });
-//         }
-//         // End of the day
-//         end.setHours(23, 59, 59, 999);
-//         query.punchInTime.$lte = end;
-//       }
-//     }
-
-//     // ================= PAGINATION =================
-//     const pageNumber = Math.max(1, parseInt(page) || 1);
-//     const limitNumber = Math.max(1, Math.min(100, parseInt(limit) || 10));
-//     const skip = (pageNumber - 1) * limitNumber;
-
-//     // ================= SORTING =================
-//     const sortObj = {};
-//     const validSortFields = [
-//       "punchInTime",
-//       "createdAt",
-//       "updatedAt",
-//       "totalDistance",
-//       "status"
-//     ];
-//     const sortField = validSortFields.includes(sortBy) ? sortBy : "punchInTime";
-//     const order = sortOrder === "1" ? 1 : -1;
-//     sortObj[sortField] = order;
-
-//     // ================= BUILD MONGO QUERY =================
-//     let mongoQuery = SalesSession.find(query)
-//       .populate("employeeId", "name email phone")
-//       .populate("createdBy", "name email")
-//       .populate("companyId", "name")
-//       .populate("assignedTo", "name email")
-//       .sort(sortObj)
-//       .skip(skip)
-//       .limit(limitNumber)
-//       .lean();
-
-//     // ================= CONDITIONAL POPULATES FOR LOGS =================
-//     if (includeLogs === "true") {
-//       mongoQuery = mongoQuery
-//         .populate("visitLogs.userId", "name email")
-//         .populate("salesLogs.userId", "name email")
-//         .populate("meetingLogs.userId", "name email")
-//         .populate("visitNotes.userId", "name email");
-//     }
-
-//     // ================= EXECUTE QUERY =================
-//     const sessions = await mongoQuery.exec();
-//     const total = await SalesSession.countDocuments(query);
-
-//     // ================= HELPER: EXTRACT GEO COORDINATES =================
-//     const extractGeo = (geo) => {
-//       if (!geo || !geo.coordinates || geo.coordinates.length !== 2) {
-//         return null;
-//       }
-//       return {
-//         latitude: geo.coordinates[1],
-//         longitude: geo.coordinates[0],
-//         type: geo.type || "Point"
-//       };
-//     };
-
-//     // ================= HELPER: FORMAT DATE =================
-//     const formatDate = (date) => {
-//       if (!date) return null;
-//       return {
-//         iso: new Date(date).toISOString(),
-//         unix: new Date(date).getTime(),
-//         readable: new Date(date).toLocaleString("en-IN", {
-//           timeZone: "Asia/Kolkata",
-//           year: "numeric",
-//           month: "2-digit",
-//           day: "2-digit",
-//           hour: "2-digit",
-//           minute: "2-digit",
-//           second: "2-digit"
-//         })
-//       };
-//     };
-
-//     // ================= FORMAT RESPONSE =================
-//     const formatted = sessions.map((session) => {
-//       const formattedSession = {
-//         id: session.sessionId,
-
-//         // Status Fields
-//         status: session.status,
-//         SalesStatus: session.SalesStatus,
-//         formCompleted: session.formCompleted,
-
-//         // Customer Information
-//         customer: {
-//           companyName: session.customer?.companyName || "",
-//           contactName: session.customer?.contactName || "",
-//           phone: session.customer?.phoneNumber || "",
-//           address: session.customer?.address || "",
-//           landmark: session.customer?.landmark || "",
-//           location: extractGeo(session.customer?.location),
-//           shopPhoto: session.customer?.shopPhoto
-//             ? {
-//               url: session.customer.shopPhoto.url,
-//               fileName: session.customer.shopPhoto.fileName,
-//               uploadedAt: formatDate(session.customer.shopPhoto.uploadedAt)
-//             }
-//             : null
-//         },
-
-//         // User References
-//         employee: session.employeeId,
-//         createdBy: session.createdBy,
-//         assignedTo: session.assignedTo || [],
-//         company: session.companyId,
-
-//         // Punch Details
-//         punch: {
-//           inTime: formatDate(session.punchInTime),
-//           outTime: formatDate(session.punchOutTime),
-//           inLocation: extractGeo(session.punchInLocation),
-//           outLocation: extractGeo(session.punchOutLocation),
-//           outAddress: session.punchOutAddress || "",
-//           lastPunchAt: formatDate(session.lastPunchAt)
-//         },
-
-//         // Statistics
-//         stats: {
-//           totalDistance: session.totalDistance || 0,
-//           duration: session.duration || 0,
-//           visits: session.visitLogs?.length || 0,
-//           sales: session.salesLogs?.length || 0,
-//           meetings: session.meetingLogs?.length || 0,
-//           notes: session.visitNotes?.length || 0
-//         },
-
-//         // Next Meeting
-//         nextMeeting: session.nextMeeting
-//           ? {
-//             decided: session.nextMeeting.decided,
-//             date: formatDate(session.nextMeeting.date),
-//             time: session.nextMeeting.time,
-//             notes: session.nextMeeting.notes
-//           }
-//           : null,
-
-//         // Evidence
-//         evidence: {
-//           visitNotes: session.evidence?.visitNotes || "",
-//           visitPhoto: session.evidence?.visitPhoto
-//             ? {
-//               url: session.evidence.visitPhoto.url,
-//               fileName: session.evidence.visitPhoto.fileName,
-//               uploadedAt: formatDate(session.evidence.visitPhoto.uploadedAt)
-//             }
-//             : null
-//         },
-
-//         // Timestamps
-//         timestamps: {
-//           createdAt: formatDate(session.createdAt),
-//           updatedAt: formatDate(session.updatedAt)
-//         }
-//       };
-
-//       // ================= CONDITIONAL LOG INCLUSION =================
-//       if (includeLogs === "true") {
-//         formattedSession.visitLogs = (session.visitLogs || []).map((visit) => ({
-//           userId: visit.userId,
-//           punchInTime: formatDate(visit.punchInTime),
-//           punchOutTime: formatDate(visit.punchOutTime),
-//           punchInLocation: extractGeo(visit.punchInLocation),
-//           punchOutLocation: extractGeo(visit.punchOutLocation)
-//         }));
-
-//         formattedSession.salesLogs = (session.salesLogs || []).map((sale) => ({
-//           userId: sale.userId,
-//           dealStatus: sale.dealStatus,
-//           amount: sale.amount,
-//           paymentCollected: sale.paymentCollected,
-//           paymentMode: sale.paymentMode,
-//           note: sale.note,
-//           createdAt: formatDate(sale.createdAt)
-//         }));
-
-//         formattedSession.meetingLogs = (session.meetingLogs || []).map((meeting) => ({
-//           userId: meeting.userId,
-//           date: formatDate(meeting.date),
-//           time: meeting.time,
-//           notes: meeting.notes,
-//           createdAt: formatDate(meeting.createdAt)
-//         }));
-
-//         formattedSession.visitNotes = (session.visitNotes || []).map((note) => ({
-//           userId: note.userId,
-//           note: note.note,
-//           photo: note.photo
-//             ? {
-//               url: note.photo.url,
-//               fileName: note.photo.fileName,
-//               uploadedAt: formatDate(note.photo.uploadedAt)
-//             }
-//             : null,
-//           createdAt: formatDate(note.createdAt)
-//         }));
-//       }
-
-//       // ================= CONDITIONAL ROUTE INCLUSION =================
-//       if (includeRoute === "true") {
-//         formattedSession.routePath = (session.routePath || []).map((point) => ({
-//           userId: point.userId,
-//           location: extractGeo(point.location),
-//           timestamp: formatDate(point.timestamp),
-//           accuracy: point.accuracy,
-//           speed: point.speed,
-//           heading: point.heading
-//         }));
-//       }
-
-//       return formattedSession;
-//     });
-
-//     // ================= SUCCESS RESPONSE =================
-//     res.status(200).json({
-//       success: true,
-//       message: "Sessions retrieved successfully",
-//       count: formatted.length,
-//       data: formatted,
-//       pagination: {
-//         total,
-//         page: pageNumber,
-//         limit: limitNumber,
-//         pages: Math.ceil(total / limitNumber),
-//         hasNextPage: pageNumber < Math.ceil(total / limitNumber),
-//         hasPrevPage: pageNumber > 1
-//       },
-//       filters: {
-//         companyId: finalCompanyId.toString(),
-//         employeeId: employeeId || null,
-//         status: status || null,
-//         SalesStatus: SalesStatus || null,
-//         dateRange: {
-//           start: startDate || null,
-//           end: endDate || null
-//         }
-//       }
-//     });
-//   } catch (error) {
-//     console.error("GetSessions Error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch sessions",
-//       error: error.message,
-//       stack: process.env.NODE_ENV === "development" ? error.stack : undefined
-//     });
-//   }
-// };
-
 export const getSessions = async (req, res) => {
   try {
     // ================= QUERY PARAMS =================
@@ -1752,7 +1479,7 @@ export const getSessions = async (req, res) => {
     // -------- SINGLE DATE --------
     if (singleDate) {
       const selectedDate = new Date(singleDate);
-      
+
       if (isNaN(selectedDate.getTime())) {
         return res.status(400).json({
           success: false,
@@ -1791,10 +1518,10 @@ export const getSessions = async (req, res) => {
     else if (filterType === "week") {
       const now = new Date();
       const currentDay = now.getDay();
-      
+
       // Monday start
       const diff = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
-      
+
       start = new Date(now.setDate(diff));
       start.setHours(0, 0, 0, 0);
 
@@ -1815,27 +1542,27 @@ export const getSessions = async (req, res) => {
     else if (startDate || endDate) {
       if (startDate) {
         start = new Date(startDate);
-        
+
         if (isNaN(start.getTime())) {
           return res.status(400).json({
             success: false,
             message: "Invalid startDate format. Use YYYY-MM-DD"
           });
         }
-        
+
         start.setHours(0, 0, 0, 0);
       }
 
       if (endDate) {
         end = new Date(endDate);
-        
+
         if (isNaN(end.getTime())) {
           return res.status(400).json({
             success: false,
             message: "Invalid endDate format. Use YYYY-MM-DD"
           });
         }
-        
+
         end.setHours(23, 59, 59, 999);
       }
     }
@@ -1843,11 +1570,11 @@ export const getSessions = async (req, res) => {
     // ================= APPLY DATE FILTER =================
     if (start || end) {
       query[selectedDateField] = {};
-      
+
       if (start) {
         query[selectedDateField].$gte = start;
       }
-      
+
       if (end) {
         query[selectedDateField].$lte = end;
       }
@@ -1867,10 +1594,10 @@ export const getSessions = async (req, res) => {
       "duration",
       "status"
     ];
-    
+
     const finalSortField = validSortFields.includes(sortBy) ? sortBy : "punchInTime";
     const finalSortOrder = sortOrder === "1" ? 1 : -1;
-    
+
     const sortObj = { [finalSortField]: finalSortOrder };
 
     // ================= BUILD QUERY =================
@@ -1902,7 +1629,7 @@ export const getSessions = async (req, res) => {
     // ================= FORMAT DATE =================
     const formatDate = (date) => {
       if (!date) return "-";
-      
+
       try {
         return new Date(date).toLocaleString("en-IN", {
           timeZone: "Asia/Kolkata",
@@ -1924,7 +1651,7 @@ export const getSessions = async (req, res) => {
       if (!geo || !geo.coordinates || geo.coordinates.length !== 2) {
         return null;
       }
-      
+
       return {
         latitude: geo.coordinates[1],
         longitude: geo.coordinates[0],
@@ -1952,12 +1679,12 @@ export const getSessions = async (req, res) => {
           address: session.customer?.address || "",
           landmark: session.customer?.landmark || "",
           location: extractGeo(session.customer?.location),
-          shopPhoto: session.customer?.shopPhoto?.length > 0 
+          shopPhoto: session.customer?.shopPhoto?.length > 0
             ? session.customer.shopPhoto.map(photo => ({
-                url: photo.url,
-                fileName: photo.fileName,
-                uploadedAt: formatDate(photo.uploadedAt)
-              }))
+              url: photo.url,
+              fileName: photo.fileName,
+              uploadedAt: formatDate(photo.uploadedAt)
+            }))
             : []
         },
 
@@ -2043,12 +1770,12 @@ export const getSessions = async (req, res) => {
         formattedSession.visitNotes = (session.visitNotes || []).map((note) => ({
           userId: note.userId,
           note: note.note,
-          photo: note.photo?.length > 0 
+          photo: note.photo?.length > 0
             ? note.photo.map(p => ({
-                url: p.url,
-                fileName: p.fileName,
-                uploadedAt: formatDate(p.uploadedAt)
-              }))
+              url: p.url,
+              fileName: p.fileName,
+              uploadedAt: formatDate(p.uploadedAt)
+            }))
             : [],
           createdAt: formatDate(note.createdAt)
         }));
@@ -2099,7 +1826,7 @@ export const getSessions = async (req, res) => {
     });
   } catch (error) {
     console.error("GetSessions Error:", error);
-    
+
     return res.status(500).json({
       success: false,
       message: "Failed to fetch sessions",
