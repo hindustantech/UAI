@@ -2994,136 +2994,244 @@ export const getNearbySalesByLocation = async (req, res) => {
     });
   }
 };
-// ========== GET NEARBY OPEN SALES (ADMIN OPTIMIZED) ==========
+
+
 export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
   try {
+    // ===== VALIDATION =====
     const { sessionId } = req.params;
 
-    let {
-      page = 1,
-      limit = 10,
-      radius = 1000,
-      userFilterId
-    } = req.query;
+    if (!sessionId || !sessionId.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Session ID is required"
+      });
+    }
 
-    page = Math.max(1, parseInt(page));
-    limit = Math.max(1, Math.min(100, parseInt(limit)));
-    radius = Math.max(1, Math.min(10000, parseInt(radius)));
+    // Validate sessionId format
+    if (typeof sessionId !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid session ID format"
+      });
+    }
+
+    // ===== PARSE QUERY PARAMS =====
+    let page = parseInt(req.query.page) || 1;
+    let limit = parseInt(req.query.limit) || 10;
+    let radius = parseInt(req.query.radius) || 1000;
+    const { userFilterId } = req.query;
+
+    // Validate and constrain parameters
+    page = Math.max(1, page);
+    limit = Math.max(1, Math.min(100, limit));
+    radius = Math.max(1, Math.min(10000, radius));
 
     const skip = (page - 1) * limit;
 
-    const companyId = new mongoose.Types.ObjectId(
-      req.user?.companyId || req.user?.id
-    );
+    // ===== GET COMPANY ID =====
+    let companyId;
+    try {
+      companyId = new mongoose.Types.ObjectId(req.user?.companyId || req.user?.id);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid company ID"
+      });
+    }
 
-    // Get current session location
+    // ===== GET BASE SESSION LOCATION =====
     const baseSession = await SalesSession.findOne(
-      { sessionId },
+      { sessionId: String(sessionId) },
       {
         punchInLocation: 1,
         _id: 0
       }
     ).lean();
 
-    if (
-      !baseSession ||
-      !baseSession.punchInLocation ||
-      !baseSession.punchInLocation.coordinates
-    ) {
+    if (!baseSession) {
       return res.status(404).json({
         success: false,
-        message: "Base session location not found"
+        message: "Base session not found"
+      });
+    }
+
+    if (
+      !baseSession.punchInLocation ||
+      !baseSession.punchInLocation.coordinates ||
+      !Array.isArray(baseSession.punchInLocation.coordinates) ||
+      baseSession.punchInLocation.coordinates.length !== 2
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Base session location is invalid or missing"
       });
     }
 
     const coordinates = baseSession.punchInLocation.coordinates;
 
-    const matchFilter = {
-      sessionId: { $ne: sessionId },
-      SalesStatus: "open",
-      companyId: companyId,
+    // Validate coordinates
+    if (
+      !isFinite(coordinates[0]) ||
+      !isFinite(coordinates[1]) ||
+      coordinates[0] < -180 ||
+      coordinates[0] > 180 ||
+      coordinates[1] < -90 ||
+      coordinates[1] > 90
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Base session coordinates are invalid"
+      });
+    }
 
-      // VERY IMPORTANT
+    // ===== BUILD MATCH FILTER =====
+    const matchFilter = {
+      sessionId: { $ne: sessionId }, // Exclude current session
+      SalesStatus: "open", // Only open sales
+      companyId: companyId, // Same company
       punchInLocation: {
-        $exists: true
+        $exists: true, // Must have punch-in location
+        $ne: null
+      },
+      "punchInLocation.coordinates": {
+        $exists: true,
+        $type: "array"
       }
     };
 
     // Optional user filter
-    if (
-      userFilterId &&
-      mongoose.Types.ObjectId.isValid(userFilterId)
-    ) {
-      const userId = new mongoose.Types.ObjectId(userFilterId);
+    if (userFilterId && userFilterId.trim()) {
+      if (mongoose.Types.ObjectId.isValid(userFilterId)) {
+        const userId = new mongoose.Types.ObjectId(userFilterId);
 
-      matchFilter.$or = [
-        { employeeId: userId },
-        { assignedTo: { $in: [userId] } }
-      ];
+        matchFilter.$or = [
+          { employeeId: userId }, // Current employee's sessions
+          { assignedTo: { $in: [userId] } } // Sessions assigned to user
+        ];
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid user filter ID"
+        });
+      }
     }
 
+    // ===== BUILD AGGREGATION PIPELINE =====
     const pipeline = [
+      // Stage 1: Geospatial query
       {
         $geoNear: {
           near: {
             type: "Point",
-            coordinates
+            coordinates: coordinates // [longitude, latitude]
           },
-
-          distanceField: "distance",
-
-          maxDistance: radius,
-
-          spherical: true,
-
-          key: "punchInLocation",
-
-          query: matchFilter
+          distanceField: "distance", // Add distance to results
+          maxDistance: radius, // Radius in meters
+          minDistance: 0,
+          spherical: true, // Use spherical geometry
+          key: "punchInLocation", // Field to search
+          query: matchFilter // Additional filters
         }
       },
 
+      // Stage 2: Sort by distance
       {
         $sort: {
           distance: 1
         }
       },
 
+      // Stage 3: Facet for total count and paginated data
       {
         $facet: {
+          metadata: [
+            {
+              $count: "total"
+            }
+          ],
           data: [
             { $skip: skip },
             { $limit: limit }
-          ],
-
-          totalCount: [
-            {
-              $count: "count"
-            }
           ]
+        }
+      },
+
+      // Stage 4: Project final output
+      {
+        $project: {
+          total: {
+            $arrayElemAt: ["$metadata.total", 0]
+          },
+          data: 1
         }
       }
     ];
 
-    const result = await SalesSession.aggregate(pipeline);
+    // ===== EXECUTE AGGREGATION =====
+    const results = await SalesSession.aggregate(pipeline)
+      .allowDiskUse(true)
+      .exec();
 
-    const data = result[0]?.data || [];
-    const total = result[0]?.totalCount?.[0]?.count || 0;
+    if (!results || results.length === 0) {
+      return res.status(200).json({
+        success: true,
+        pagination: {
+          total: 0,
+          page,
+          limit,
+          totalPages: 0
+        },
+        data: [],
+        message: "No nearby sessions found"
+      });
+    }
 
+    const { total = 0, data = [] } = results[0];
+
+    // ===== RESPONSE =====
     return res.status(200).json({
       success: true,
-
       pagination: {
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1
       },
-
-      data
+      data: data.map(session => ({
+        sessionId: session.sessionId,
+        distance: Math.round(session.distance), // Distance in meters
+        customer: session.customer || {},
+        punchInLocation: session.punchInLocation,
+        punchOutLocation: session.punchOutLocation,
+        SalesStatus: session.SalesStatus,
+        status: session.status,
+        createdBy: session.createdBy,
+        assignedTo: session.assignedTo || [],
+        employeeId: session.employeeId,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt
+      }))
     });
 
   } catch (error) {
-    console.error("Nearby Session Error:", error);
+    console.error("❌ Nearby Session Error:", {
+      message: error.message,
+      stack: error.stack,
+      code: error.code
+    });
+
+    // Handle specific MongoDB errors
+    if (error.name === "MongoError" || error.name === "MongoServerError") {
+      return res.status(500).json({
+        success: false,
+        message: "Database query error",
+        error: error.message,
+        code: error.code
+      });
+    }
 
     return res.status(500).json({
       success: false,
@@ -3132,7 +3240,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
     });
   }
 };
-
 
 
 
