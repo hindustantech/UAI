@@ -3048,7 +3048,7 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
         _id: 0
       }
     ).lean();
-
+    console.log("Base session punchInLocation:", baseSession?.punchInLocation);
     if (!baseSession) {
       return res.status(404).json({
         success: false,
