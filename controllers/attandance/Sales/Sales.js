@@ -2998,25 +2998,41 @@ export const getNearbySalesByLocation = async (req, res) => {
 export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
   try {
     const { sessionId } = req.params;
-    let { page = 1, limit = 10, radius = 1000, userFilterId } = req.query;
 
-    const companyId = new mongoose.Types.ObjectId(req.user?.companyId || req.user?.id);
+    let {
+      page = 1,
+      limit = 10,
+      radius = 1000,
+      userFilterId
+    } = req.query;
 
-    page = Math.max(1, Number(page));
-    limit = Math.min(100, Number(limit));
-    radius = Math.min(Number(radius), 10000);
+    page = Math.max(1, parseInt(page));
+    limit = Math.max(1, Math.min(100, parseInt(limit)));
+    radius = Math.max(1, Math.min(10000, parseInt(radius)));
 
     const skip = (page - 1) * limit;
 
+    const companyId = new mongoose.Types.ObjectId(
+      req.user?.companyId || req.user?.id
+    );
+
+    // Get current session location
     const baseSession = await SalesSession.findOne(
       { sessionId },
-      { "punchInLocation.coordinates": 1, _id: 0 }
+      {
+        punchInLocation: 1,
+        _id: 0
+      }
     ).lean();
 
-    if (!baseSession?.punchInLocation?.coordinates) {
+    if (
+      !baseSession ||
+      !baseSession.punchInLocation ||
+      !baseSession.punchInLocation.coordinates
+    ) {
       return res.status(404).json({
         success: false,
-        message: "Session or location not found"
+        message: "Base session location not found"
       });
     }
 
@@ -3025,71 +3041,89 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
     const matchFilter = {
       sessionId: { $ne: sessionId },
       SalesStatus: "open",
-      companyId
+      companyId: companyId,
+
+      // VERY IMPORTANT
+      punchInLocation: {
+        $exists: true
+      }
     };
 
-    if (userFilterId && mongoose.Types.ObjectId.isValid(userFilterId)) {
+    // Optional user filter
+    if (
+      userFilterId &&
+      mongoose.Types.ObjectId.isValid(userFilterId)
+    ) {
       const userId = new mongoose.Types.ObjectId(userFilterId);
 
       matchFilter.$or = [
         { employeeId: userId },
-        { assignedTo: userId }
+        { assignedTo: { $in: [userId] } }
       ];
     }
 
-    const dataPipeline = [
+    const pipeline = [
       {
         $geoNear: {
-          near: { type: "Point", coordinates },
+          near: {
+            type: "Point",
+            coordinates
+          },
+
           distanceField: "distance",
-          spherical: true,
+
           maxDistance: radius,
-          key: "punchInLocation"
+
+          spherical: true,
+
+          key: "punchInLocation",
+
+          query: matchFilter
         }
       },
 
-      { $match: matchFilter },
-
-      { $sort: { distance: 1 } },
-
-      { $skip: skip },
-      { $limit: limit }
-    ];
-
-    const countPipeline = [
       {
-        $geoNear: {
-          near: { type: "Point", coordinates },
-          distanceField: "distance",
-          spherical: true,
-          maxDistance: radius,
-          key: "punchInLocation"
+        $sort: {
+          distance: 1
         }
       },
-      { $match: matchFilter },
-      { $count: "total" }
+
+      {
+        $facet: {
+          data: [
+            { $skip: skip },
+            { $limit: limit }
+          ],
+
+          totalCount: [
+            {
+              $count: "count"
+            }
+          ]
+        }
+      }
     ];
 
-    const [data, countResult] = await Promise.all([
-      SalesSession.aggregate(dataPipeline),
-      SalesSession.aggregate(countPipeline)
-    ]);
+    const result = await SalesSession.aggregate(pipeline);
 
-    const total = countResult[0]?.total || 0;
+    const data = result[0]?.data || [];
+    const total = result[0]?.totalCount?.[0]?.count || 0;
 
     return res.status(200).json({
       success: true,
+
       pagination: {
         total,
         page,
         limit,
         totalPages: Math.ceil(total / limit)
       },
+
       data
     });
 
   } catch (error) {
-    console.error("Optimized Geo Error:", error);
+    console.error("Nearby Session Error:", error);
 
     return res.status(500).json({
       success: false,
