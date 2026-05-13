@@ -13,7 +13,7 @@ import PatnerProfile from '../models/PatnerProfile.js';
 import Employee from '../models/Attandance/Employee.js';
 import jwt from 'jsonwebtoken';
 import QRCode from "qrcode";
-
+import {verifyGoogleOwnership} from '../config/OAuth.js';
 import { Parser } from 'json2csv';
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep this secret in env
 
@@ -697,7 +697,210 @@ export const getUserProfile = async (req, res) => {
 
 
 
+export const createPatnerProfileMinimal = async ({
+  user,
+  session,
+  payload = {},
+}) => {
+  const {
+    firm_name = user.name || "Default Firm",
+    logo = null, // image URL from frontend
+  } = payload;
 
+  // 🛑 Idempotency check (critical in production)
+  const existing = await PatnerProfile.findOne({
+    User_id: user._id,
+  }).session(session);
+
+  if (existing) return existing;
+
+  const [patner] = await PatnerProfile.create(
+    [
+      {
+        User_id: user._id,
+        email: user.email,
+        firm_name,
+        logo, // single image string
+      },
+    ],
+    { session }
+  );
+
+  return patner;
+};
+
+export const oauthAuthController = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    session.startTransaction();
+
+    const { idToken, deviceId, referralCode, devicetoken, type } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        message: "idToken is required",
+      });
+    }
+
+    // 🔐 Step 1: Verify Google Token
+    const googleData = await verifyGoogleOwnership(idToken);
+
+    const {
+      providerId: googleId,
+      email,
+      name,
+      avatar,
+      emailVerified,
+    } = googleData;
+
+    if (!googleId) {
+      throw new Error("INVALID_GOOGLE_ID");
+    }
+
+    // 🔎 Step 2: Find user (Indexed Query)
+    let user = await User.findOne({
+      $or: [
+        { "oauthProviders.google.id": googleId },
+        ...(email ? [{ email }] : []),
+      ],
+    }).session(session);
+
+    let isNewUser = false;
+
+    // 🆕 Step 3: Create User (Atomic Write)
+    if (!user) {
+      const ownReferral = await generateUniqueReferralCode();
+
+      const [newUser] = await User.create(
+        [
+          {
+            name,
+            email,
+            profileImage: avatar,
+            referalCode: ownReferral,
+            referredBy: referralCode || null,
+            deviceId: deviceId || null,
+            type: type || "user",
+            devicetoken: devicetoken || null,
+            oauthProviders: {
+              google: {
+                id: googleId,
+                email,
+              },
+            },
+            isVerified: emailVerified,
+            accountStatus: "ACTIVE",
+          },
+        ],
+        { session }
+      );
+
+      user = newUser;
+      isNewUser = true;
+    } else {
+      let updatePayload = {};
+      let needsUpdate = false;
+
+      // 🔗 Link Google if not linked
+      if (!user.oauthProviders?.google?.id) {
+        updatePayload["oauthProviders.google"] = {
+          id: googleId,
+          email,
+        };
+        needsUpdate = true;
+      }
+
+      // 📱 Device ID update
+      if (deviceId && user.deviceId !== deviceId) {
+        updatePayload.deviceId = deviceId;
+        needsUpdate = true;
+      }
+
+      // 🔔 Device Token update
+      if (devicetoken && user.devicetoken !== devicetoken) {
+        updatePayload.devicetoken = devicetoken;
+        needsUpdate = true;
+      }
+
+      // 🖼️ Optional profile sync (like Google refresh)
+      if (avatar && user.profileImage !== avatar) {
+        updatePayload.profileImage = avatar;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        user = await User.findByIdAndUpdate(
+          user._id,
+          { $set: updatePayload },
+          { new: true, session }
+        );
+      }
+    }
+
+    // 🚫 Step 4: Account Status Check (Fail Fast)
+    if (user.accountStatus === "SUSPENDED" || user.suspend === true) {
+      await session.abortTransaction();
+
+      return res.status(403).json({
+        success: false,
+        message: "Account suspended",
+      });
+    }
+
+    // if (isNewUser && user.type === "patner") {
+    //   await createPatnerProfileMinimal({
+    //     user,
+    //     session,
+    //     payload: {
+    //       firm_name: name,     // default from Google
+    //       logo: avatar || null // Google profile image
+    //     },
+    //   });
+    // }
+    // 🔐 Step 5: Generate JWT (stateless auth)
+    const token = generateToken(user._id, user.type);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // ✅ Step 6: Response (Lean, frontend optimized)
+    return res.status(200).json({
+      success: true,
+      message: isNewUser
+        ? "User registered successfully"
+        : "Login successful",
+      data: {
+        isNewUser,
+        token,
+        user: {
+          id: user._id,
+          uid: user.uid,
+          name: user.name,
+          email: user.email,
+          profileImage: user.profileImage,
+          type: user.type,
+          accountStatus: user.accountStatus,
+        },
+      },
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("OAuth Auth Error:", {
+      message: error.message,
+      stack: error.stack,
+    });
+
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized Google login",
+    });
+  }
+};
 
 
 /**
@@ -1290,7 +1493,7 @@ export const startAuth = async (req, res) => {
     const otpResponse = await sendWhatsAppOtp(phone);
 
     if (!otpResponse.success) {
-  
+
 
       return res.status(500).json({ message: 'Failed to send OTP', error: otpResponse.error });
     }

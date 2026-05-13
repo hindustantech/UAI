@@ -31,7 +31,8 @@ import {
     requestAccountDeletion,
     getDeletionStatus,
     generateTheQRCode,
-    startAdminAuth,completeAdminOtp
+    startAdminAuth, completeAdminOtp,
+    oauthAuthController
 } from '../controllers/authController.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import profileUploadMiddleware from '../middlewares/profileUploadMiddleware.js';
@@ -42,6 +43,7 @@ const upload = multer({ storage });
 upload.single("images")
 
 router.post('/updateUserLocation', authMiddleware, updateUserLocation);
+router.post('/oauthAuthController', oauthAuthController);
 
 router.get('/getuserbyreferal', getUserIdsAndNamesByReferralCodesController);
 router.get('/generateTheQRCode', authMiddleware, generateTheQRCode);
@@ -69,7 +71,7 @@ router.post('/completeProfile',
     authMiddleware,
     upload.single('profileImage'),
     completeProfile
-); 
+);
 router.post('/restoreAccount', authMiddleware, restoreAccount);
 router.post('/requestAccountDeletion', authMiddleware, requestAccountDeletion);
 router.get('/getDeletionStatus', authMiddleware, getDeletionStatus);

@@ -194,23 +194,42 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
-  // ZoneId: {
-  //   type: mongoose.Schema.Types.ObjectId,
-  //   ref: 'Zone',
-  //   default: null,
-  //   validate: {
-  //     validator: function (value) {
-  //       // Allow ZoneId ONLY for admin roles
-  //       if (this.type === 'admin') {
-  //         return value !== null; // must exist
-  //       }
 
-  //       return value === null;
-  //     },
-  //     message: 'ZoneId is allowed only for admin/super_admin users'
-  //   },
-  //   index: true
-  // },
+  
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true, // Allows null/undefined values
+    index: true
+  },
+  isGoogleVerified: {
+    type: Boolean,
+    default: false
+  },
+  googleEmail: {
+    type: String,
+    lowercase: true,
+    trim: true,
+    sparse: true
+  },
+  googleProfilePicture: {
+    type: String,
+    required: false
+  },
+  authProvider: {
+    type: String,
+    enum: ['local', 'google', 'whatsapp', 'both'],
+    default: 'local'
+  },
+  emailVerificationStatus: {
+    type: String,
+    enum: ['pending', 'verified', 'failed', 'not_applicable'],
+    default: 'pending'
+  },
+  emailVerifiedAt: {
+    type: Date,
+    default: null
+  },
 
 }, {
   timestamps: true
