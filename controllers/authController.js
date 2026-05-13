@@ -6,7 +6,7 @@ import { generateReferralCode } from '../utils/Referalcode.js';
 import fs from 'fs';
 import path from 'path';
 import { uploadToCloudinary } from '../utils/Cloudinary.js';
-import admin from '../utils/firebaseadmin.js';
+//  import admin from '../utils/firebaseadmin.js';
 import mongoose from "mongoose";
 import logger from '../utils/logger.js';
 import PatnerProfile from '../models/PatnerProfile.js';
