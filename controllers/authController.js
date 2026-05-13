@@ -13,7 +13,7 @@ import PatnerProfile from '../models/PatnerProfile.js';
 import Employee from '../models/Attandance/Employee.js';
 import jwt from 'jsonwebtoken';
 import QRCode from "qrcode";
-import {verifyGoogleOwnership} from '../config/OAuth.js';
+import { verifyGoogleOwnership } from '../config/OAuth.js';
 import { Parser } from 'json2csv';
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep this secret in env
 
@@ -902,6 +902,49 @@ export const oauthAuthController = async (req, res) => {
   }
 };
 
+
+
+export const UpdatePhone = async (req, res) => {
+  try {
+    const { phone } = req.body;
+    const userId = req?.user?.id || req?.user?._id;
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is required",
+      });
+    }
+
+    const existingUser = await User.findOne({ phone: phone.trim() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number already in use",
+      });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId, // the user to update
+      { phone: phone.trim() }, // update this field
+      { new: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Phone number updated successfully",
+      data: updatedUser,
+    });
+  }
+
+  catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
 
 /**
  * @desc    Get Profile (User + Employee)

@@ -32,7 +32,8 @@ import {
     getDeletionStatus,
     generateTheQRCode,
     startAdminAuth, completeAdminOtp,
-    oauthAuthController
+    oauthAuthController,
+    UpdatePhone
 } from '../controllers/authController.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import profileUploadMiddleware from '../middlewares/profileUploadMiddleware.js';
@@ -44,6 +45,7 @@ upload.single("images")
 
 router.post('/updateUserLocation', authMiddleware, updateUserLocation);
 router.post('/oauthAuthController', oauthAuthController);
+router.post('/UpdatePhone', authMiddleware, UpdatePhone);
 
 router.get('/getuserbyreferal', getUserIdsAndNamesByReferralCodesController);
 router.get('/generateTheQRCode', authMiddleware, generateTheQRCode);
