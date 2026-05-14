@@ -150,7 +150,7 @@ const ShiftSchema = new Schema({
 /**
  * Index (multi-tenant safe)
  */
-ShiftSchema.index({ companyId: 1, shiftCode: 1 }, { unique: true });
+ShiftSchema.index({ companyId: 1}, { unique: true });
 
 /**
  * Auto Apply Defaults Middleware (CRITICAL)
