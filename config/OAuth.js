@@ -97,6 +97,7 @@ export const verifyGoogleWebOwnership = async (accessToken) => {
         );
 
         logger.info("✅ Google ID Token verified successfully", response.data);
+        const data = response.data;
         return {
             provider: "google",
             providerId: data.sub,
