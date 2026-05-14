@@ -96,6 +96,7 @@ export const verifyGoogleWebOwnership = async (accessToken) => {
             }
         );
 
+        logger.info("✅ Google ID Token verified successfully", response.data);
         return response.data;
     } catch (error) {
         console.log(error);
