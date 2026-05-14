@@ -106,6 +106,7 @@ export const verifyGoogleWebOwnership = async (accessToken) => {
             avatar: data.picture || null,
             emailVerified: data.email_verified || false,
         };
+        logger.info("✅ Google Web Token verified successfully11", data);
     } catch (error) {
         console.log(error);
         throw new Error("GOOGLE_AUTH_FAILED");
