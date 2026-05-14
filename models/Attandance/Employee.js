@@ -123,5 +123,5 @@ employeeSchema.index({
     officeLocation: "2dsphere"
 });
 employeeSchema.index({ companyId: 1, userId: 1 }, { unique: true });
-employeeSchema.index({ empCode: 1 }, { unique: true });
+// employeeSchema.index({ empCode: 1 }, { unique: true });
 export default mongoose.model("Employee", employeeSchema);
