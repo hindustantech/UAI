@@ -13,7 +13,7 @@ import PatnerProfile from '../models/PatnerProfile.js';
 import Employee from '../models/Attandance/Employee.js';
 import jwt from 'jsonwebtoken';
 import QRCode from "qrcode";
-import { verifyGoogleOwnership } from '../config/OAuth.js';
+import { verifyGoogleOwnership ,verifyGoogleWebOwnership} from '../config/OAuth.js';
 import { Parser } from 'json2csv';
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep this secret in env
 
@@ -724,7 +724,7 @@ export const oauthAuthController = async (req, res) => {
       // Web flow
       googleData = await verifyGoogleWebOwnership(accessToken);
     }
-    
+
     const {
       providerId: googleId,
       email,
