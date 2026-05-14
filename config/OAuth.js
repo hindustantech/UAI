@@ -97,7 +97,14 @@ export const verifyGoogleWebOwnership = async (accessToken) => {
         );
 
         logger.info("✅ Google ID Token verified successfully", response.data);
-        return response.data;
+        return {
+            provider: "google",
+            providerId: data.sub,
+            email: data.email?.toLowerCase() || null,
+            name: data.name || "",
+            avatar: data.picture || null,
+            emailVerified: data.email_verified || false,
+        };
     } catch (error) {
         console.log(error);
         throw new Error("GOOGLE_AUTH_FAILED");
