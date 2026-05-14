@@ -6,7 +6,7 @@ import { generateReferralCode } from '../utils/Referalcode.js';
 import fs from 'fs';
 import path from 'path';
 import { uploadToCloudinary } from '../utils/Cloudinary.js';
- import admin from '../utils/firebaseadmin.js';
+import admin from '../utils/firebaseadmin.js';
 import mongoose from "mongoose";
 import logger from '../utils/logger.js';
 import PatnerProfile from '../models/PatnerProfile.js';
@@ -697,37 +697,6 @@ export const getUserProfile = async (req, res) => {
 
 
 
-export const createPatnerProfileMinimal = async ({
-  user,
-  session,
-  payload = {},
-}) => {
-  const {
-    firm_name = user.name || "Default Firm",
-    logo = null, // image URL from frontend
-  } = payload;
-
-  // 🛑 Idempotency check (critical in production)
-  const existing = await PatnerProfile.findOne({
-    User_id: user._id,
-  }).session(session);
-
-  if (existing) return existing;
-
-  const [patner] = await PatnerProfile.create(
-    [
-      {
-        User_id: user._id,
-        email: user.email,
-        firm_name,
-        logo, // single image string
-      },
-    ],
-    { session }
-  );
-
-  return patner;
-};
 
 export const oauthAuthController = async (req, res) => {
   const session = await mongoose.startSession();
@@ -735,18 +704,27 @@ export const oauthAuthController = async (req, res) => {
   try {
     session.startTransaction();
 
-    const { idToken, deviceId, referralCode, devicetoken, type } = req.body;
+    const { idToken, accessToken, deviceId, referralCode, devicetoken, type } = req.body;
 
-    if (!idToken) {
+    // 🔐 Step 1: Validate Tokens
+    if (!idToken && !accessToken) {
       return res.status(400).json({
         success: false,
-        message: "idToken is required",
+        message: "Google token is required",
       });
     }
 
-    // 🔐 Step 1: Verify Google Token
-    const googleData = await verifyGoogleOwnership(idToken);
+    // 🔐 Step 2: Verify Google User
+    let googleData;
 
+    if (idToken) {
+      // Mobile / Native flow
+      googleData = await verifyGoogleOwnership(idToken);
+    } else if (accessToken) {
+      // Web flow
+      googleData = await verifyGoogleWebOwnership(accessToken);
+    }
+    
     const {
       providerId: googleId,
       email,

@@ -1,6 +1,6 @@
 import { OAuth2Client } from "google-auth-library";
 import logger from "../utils/logger.js";
-
+import axios from "axios";
 const client = new OAuth2Client();
 
 /**
@@ -77,6 +77,28 @@ export const verifyGoogleOwnership = async (idToken) => {
         });
 
         // 🔥 Standardized error response (like AWS / Stripe style)
+        throw new Error("GOOGLE_AUTH_FAILED");
+    }
+};
+
+
+
+
+
+export const verifyGoogleWebOwnership = async (accessToken) => {
+    try {
+        const response = await axios.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            {
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                },
+            }
+        );
+
+        return response.data;
+    } catch (error) {
+        console.log(error);
         throw new Error("GOOGLE_AUTH_FAILED");
     }
 };
