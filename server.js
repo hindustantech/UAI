@@ -32,6 +32,7 @@ dotenv.config();
 await connectDB();
 // START BACKGROUND WORKER HERE
 
+
 const app = express();
 
 app.set('view engine', 'ejs');
