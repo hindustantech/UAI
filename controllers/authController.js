@@ -853,7 +853,7 @@ export const oauthAuthController = async (req, res) => {
     });
 
     const token = await generateToken(user._id, user.type);
-    logger.info("JWT generated successfully", token);
+    logger.info("JWT generated successfully", { token });
 
     await session.commitTransaction();
     session.endSession();
