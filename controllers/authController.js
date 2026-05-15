@@ -757,6 +757,7 @@ export const oauthAuthController = async (req, res) => {
 
     // 🆕 Step 3: Create User (Atomic Write)
     if (!user) {
+      logger.info("No existing user found. Creating new user.");
       const ownReferral = await generateUniqueReferralCode();
 
       const [newUser] = await User.create(
