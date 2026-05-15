@@ -845,8 +845,9 @@ export const oauthAuthController = async (req, res) => {
       type: user.type,
     });
 
-    const token = await generateToken(user._id, user.type);
-    logger.info("JWT generated successfully", { token });
+    const token = isNewUser
+      ? await newgenerateToken(user._id, user.type)
+      : await generateToken(user._id, user.type);
 
     await session.commitTransaction();
     session.endSession();
