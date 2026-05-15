@@ -749,7 +749,8 @@ export const oauthAuthController = async (req, res) => {
     let user = await User.findOne({
       $or: [
         { "oauthProviders.google.id": googleId },
-        ...(email ? [{ email }] : []),
+        { googleId },
+        ...(email ? [{ email: email.toLowerCase() }] : []),
       ],
     }).session(session);
 
