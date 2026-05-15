@@ -15,6 +15,7 @@ import jwt from 'jsonwebtoken';
 import QRCode from "qrcode";
 import { verifyGoogleOwnership, verifyGoogleWebOwnership } from '../config/OAuth.js';
 import { Parser } from 'json2csv';
+import { newgenerateToken } from '../config/new_user_jwt.js';
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep this secret in env
 
 
