@@ -835,16 +835,7 @@ export const oauthAuthController = async (req, res) => {
       });
     }
 
-    // if (isNewUser && user.type === "patner") {
-    //   await createPatnerProfileMinimal({
-    //     user,
-    //     session,
-    //     payload: {
-    //       firm_name: name,     // default from Google
-    //       logo: avatar || null // Google profile image
-    //     },
-    //   });
-    // }
+
     // 🔐 Step 5: Generate JWT (stateless auth)
     logger.info("Generating JWT for user:", {
       userId: user._id,
