@@ -13,7 +13,7 @@ import PatnerProfile from '../models/PatnerProfile.js';
 import Employee from '../models/Attandance/Employee.js';
 import jwt from 'jsonwebtoken';
 import QRCode from "qrcode";
-import { verifyGoogleOwnership ,verifyGoogleWebOwnership} from '../config/OAuth.js';
+import { verifyGoogleOwnership, verifyGoogleWebOwnership } from '../config/OAuth.js';
 import { Parser } from 'json2csv';
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep this secret in env
 
@@ -725,6 +725,14 @@ export const oauthAuthController = async (req, res) => {
       googleData = await verifyGoogleWebOwnership(accessToken);
     }
 
+    logger.info("Google OAuth Data:", {
+
+      providerId: googleData?.providerId,
+      email: googleData?.email,
+      name: googleData?.name,
+      avatar: googleData?.avatar,
+      emailVerified: googleData?.emailVerified,
+    });
     const {
       providerId: googleId,
       email,
@@ -838,7 +846,14 @@ export const oauthAuthController = async (req, res) => {
     //   });
     // }
     // 🔐 Step 5: Generate JWT (stateless auth)
+    logger.info("Generating JWT for user:", {
+      userId: user._id,
+      email: user.email,
+      type: user.type,
+    });
+
     const token = generateToken(user._id, user.type);
+    logger.info("JWT generated successfully", token);
 
     await session.commitTransaction();
     session.endSession();
