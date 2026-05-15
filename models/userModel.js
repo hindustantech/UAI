@@ -194,8 +194,13 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  oauthProviders: {
+    google: {
+      id: String,
+      email: String,
+    }
+  },
 
-  
   googleId: {
     type: String,
     unique: true,
