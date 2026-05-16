@@ -6,11 +6,26 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import { abortAndRespond } from '../utils/errorResponse.js';
 
+const getDistance = (lat1, lng1, lat2, lng2) => {
+    const R = 6371000; // Earth radius in meters
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+};
+
+
 export const startBreakController = async (req, res) => {
 
     try {
 
-        const { breakType, token } = req.body;
+        const { breakType, token, Lat, Lng } = req.body;
 
         const employeeId = req.user._id;
 
@@ -103,6 +118,35 @@ export const startBreakController = async (req, res) => {
             });
         }
 
+
+
+        if (
+            employee.officeLocation?.coordinates &&
+            employee.officeLocation.coordinates.length === 2
+        ) {
+            const [officeLng, officeLat] = employee.officeLocation.coordinates;
+            const [userLng, userLat] = [parseFloat(Lng), parseFloat(Lat)];
+
+            const distance = getDistance(officeLat, officeLng, userLat, userLng);
+            const allowedRadius = employee.officeLocation.radius || 500;
+
+            if (distance > allowedRadius) {
+                return abortAndRespond(
+                    session, res, 403, "OUTSIDE_OFFICE_RADIUS",
+                    `You are outside the allowed office location range (${Math.round(distance)}m from office).`,
+                    {
+                        allowedRadius,
+                        currentDistance: Math.round(distance),
+                        unit: "meters"
+                    }
+                );
+            }
+
+            geoVerified = true;
+            console.log(`✓ Geo-Location Verified: ${Math.round(distance)}m from office`);
+        } else {
+            console.log(`⚠ Geo-Location: No office location set for employee`);
+        }
         /**
          * CREATE BREAK
          */
@@ -144,7 +188,7 @@ export const endBreakController = async (req, res) => {
 
     try {
 
-        const { breakType, token } = req.body;
+        const { breakType, token, Lat, Lng } = req.body;
 
         const employeeId = req.user._id;
 
@@ -195,6 +239,36 @@ export const endBreakController = async (req, res) => {
             }
         });
 
+
+        const employee = await Employee.findById(employeeId);
+
+        if (
+            employee.officeLocation?.coordinates &&
+            employee.officeLocation.coordinates.length === 2
+        ) {
+            const [officeLng, officeLat] = employee.officeLocation.coordinates;
+            const [userLng, userLat] = [parseFloat(Lng), parseFloat(Lat)];
+
+            const distance = getDistance(officeLat, officeLng, userLat, userLng);   
+            const allowedRadius = employee.officeLocation.radius || 500;
+
+            if (distance > allowedRadius) {
+                return abortAndRespond(
+                    session, res, 403, "OUTSIDE_OFFICE_RADIUS",
+                    `You are outside the allowed office location range (${Math.round(distance)}m from office).`,
+                    {
+                        allowedRadius,
+                        currentDistance: Math.round(distance),
+                        unit: "meters"
+                    }
+                );
+            }
+
+            geoVerified = true;
+            console.log(`✓ Geo-Location Verified: ${Math.round(distance)}m from office`);
+        } else {
+            console.log(`⚠ Geo-Location: No office location set for employee`);
+        }
         if (!attendance) {
             return res.status(404).json({
                 success: false,
