@@ -2,6 +2,75 @@
 
 import mongoose from "mongoose";
 
+
+const BreakSchema = new mongoose.Schema({
+
+    type: {
+        type: String,
+        enum: ["lunch", "tea", "personal", "meeting"],
+        required: true
+    },
+
+    breakName: {
+        type: String,
+        default: "Lunch Break"
+    },
+
+    startTime: {
+        type: Date,
+        required: true
+    },
+
+    endTime: {
+        type: Date,
+        default: null
+    },
+
+    /**
+     * Total Minutes
+     */
+    durationMinutes: {
+        type: Number,
+        default: 0
+    },
+
+    /**
+     * HH:MM FORMAT
+     */
+    durationHHMM: {
+        type: String,
+        default: "00:00"
+    },
+
+    /**
+     * Shift Allowed Minutes
+     */
+    allowedMinutes: {
+        type: Number,
+        default: 0
+    },
+
+    /**
+     * Extra Minutes
+     */
+    exceededMinutes: {
+        type: Number,
+        default: 0
+    },
+
+    isPaid: {
+        type: Boolean,
+        default: false
+    },
+
+    status: {
+        type: String,
+        enum: ["active", "completed"],
+        default: "active"
+    }
+
+}, { _id: true });
+
 const attendanceSchema = new mongoose.Schema({
 
 
@@ -13,7 +82,7 @@ const attendanceSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
         required: true,
-        index: true
+        index: true // ✅ CRITICAL for performance
     },
 
     employeeId: {
@@ -71,6 +140,10 @@ const attendanceSchema = new mongoose.Schema({
     },
 
 
+    breaks: {
+        type: [BreakSchema],
+        default: []
+    },
     /* ===========================
        Punch History (Audit Trail)
     ============================ */
@@ -79,18 +152,18 @@ const attendanceSchema = new mongoose.Schema({
         {
             punchOut: {
                 type: Date,
-               
+
             },
 
             type: {
                 type: String,
                 enum: ["in", "out"],
-                
+
             },
 
             time: {
                 type: Date,
-                
+
             },
             geoLocation: Object,
 

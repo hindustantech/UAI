@@ -12,7 +12,7 @@ const BreakSchema = new Schema({
     },
     duration: {
         type: Number,
-        default: 30 // 30 mins default
+        default: 30 
     },
     isPaid: {
         type: Boolean,

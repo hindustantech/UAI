@@ -1,6 +1,4 @@
 import dotenv from 'dotenv';  // <-- make sure you import it
-
-// services/whatsappService.js
 import axios from "axios";
 dotenv.config();
 
@@ -23,7 +21,6 @@ export async function sendWhatsAppOtp(mobile) {
     try {
 
 
-        // const url = `https://smsmediaapi.hellopatna.com/api/whatsapp-cloud-api/send-auth-api?apikey=${WHATSAPP_API_KEY}&mobile=${number}&templatename=${WHATSAPP_TEMPLATE_NAME}`;
         const url = `https://smsmediaapi.patronservices.in/api/whatsapp-cloud-api/send-auth-api?apikey=${WHATSAPP_API_KEY}&mobile=${number}&templatename=${WHATSAPP_TEMPLATE_NAME}`;
 
         const resp = await axios.get(url, {
