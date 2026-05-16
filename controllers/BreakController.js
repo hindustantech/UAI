@@ -2,22 +2,60 @@ import Attendance from '../models/Attandance/Attendance.js';
 import Employee from '../models/Attandance/Employee.js';
 import Shift from '../models/Attandance/Shift.js';
 import { convertMinutesToHHMM } from '../config/timehh.js';
+import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
+import { abortAndRespond } from '../utils/errorResponse.js';
 
 export const startBreakController = async (req, res) => {
 
     try {
 
-        const { breakType } = req.body;
+        const { breakType, token } = req.body;
 
         const employeeId = req.user._id;
-        const companyId = req.user.companyId;
+
+
+        /* ===========================
+                 2. JWT VERIFICATION
+              =========================== */
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (err) {
+            return abortAndRespond(
+                session, res, 401, "TOKEN_INVALID",
+                "Invalid or expired token"
+            );
+        }
+
+        if (!decoded?.userId) {
+            return abortAndRespond(
+                session, res, 401, "TOKEN_PAYLOAD_INVALID",
+                "Invalid token payload"
+            );
+        }
+
+        const companyUser = await User
+            .findById(decoded.userId)
+            .select("-password -otp -__v")
+            .session(session);
+
+        if (!companyUser) {
+            return abortAndRespond(
+                session, res, 401, "USER_NOT_FOUND",
+                "Company user not found"
+            );
+        }
+
+        const companyId = companyUser._id;
         /**
          * FIND TODAY ATTENDANCE
          */
         const attendance = await Attendance.findOne({
             employeeId,
             companyId,
-            
+
             date: {
                 $gte: new Date().setHours(0, 0, 0, 0),
                 $lte: new Date().setHours(23, 59, 59, 999)
@@ -106,8 +144,45 @@ export const endBreakController = async (req, res) => {
 
     try {
 
+        const { breakType, token } = req.body;
+
         const employeeId = req.user._id;
-        const companyId = req.user.companyId;
+
+
+        /* ===========================
+                 2. JWT VERIFICATION
+              =========================== */
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (err) {
+            return abortAndRespond(
+                session, res, 401, "TOKEN_INVALID",
+                "Invalid or expired token"
+            );
+        }
+
+        if (!decoded?.userId) {
+            return abortAndRespond(
+                session, res, 401, "TOKEN_PAYLOAD_INVALID",
+                "Invalid token payload"
+            );
+        }
+
+        const companyUser = await User
+            .findById(decoded.userId)
+            .select("-password -otp -__v")
+            .session(session);
+
+        if (!companyUser) {
+            return abortAndRespond(
+                session, res, 401, "USER_NOT_FOUND",
+                "Company user not found"
+            );
+        }
+
+        const companyId = companyUser._id;
         /**
          * FIND ATTENDANCE
          */
