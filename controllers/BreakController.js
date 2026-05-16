@@ -3,8 +3,29 @@ import Employee from '../models/Attandance/Employee.js';
 import Shift from '../models/Attandance/Shift.js';
 import { convertMinutesToHHMM } from '../config/timehh.js';
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
-import { abortAndRespond } from '../utils/errorResponse.js';
+// import { abortAndRespond } from '../utils/errorResponse.js';
+// import {abortAdndRespond} from '../utils/AppError.js'
+import User from '../models/userModel.js';
+
+/**
+ * Helper to abort transaction and send error response
+ */
+const abortAndRespond = async (session, res, statusCode, errorCode, message, data = null) => {
+    try {
+        await session.abortTransaction();
+    } catch (e) {
+        console.error("Error aborting transaction:", e);
+    } finally {
+        session.endSession();
+    }
+
+    return res.status(statusCode).json({
+        success: false,
+        errorCode,
+        message,
+        ...(data && { data })
+    });
+};
 
 const getDistance = (lat1, lng1, lat2, lng2) => {
     const R = 6371000; // Earth radius in meters

@@ -26,6 +26,7 @@ import permissionRoutes from './routes/permissionRoutes.js';
 import subscriptionsdata from './routes/Attandance/subscription.routes.js';
 import SalesRoute from './routes/Attandance/Sales/Sales.routes.js';
 import SalesReoprts from './routes/Attandance/Sales/Sales.Reports.js';
+import lunchRoute from './routes/Attandance/BreakRoute.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 dotenv.config();
@@ -66,6 +67,7 @@ app.use('/api/categoryAdvertisment', categoryAdvertisment);
 app.use('/api/advertisements', advertisment);
 app.use('/api/ExportRoutes', ExportRoutes);
 app.use('/api/v1/sales/reports', SalesReoprts);
+app.use('/api/break', lunchRoute);
 // API routes
 app.use('/api/plan', planRoutes);
 app.use('/api/appsetting', appsettingroutes);
