@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/userModel.js';
-
+import logger from '../utils/logger.js';
 const authMiddleware = async (req, res, next) => {
   try {
     let token;
