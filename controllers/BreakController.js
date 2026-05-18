@@ -154,7 +154,7 @@ export const startBreakController = async (req, res) => {
         /**
          * FIND EMPLOYEE
          */
-        const employee = await Employee.findById(employeeId)
+        const employee = await Employee.findOne({ userId: employeeId })
             .populate("shiftId")
             .session(session);
 
@@ -215,7 +215,7 @@ export const startBreakController = async (req, res) => {
         endOfDay.setHours(23, 59, 59, 999);
 
         const attendance = await Attendance.findOne({
-            employeeId,
+            employeeId: employee._id,
             companyId,
             date: {
                 $gte: startOfDay,
@@ -428,7 +428,8 @@ export const endBreakController = async (req, res) => {
         /**
          * FIND EMPLOYEE
          */
-        const employee = await Employee.findById(employeeId)
+        const employee = await Employee.findOne({ userId: employeeId })
+            .populate("shiftId")
             .session(session);
 
         if (!employee) {
@@ -452,7 +453,7 @@ export const endBreakController = async (req, res) => {
         endOfDay.setHours(23, 59, 59, 999);
 
         const attendance = await Attendance.findOne({
-            employeeId,
+            employeeId: employee._id,
             companyId,
             date: {
                 $gte: startOfDay,
