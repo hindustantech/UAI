@@ -1271,13 +1271,34 @@ export const getTodayPunchStatus = async (req, res) => {
             employeeId,
             date: { $gte: start, $lt: end }
         })
-            .select("punchIn punchOut")
+            .select("punchIn punchOut breaks")
             .lean();
+
+        // Latest break
+        const latestBreak =
+            attendance?.breaks?.length > 0
+                ? attendance.breaks[attendance.breaks.length - 1]
+                : null;
+
+        // Break Status
+        const isBreakStarted =
+            latestBreak?.status === "active";
+
+        const isBreakEnded =
+            latestBreak?.status === "completed";
 
         return res.status(200).json({
             success: true,
+
             isPunchedIn: Boolean(attendance?.punchIn),
-            isPunchedOut: Boolean(attendance?.punchOut)
+
+            isPunchedOut: Boolean(attendance?.punchOut),
+
+            breakStarted: isBreakStarted,
+
+            breakEnded: isBreakEnded,
+
+            breakDetails: latestBreak || null
         });
 
     } catch (error) {
@@ -1289,7 +1310,6 @@ export const getTodayPunchStatus = async (req, res) => {
         });
     }
 };
-
 
 
 
