@@ -188,23 +188,9 @@ export const startBreakController = async (req, res) => {
         /**
          * BREAK VALIDATION
          */
-        const shiftBreak = shift.breaks.find(
-            item =>
-                item.name.toLowerCase() ===
-                breakType.toLowerCase()
-        );
+ 
 
-        if (!shiftBreak) {
-
-            return abortAndRespond(
-                session,
-                res,
-                400,
-                "BREAK_NOT_ALLOWED",
-                "Break not allowed"
-            );
-        }
-
+        
         /**
          * FIND TODAY ATTENDANCE
          */
@@ -312,13 +298,13 @@ export const startBreakController = async (req, res) => {
 
             type: breakType.toLowerCase(),
 
-            breakName: shiftBreak.name,
+            breakName: shift.name,
 
             startTime: new Date(),
 
-            allowedMinutes: shiftBreak.duration,
+            allowedMinutes: shift.duration,
 
-            isPaid: shiftBreak.isPaid,
+            isPaid: shift.isPaid,
 
             geoVerified,
 
