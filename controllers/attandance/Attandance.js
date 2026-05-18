@@ -13,6 +13,7 @@ import jwt from "jsonwebtoken";
 import User from "../../models/userModel.js";
 import { resolveDateRange } from "../../utils/dateRangeResolver.js";
 import Shift from "../../models/Attandance/Shift.js";
+import logger from '../../utils/logger.js';
 // utils/dateRange.js
 // import {
 //     normalizeDate,
