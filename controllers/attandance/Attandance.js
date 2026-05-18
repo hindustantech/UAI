@@ -316,6 +316,7 @@ export const markAttendance = async (req, res) => {
         let decoded;
         try {
             decoded = jwt.verify(token, process.env.JWT_SECRET);
+            logger.info(`JWT decoded successfully for user ${decoded.userId}`);
         } catch (err) {
             return abortAndRespond(
                 session, res, 401, "TOKEN_INVALID",
@@ -335,6 +336,7 @@ export const markAttendance = async (req, res) => {
             .select("-password -otp -__v")
             .session(session);
 
+            logger.info(`Company user fetched: ${companyUser ? companyUser._id : 'Not found'}`);
         if (!companyUser) {
             return abortAndRespond(
                 session, res, 401, "USER_NOT_FOUND",
