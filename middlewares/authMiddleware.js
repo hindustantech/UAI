@@ -18,6 +18,7 @@ const authMiddleware = async (req, res, next) => {
 
     // Verify
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    logger.info(`Token verified for user ID: ${decoded.id}`);
 
     if (!decoded?.id) {
       return res.status(401).json({ message: 'Invalid token' });
@@ -27,6 +28,8 @@ const authMiddleware = async (req, res, next) => {
     const user = await User.findById(decoded.id)
       .select('-password -otp -__v')
       .lean();
+
+    logger.info(`User fetched for ID: ${user ? user._id : 'Not found'}`);
 
     if (!user) {
       return res.status(401).json({ message: 'User not found' });
