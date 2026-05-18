@@ -189,18 +189,6 @@ const attendanceSchema = new mongoose.Schema({
     },
 
 
-    /* ===========================
-       Breaks
-    ============================ */
-
-    breaks: [
-        {
-            start: Date,
-            end: Date,
-            reason: String
-        }
-    ],
-
 
     /* ===========================
        Work Calculation
