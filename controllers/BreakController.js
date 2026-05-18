@@ -155,7 +155,7 @@ export const startBreakController = async (req, res) => {
          * FIND EMPLOYEE
          */
         const employee = await Employee.findOne({ userId: employeeId })
-            .populate("shiftId")
+            .populate("shift")
             .session(session);
 
         if (!employee) {
@@ -429,7 +429,7 @@ export const endBreakController = async (req, res) => {
          * FIND EMPLOYEE
          */
         const employee = await Employee.findOne({ userId: employeeId })
-            .populate("shiftId")
+            .populate("shift")
             .session(session);
 
         if (!employee) {
