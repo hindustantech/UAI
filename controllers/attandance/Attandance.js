@@ -316,6 +316,10 @@ export const markAttendance = async (req, res) => {
 
         let decoded;
         try {
+            logger.info(`Verifying JWT for attendance marking, user ID: ${u_id}`);
+            logger.info(`Received token: ${token}`);
+            logger.info(`JWT_SECRET used: ${process.env.JWT_SECRET ? 'Available' : 'MISSING'}`);
+            
             decoded = jwt.verify(token, process.env.JWT_SECRET);
             logger.info(`JWT decoded successfully for user ${decoded.userId}`);
         } catch (err) {
