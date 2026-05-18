@@ -172,7 +172,7 @@ export const startBreakController = async (req, res) => {
         /**
          * SHIFT VALIDATION
          */
-        const shift = employee.shiftId;
+        const shift = employee.shift;
 
         if (!shift) {
 
