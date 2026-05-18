@@ -318,6 +318,7 @@ export const markAttendance = async (req, res) => {
             decoded = jwt.verify(token, process.env.JWT_SECRET);
             logger.info(`JWT decoded successfully for user ${decoded.userId}`);
         } catch (err) {
+            logger.error(`JWT verification failed: ${err.message}`);
             return abortAndRespond(
                 session, res, 401, "TOKEN_INVALID",
                 "Invalid or expired token"
