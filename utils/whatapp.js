@@ -3,19 +3,14 @@ import axios from "axios";
 dotenv.config();
 
 
+const QUICKHUB_API_KEY = process.env.QUICKHUB_API_KEY;
 const WHATSAPP_API_KEY = process.env.WHATSAPP_API_KEY;
 const WHATSAPP_SEND = process.env.WHATSAPP_SEND_OTP_URL;
 const WHATSAPP_VERIFY = process.env.WHATSAPP_VERIFY_OTP_URL;
 const WHATSAPP_TEMPLATE_NAME = process.env.WHATSAPP_TEMPLATE_NAME;
 
-// function formatWhatsappNumber(number) {
-//   let n = String(number || "").replace(/\D/g, "");
-//   if (n.length <= 10 && !n.startsWith("91")) n = "91" + n;
-//   return n;
-// }
 
 
-// Send OTP
 export async function sendWhatsAppOtp(mobile) {
     const number = mobile;
     try {

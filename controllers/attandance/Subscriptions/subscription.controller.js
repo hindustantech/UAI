@@ -61,7 +61,7 @@ export const getAllSubscriptions = async (req, res) => {
         ------------------------------------------ */
         const [subscriptions, total] = await Promise.all([
             Subscription.find(filter)
-                .populate("company", "name email")
+                .populate("company", "name email phone")
                 .populate("plan", "name price validityDays")
                 .sort(sort)
                 .skip(skip)
