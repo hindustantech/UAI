@@ -1,5 +1,5 @@
 import User from "../../models/userModel.js";
-import Emmployee from '../../models/Attandance/Employee.js'
+import Employee from '../../models/Attandance/Employee.js'
 import Attendance from '../../models/Attandance/Attendance.js'
 import PatnerProfile from "../../models/PatnerProfile.js";
 import mongoose from "mongoose";
