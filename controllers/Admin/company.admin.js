@@ -443,7 +443,7 @@ export const getCompanyEmployees = async (req, res) => {
         ========================================================= */
 
         const companyId =
-            req.params.companyId || req.user?._id;
+            req.query.companyId || req.user?._id;
 
         if (
             !companyId ||
