@@ -978,37 +978,20 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
         }
 
         /* =========================================================
-           COMPANY FILTER
+           COMPANY FILTER - FIXED
         ========================================================= */
 
+        // Based on your User schema, companies are stored as 'partner' or 'agency' type
         const companyMatch = {
-            type: "company"
+            type: { $in: ["partner", "agency", "admin", "super_admin"] },
+            accountStatus: "ACTIVE" // Only get active companies
         };
 
         if (search) {
-
             companyMatch.$or = [
-
-                {
-                    name: {
-                        $regex: search,
-                        $options: "i"
-                    }
-                },
-
-                {
-                    email: {
-                        $regex: search,
-                        $options: "i"
-                    }
-                },
-
-                {
-                    phone: {
-                        $regex: search,
-                        $options: "i"
-                    }
-                }
+                { name: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+                { phone: { $regex: search, $options: "i" } }
             ];
         }
 
@@ -1021,150 +1004,78 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
             createdAt: "createdAt"
         };
 
-        const finalSortField =
-            allowedSortFields[sortBy] || "name";
-
-        const finalSortOrder =
-            sortOrder === "desc" ? -1 : 1;
+        const finalSortField = allowedSortFields[sortBy] || "name";
+        const finalSortOrder = sortOrder === "desc" ? -1 : 1;
 
         /* =========================================================
            AGGREGATION PIPELINE
         ========================================================= */
 
         const pipeline = [
+            // COMPANY FILTER
+            { $match: companyMatch },
 
-            /* =====================================================
-               COMPANY FILTER
-            ===================================================== */
-
-            {
-                $match: companyMatch
-            },
-
-            /* =====================================================
-               EMPLOYEE COUNT
-            ===================================================== */
-
+            // LOOKUP EMPLOYEES - Fixed
             {
                 $lookup: {
                     from: "employees",
-
-                    let: {
-                        companyId: "$_id"
-                    },
-
+                    localField: "_id",
+                    foreignField: "companyId",
                     pipeline: [
-
                         {
                             $match: {
-                                $expr: {
-                                    $and: [
-
-                                        {
-                                            $eq: [
-                                                "$companyId",
-                                                "$$companyId"
-                                            ]
-                                        },
-
-                                        {
-                                            $eq: [
-                                                "$employmentStatus",
-                                                "active"
-                                            ]
-                                        }
-                                    ]
-                                }
+                                employmentStatus: "active"
                             }
                         },
-
                         {
                             $count: "totalEmployees"
                         }
                     ],
-
                     as: "employeeStats"
                 }
             },
 
-            /* =====================================================
-               ATTENDANCE STATS
-            ===================================================== */
-
+            // LOOKUP ATTENDANCES - Fixed
             {
                 $lookup: {
                     from: "attendances",
-
-                    let: {
-                        companyId: "$_id"
-                    },
-
+                    localField: "_id",
+                    foreignField: "companyId",
                     pipeline: [
-
                         {
                             $match: {
-                                $expr: {
-                                    $eq: [
-                                        "$companyId",
-                                        "$$companyId"
-                                    ]
-                                },
-
                                 date: {
                                     $gte: startDate,
                                     $lte: endDate
                                 }
                             }
                         },
-
                         {
                             $group: {
-
                                 _id: null,
-
-                                totalAttendanceMarked: {
-                                    $sum: 1
-                                },
-
+                                totalAttendanceMarked: { $sum: 1 },
                                 presentCount: {
                                     $sum: {
                                         $cond: [
-                                            {
-                                                $eq: [
-                                                    "$status",
-                                                    "present"
-                                                ]
-                                            },
+                                            { $eq: ["$status", "present"] },
                                             1,
                                             0
                                         ]
                                     }
                                 },
-
                                 absentCount: {
                                     $sum: {
                                         $cond: [
-                                            {
-                                                $eq: [
-                                                    "$status",
-                                                    "absent"
-                                                ]
-                                            },
+                                            { $eq: ["$status", "absent"] },
                                             1,
                                             0
                                         ]
                                     }
                                 },
-
                                 punchInCount: {
                                     $sum: {
                                         $cond: [
-                                            {
-                                                $ne: [
-                                                    "$punchIn",
-                                                    null
-                                                ]
-                                            },
+                                            { $ne: ["$punchIn", null] },
                                             1,
                                             0
                                         ]
@@ -1173,176 +1084,88 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                             }
                         }
                     ],
-
                     as: "attendanceStats"
                 }
             },
 
-            /* =====================================================
-               FORMAT DATA
-            ===================================================== */
-
+            // ADD FIELDS
             {
                 $addFields: {
-
                     totalEmployees: {
                         $ifNull: [
-                            {
-                                $arrayElemAt: [
-                                    "$employeeStats.totalEmployees",
-                                    0
-                                ]
-                            },
+                            { $arrayElemAt: ["$employeeStats.totalEmployees", 0] },
                             0
                         ]
                     },
-
                     attendanceData: {
                         $ifNull: [
+                            { $arrayElemAt: ["$attendanceStats", 0] },
                             {
-                                $arrayElemAt: [
-                                    "$attendanceStats",
-                                    0
-                                ]
-                            },
-                            {}
+                                totalAttendanceMarked: 0,
+                                presentCount: 0,
+                                absentCount: 0,
+                                punchInCount: 0
+                            }
                         ]
                     }
                 }
             },
 
-            /* =====================================================
-               FINAL COUNTS
-            ===================================================== */
-
+            // ADD ATTENDANCE COUNTS
             {
                 $addFields: {
-
-                    attendanceMarked: {
-                        $ifNull: [
-                            "$attendanceData.totalAttendanceMarked",
-                            0
-                        ]
-                    },
-
-                    presentCount: {
-                        $ifNull: [
-                            "$attendanceData.presentCount",
-                            0
-                        ]
-                    },
-
-                    absentCount: {
-                        $ifNull: [
-                            "$attendanceData.absentCount",
-                            0
-                        ]
-                    },
-
-                    punchInCount: {
-                        $ifNull: [
-                            "$attendanceData.punchInCount",
-                            0
-                        ]
-                    }
-                }
-            },
-
-            {
-                $addFields: {
-
+                    attendanceMarked: { $ifNull: ["$attendanceData.totalAttendanceMarked", 0] },
+                    presentCount: { $ifNull: ["$attendanceData.presentCount", 0] },
+                    absentCount: { $ifNull: ["$attendanceData.absentCount", 0] },
+                    punchInCount: { $ifNull: ["$attendanceData.punchInCount", 0] },
                     notMarkedAttendance: {
                         $subtract: [
-                            "$totalEmployees",
-                            "$attendanceMarked"
+                            { $ifNull: ["$totalEmployees", 0] },
+                            { $ifNull: ["$attendanceData.totalAttendanceMarked", 0] }
                         ]
                     }
                 }
             },
 
-            /* =====================================================
-               CLEAN RESPONSE
-            ===================================================== */
-
+            // PROJECT FINAL FIELDS
             {
                 $project: {
-
                     _id: 1,
-
                     companyName: "$name",
-
                     companyEmail: "$email",
-
                     companyPhone: "$phone",
-
                     profileImage: 1,
-
                     totalEmployees: 1,
-
                     attendanceMarked: 1,
-
                     presentCount: 1,
-
                     absentCount: 1,
-
                     notMarkedAttendance: 1,
-
                     punchInCount: 1,
-
                     createdAt: 1
                 }
             },
 
-            /* =====================================================
-               FACET
-            ===================================================== */
-
+            // FACET FOR PAGINATION
             {
                 $facet: {
-
                     metadata: [
-                        {
-                            $count: "totalDocuments"
-                        }
+                        { $count: "totalDocuments" }
                     ],
-
                     data: [
-
-                        {
-                            $sort: {
-                                [finalSortField]:
-                                    finalSortOrder
-                            }
-                        },
-
-                        {
-                            $skip: skip
-                        },
-
-                        {
-                            $limit: limit
-                        }
+                        { $sort: { [finalSortField]: finalSortOrder } },
+                        { $skip: skip },
+                        { $limit: limit }
                     ]
                 }
             },
 
-            /* =====================================================
-               FINAL FORMAT
-            ===================================================== */
-
+            // FORMAT FINAL OUTPUT
             {
                 $project: {
-
                     data: 1,
-
                     totalDocuments: {
                         $ifNull: [
-                            {
-                                $arrayElemAt: [
-                                    "$metadata.totalDocuments",
-                                    0
-                                ]
-                            },
+                            { $arrayElemAt: ["$metadata.totalDocuments", 0] },
                             0
                         ]
                     }
@@ -1351,20 +1174,17 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
         ];
 
         /* =========================================================
-           EXECUTE
+           EXECUTE AGGREGATION
         ========================================================= */
 
-        const result =
-            await User.aggregate(pipeline);
+        const result = await User.aggregate(pipeline);
 
-        const companies =
-            result[0]?.data || [];
+        // Debug log to see what's happening
+        console.log("Aggregation Result:", JSON.stringify(result, null, 2));
 
-        const totalDocuments =
-            result[0]?.totalDocuments || 0;
-
-        const totalPages =
-            Math.ceil(totalDocuments / limit);
+        const companies = result[0]?.data || [];
+        const totalDocuments = result[0]?.totalDocuments || 0;
+        const totalPages = Math.ceil(totalDocuments / limit) || 0;
 
         /* =========================================================
            RESPONSE
@@ -1372,14 +1192,11 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message:
-                "All companies attendance fetched successfully",
-
+            message: "All companies attendance fetched successfully",
             dateFilter: {
                 startDate,
                 endDate
             },
-
             pagination: {
                 currentPage: page,
                 limit,
@@ -1388,28 +1205,20 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                 hasNextPage: page < totalPages,
                 hasPrevPage: page > 1
             },
-
             data: companies
         });
 
     } catch (error) {
-
-        console.error(
-            "GET ALL COMPANY ATTENDANCE ERROR:",
-            error
-        );
+        console.error("GET ALL COMPANY ATTENDANCE ERROR:", error);
 
         return res.status(500).json({
             success: false,
             message: "Internal server error",
-            error:
-                process.env.NODE_ENV === "development"
-                    ? error.message
-                    : undefined
+            error: process.env.NODE_ENV === "development" ? error.message : undefined,
+            stack: process.env.NODE_ENV === "development" ? error.stack : undefined
         });
     }
 };
-
 
 // GET COMPANY ATTENDANCE DASHBOARD
 
