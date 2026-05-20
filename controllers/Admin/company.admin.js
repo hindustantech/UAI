@@ -886,7 +886,6 @@ export const getCompanyEmployees = async (req, res) => {
 
 // get ALL company employees  Attendance  with filters, pagination and sorting
 
-
 export const getTodayAllCompaniesAttendance = async (req, res) => {
     try {
 
@@ -978,13 +977,12 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
         }
 
         /* =========================================================
-           COMPANY FILTER - FIXED
+           COMPANY FILTER
         ========================================================= */
 
-        // Based on your User schema, companies are stored as 'partner' or 'agency' type
         const companyMatch = {
             type: { $in: ["partner", "agency", "admin", "super_admin"] },
-            accountStatus: "ACTIVE" // Only get active companies
+            accountStatus: "ACTIVE"
         };
 
         if (search) {
@@ -1001,7 +999,12 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
 
         const allowedSortFields = {
             companyName: "name",
-            createdAt: "createdAt"
+            createdAt: "createdAt",
+            totalEmployees: "totalEmployees",
+            attendanceMarked: "attendanceMarked",
+            presentCount: "presentCount",
+            absentCount: "absentCount",
+            notMarkedAttendance: "notMarkedAttendance"
         };
 
         const finalSortField = allowedSortFields[sortBy] || "name";
@@ -1012,10 +1015,17 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
         ========================================================= */
 
         const pipeline = [
-            // COMPANY FILTER
+            
+            /* =====================================================
+               STEP 1: FILTER COMPANIES
+            ===================================================== */
+            
             { $match: companyMatch },
 
-            // LOOKUP EMPLOYEES - Fixed
+            /* =====================================================
+               STEP 2: COUNT ACTIVE EMPLOYEES
+            ===================================================== */
+            
             {
                 $lookup: {
                     from: "employees",
@@ -1035,7 +1045,10 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                 }
             },
 
-            // LOOKUP ATTENDANCES - Fixed
+            /* =====================================================
+               STEP 3: GET ATTENDANCE STATISTICS
+            ===================================================== */
+            
             {
                 $lookup: {
                     from: "attendances",
@@ -1053,30 +1066,79 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                         {
                             $group: {
                                 _id: null,
+                                
+                                // Total attendance records
                                 totalAttendanceMarked: { $sum: 1 },
+                                
+                                // Status wise counts
                                 presentCount: {
                                     $sum: {
-                                        $cond: [
-                                            { $eq: ["$status", "present"] },
-                                            1,
-                                            0
-                                        ]
+                                        $cond: [{ $eq: ["$status", "present"] }, 1, 0]
                                     }
                                 },
+                                
                                 absentCount: {
                                     $sum: {
-                                        $cond: [
-                                            { $eq: ["$status", "absent"] },
-                                            1,
-                                            0
-                                        ]
+                                        $cond: [{ $eq: ["$status", "absent"] }, 1, 0]
                                     }
                                 },
+                                
+                                leaveCount: {
+                                    $sum: {
+                                        $cond: [{ $eq: ["$status", "leave"] }, 1, 0]
+                                    }
+                                },
+                                
+                                holidayCount: {
+                                    $sum: {
+                                        $cond: [{ $eq: ["$status", "holiday"] }, 1, 0]
+                                    }
+                                },
+                                
+                                halfDayCount: {
+                                    $sum: {
+                                        $cond: [{ $eq: ["$status", "half_day"] }, 1, 0]
+                                    }
+                                },
+                                
+                                weekOffCount: {
+                                    $sum: {
+                                        $cond: [{ $eq: ["$status", "week_off"] }, 1, 0]
+                                    }
+                                },
+                                
+                                pendingApprovalCount: {
+                                    $sum: {
+                                        $cond: [{ $eq: ["$status", "pending_approval"] }, 1, 0]
+                                    }
+                                },
+                                
+                                rejectedCount: {
+                                    $sum: {
+                                        $cond: [{ $eq: ["$status", "rejected"] }, 1, 0]
+                                    }
+                                },
+                                
+                                // Punch in count (employees who actually punched in)
                                 punchInCount: {
                                     $sum: {
+                                        $cond: [{ $ne: ["$punchIn", null] }, 1, 0]
+                                    }
+                                },
+                                
+                                // Late arrivals
+                                lateCount: {
+                                    $sum: {
+                                        $cond: [{ $gt: ["$lateByMinutes", 0] }, 1, 0]
+                                    }
+                                },
+                                
+                                // Overtime
+                                overtimeCount: {
+                                    $sum: {
                                         $cond: [
-                                            { $ne: ["$punchIn", null] },
-                                            1,
+                                            { $gt: ["$workSummary.overtimeMinutes", 0] }, 
+                                            1, 
                                             0
                                         ]
                                     }
@@ -1088,15 +1150,21 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                 }
             },
 
-            // ADD FIELDS
+            /* =====================================================
+               STEP 4: SET DEFAULT VALUES
+            ===================================================== */
+            
             {
                 $addFields: {
+                    // Employee count
                     totalEmployees: {
                         $ifNull: [
                             { $arrayElemAt: ["$employeeStats.totalEmployees", 0] },
                             0
                         ]
                     },
+                    
+                    // Attendance data with defaults
                     attendanceData: {
                         $ifNull: [
                             { $arrayElemAt: ["$attendanceStats", 0] },
@@ -1104,20 +1172,76 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                                 totalAttendanceMarked: 0,
                                 presentCount: 0,
                                 absentCount: 0,
-                                punchInCount: 0
+                                leaveCount: 0,
+                                holidayCount: 0,
+                                halfDayCount: 0,
+                                weekOffCount: 0,
+                                pendingApprovalCount: 0,
+                                rejectedCount: 0,
+                                punchInCount: 0,
+                                lateCount: 0,
+                                overtimeCount: 0
                             }
                         ]
                     }
                 }
             },
 
-            // ADD ATTENDANCE COUNTS
+            /* =====================================================
+               STEP 5: EXTRACT ALL COUNTS
+            ===================================================== */
+            
             {
                 $addFields: {
-                    attendanceMarked: { $ifNull: ["$attendanceData.totalAttendanceMarked", 0] },
-                    presentCount: { $ifNull: ["$attendanceData.presentCount", 0] },
-                    absentCount: { $ifNull: ["$attendanceData.absentCount", 0] },
-                    punchInCount: { $ifNull: ["$attendanceData.punchInCount", 0] },
+                    attendanceMarked: { 
+                        $ifNull: ["$attendanceData.totalAttendanceMarked", 0] 
+                    },
+                    
+                    presentCount: { 
+                        $ifNull: ["$attendanceData.presentCount", 0] 
+                    },
+                    
+                    absentCount: { 
+                        $ifNull: ["$attendanceData.absentCount", 0] 
+                    },
+                    
+                    leaveCount: { 
+                        $ifNull: ["$attendanceData.leaveCount", 0] 
+                    },
+                    
+                    holidayCount: { 
+                        $ifNull: ["$attendanceData.holidayCount", 0] 
+                    },
+                    
+                    halfDayCount: { 
+                        $ifNull: ["$attendanceData.halfDayCount", 0] 
+                    },
+                    
+                    weekOffCount: { 
+                        $ifNull: ["$attendanceData.weekOffCount", 0] 
+                    },
+                    
+                    pendingApprovalCount: { 
+                        $ifNull: ["$attendanceData.pendingApprovalCount", 0] 
+                    },
+                    
+                    rejectedCount: { 
+                        $ifNull: ["$attendanceData.rejectedCount", 0] 
+                    },
+                    
+                    punchInCount: { 
+                        $ifNull: ["$attendanceData.punchInCount", 0] 
+                    },
+                    
+                    lateCount: { 
+                        $ifNull: ["$attendanceData.lateCount", 0] 
+                    },
+                    
+                    overtimeCount: { 
+                        $ifNull: ["$attendanceData.overtimeCount", 0] 
+                    },
+                    
+                    // Calculate NOT MARKED = Total Employees - Total Attendance Records
                     notMarkedAttendance: {
                         $subtract: [
                             { $ifNull: ["$totalEmployees", 0] },
@@ -1127,42 +1251,196 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                 }
             },
 
-            // PROJECT FINAL FIELDS
+            /* =====================================================
+               STEP 6: CALCULATE PERCENTAGES
+            ===================================================== */
+            
+            {
+                $addFields: {
+                    // Attendance marked percentage
+                    attendancePercentage: {
+                        $cond: [
+                            { $gt: ["$totalEmployees", 0] },
+                            {
+                                $round: [
+                                    {
+                                        $multiply: [
+                                            { $divide: ["$attendanceMarked", "$totalEmployees"] },
+                                            100
+                                        ]
+                                    },
+                                    2
+                                ]
+                            },
+                            0
+                        ]
+                    },
+                    
+                    // Present percentage
+                    presentPercentage: {
+                        $cond: [
+                            { $gt: ["$totalEmployees", 0] },
+                            {
+                                $round: [
+                                    {
+                                        $multiply: [
+                                            { $divide: ["$presentCount", "$totalEmployees"] },
+                                            100
+                                        ]
+                                    },
+                                    2
+                                ]
+                            },
+                            0
+                        ]
+                    },
+                    
+                    // Absent percentage
+                    absentPercentage: {
+                        $cond: [
+                            { $gt: ["$totalEmployees", 0] },
+                            {
+                                $round: [
+                                    {
+                                        $multiply: [
+                                            { $divide: ["$absentCount", "$totalEmployees"] },
+                                            100
+                                        ]
+                                    },
+                                    2
+                                ]
+                            },
+                            0
+                        ]
+                    },
+                    
+                    // Not marked percentage
+                    notMarkedPercentage: {
+                        $cond: [
+                            { $gt: ["$totalEmployees", 0] },
+                            {
+                                $round: [
+                                    {
+                                        $multiply: [
+                                            { $divide: ["$notMarkedAttendance", "$totalEmployees"] },
+                                            100
+                                        ]
+                                    },
+                                    2
+                                ]
+                            },
+                            0
+                        ]
+                    }
+                }
+            },
+
+            /* =====================================================
+               STEP 7: PROJECT FINAL RESPONSE FIELDS
+            ===================================================== */
+            
             {
                 $project: {
                     _id: 1,
+                    
+                    // Company Info
                     companyName: "$name",
                     companyEmail: "$email",
                     companyPhone: "$phone",
                     profileImage: 1,
+                    companyType: "$type",
+                    
+                    // Employee Stats
                     totalEmployees: 1,
+                    
+                    // Attendance Summary
                     attendanceMarked: 1,
+                    notMarkedAttendance: 1,
+                    
+                    // Status Wise Breakdown
                     presentCount: 1,
                     absentCount: 1,
-                    notMarkedAttendance: 1,
+                    leaveCount: 1,
+                    holidayCount: 1,
+                    halfDayCount: 1,
+                    weekOffCount: 1,
+                    pendingApprovalCount: 1,
+                    rejectedCount: 1,
+                    
+                    // Other Counts
                     punchInCount: 1,
-                    createdAt: 1
+                    lateCount: 1,
+                    overtimeCount: 1,
+                    
+                    // Percentages
+                    attendancePercentage: 1,
+                    presentPercentage: 1,
+                    absentPercentage: 1,
+                    notMarkedPercentage: 1,
+                    
+                    // Verification
+                    statusBreakdownTotal: {
+                        $add: [
+                            "$presentCount",
+                            "$absentCount",
+                            "$leaveCount",
+                            "$holidayCount",
+                            "$halfDayCount",
+                            "$weekOffCount",
+                            "$pendingApprovalCount",
+                            "$rejectedCount"
+                        ]
+                    },
+                    
+                    // Timestamp
+                    createdAt: 1,
+                    updatedAt: 1
                 }
             },
 
-            // FACET FOR PAGINATION
+            /* =====================================================
+               STEP 8: FACET FOR PAGINATION
+            ===================================================== */
+            
             {
                 $facet: {
+                    // Get total count
                     metadata: [
                         { $count: "totalDocuments" }
                     ],
+                    
+                    // Get paginated data
                     data: [
                         { $sort: { [finalSortField]: finalSortOrder } },
                         { $skip: skip },
                         { $limit: limit }
+                    ],
+                    
+                    // Get summary statistics (optional)
+                    summary: [
+                        {
+                            $group: {
+                                _id: null,
+                                totalCompanies: { $sum: 1 },
+                                totalEmployeesAcrossAll: { $sum: "$totalEmployees" },
+                                totalPresentAcrossAll: { $sum: "$presentCount" },
+                                totalAbsentAcrossAll: { $sum: "$absentCount" },
+                                totalNotMarkedAcrossAll: { $sum: "$notMarkedAttendance" },
+                                totalAttendanceMarkedAcrossAll: { $sum: "$attendanceMarked" }
+                            }
+                        }
                     ]
                 }
             },
 
-            // FORMAT FINAL OUTPUT
+            /* =====================================================
+               STEP 9: FORMAT FINAL OUTPUT
+            ===================================================== */
+            
             {
                 $project: {
                     data: 1,
+                    summary: { $arrayElemAt: ["$summary", 0] },
                     totalDocuments: {
                         $ifNull: [
                             { $arrayElemAt: ["$metadata.totalDocuments", 0] },
@@ -1179,11 +1457,12 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
 
         const result = await User.aggregate(pipeline);
 
-        // Debug log to see what's happening
+        // Debug log
         console.log("Aggregation Result:", JSON.stringify(result, null, 2));
 
         const companies = result[0]?.data || [];
         const totalDocuments = result[0]?.totalDocuments || 0;
+        const summary = result[0]?.summary || {};
         const totalPages = Math.ceil(totalDocuments / limit) || 0;
 
         /* =========================================================
@@ -1193,10 +1472,23 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "All companies attendance fetched successfully",
+            
             dateFilter: {
                 startDate,
-                endDate
+                endDate,
+                dateRange: `${startDate.toISOString()} to ${endDate.toISOString()}`
             },
+            
+            // Overall summary across all companies
+            overallSummary: {
+                totalCompanies: summary?.totalCompanies || 0,
+                totalEmployees: summary?.totalEmployeesAcrossAll || 0,
+                totalAttendanceMarked: summary?.totalAttendanceMarkedAcrossAll || 0,
+                totalNotMarked: summary?.totalNotMarkedAcrossAll || 0,
+                totalPresent: summary?.totalPresentAcrossAll || 0,
+                totalAbsent: summary?.totalAbsentAcrossAll || 0
+            },
+            
             pagination: {
                 currentPage: page,
                 limit,
@@ -1205,6 +1497,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                 hasNextPage: page < totalPages,
                 hasPrevPage: page > 1
             },
+            
             data: companies
         });
 
@@ -1219,7 +1512,6 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
         });
     }
 };
-
 // GET COMPANY ATTENDANCE DASHBOARD
 
 export const getCompanyAttendanceDashboard = async (req, res) => {
