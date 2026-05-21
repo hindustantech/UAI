@@ -601,6 +601,8 @@ export const markAttendance = async (req, res) => {
                 if (!absentGraceCheck.isWithinGrace) {
                     console.log(`❌ ABSENT MARKING: Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
                     finalStatus = "absent";
+
+
                 }
             }
 
@@ -608,6 +610,9 @@ export const markAttendance = async (req, res) => {
                 // Punch-in is AFTER the grace period → Mark as ABSENT
                 // console.log(`❌ ABSENT MARKING: Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
                 // finalStatus = "absent";
+                                const absentGraceCheck = checkAfterAbsentMarkGrace(punchInTimeIST, shiftStartTimeIST, afterAbsentMarkGrace);
+
+                throw new Error(`Punch-in is ${absentGraceCheck.minutesAfterShiftStart}minutes after shift start, which exceeds the absent marking grace period of ${afterAbsentMarkGrace} minutes. Attendance marked as ABSENT.`);
 
                 attendance = new Attendance({
                     companyId,
@@ -661,6 +666,7 @@ export const markAttendance = async (req, res) => {
                     lastPunchAt: outTimeUTC || inTimeUTC,
                     approvalStatus: "pending"
                 });
+
             } else {
                 // Punch-in is WITHIN grace period → Calculate normal attendance
 
