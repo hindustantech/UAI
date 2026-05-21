@@ -483,7 +483,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                         type: "Point",
                         coordinates: finalCoordinates,
                         locationtype: ["current", "employee"].includes(row.locationtype) ? row.locationtype : "employee",
-                        radius: parseNumericValue(row.radius, 100),
+                        radius: parseNumericValue(row.radius, 200),
                         manual: row.manualAddress ? row.manualAddress.toString().trim() : ""
                     },
                     employmentStatus: "active"
