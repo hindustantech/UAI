@@ -12,7 +12,7 @@ const BreakSchema = new Schema({
     },
     duration: {
         type: Number,
-        default: 30 
+        default: 30
     },
     isPaid: {
         type: Boolean,
@@ -150,8 +150,13 @@ const ShiftSchema = new Schema({
 /**
  * Index (multi-tenant safe)
  */
-ShiftSchema.index({ companyId: 1}, { unique: true });
+ShiftSchema.index({ companyId: 1 }, { unique: true });
 
+
+// In ShiftSchema, add a method to check if shift is flexible
+ShiftSchema.methods.isFlexible = function () {
+    return this.shiftType === "flexible";
+};
 /**
  * Auto Apply Defaults Middleware (CRITICAL)
  */
