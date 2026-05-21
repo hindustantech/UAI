@@ -179,7 +179,7 @@ export const createEmployeesFromCSV = async (req, res) => {
         try {
             partnerUser = await User.findOne({
                 phone: partnerPhone,
-                role: { $in: ["admin", "super_admin", "hr"] }
+                type: { $in: ["admin", "super_admin", "partner"] }
             }).session(session);
         } catch (error) {
             await session.abortTransaction();
