@@ -606,6 +606,7 @@ export const markAttendance = async (req, res) => {
 
             if (finalStatus === "absent" && !isFlexible) {
                 // Punch-in is AFTER the grace period → Mark as ABSENT
+                // console.log(`❌ ABSENT MARKING: Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
                 // finalStatus = "absent";
 
                 attendance = new Attendance({
@@ -695,6 +696,7 @@ export const markAttendance = async (req, res) => {
                     isSuspicious = true;
                     console.log(`  ⚠ Incomplete: Punch-out not provided`);
                 }
+                const finalPayableMinutes = calculatePayableMinutes(totalMinutes, breaks);
 
                 if (isFlexible) {
                     // Flexible shifts: present if any work done, absent only if no punch-in
@@ -746,220 +748,220 @@ export const markAttendance = async (req, res) => {
                     remarks: isFlexible ? (remarks || "Flexible shift - no late penalties applied") : remarks,
                     isSuspicious,
                     punchHistory: outTimeUTC
-                    ? [
-                        {
-                            punchOut: outTimeUTC,
-                            geoLocation: {
-                                type: "Point",
-                                coordinates: geoLocation.coordinates,
-                                accuracy: geoLocation.accuracy,
-                                verified: geoVerified,
-                                source: geoLocation.source || "gps"
-                            },
-                            deviceInfo,
-                            source: deviceInfo?.source || "mobile"
-                        }
-                    ]
-                    : [],
+                        ? [
+                            {
+                                punchOut: outTimeUTC,
+                                geoLocation: {
+                                    type: "Point",
+                                    coordinates: geoLocation.coordinates,
+                                    accuracy: geoLocation.accuracy,
+                                    verified: geoVerified,
+                                    source: geoLocation.source || "gps"
+                                },
+                                deviceInfo,
+                                source: deviceInfo?.source || "mobile"
+                            }
+                        ]
+                        : [],
                     lastPunchAt: outTimeUTC || inTimeUTC,
                     approvalStatus: "pending"
                 });
+            }
         }
-    }
 
         /* ===========================
            13. PUNCH OUT (EXISTING ATTENDANCE)
         =========================== */
 
         else {
-    console.log(`→ Updating EXISTING attendance record for ${dateString}`);
+            console.log(`→ Updating EXISTING attendance record for ${dateString}`);
 
-    if (!punchOutTimeIST) {
-        return abortAndRespond(
-            session, res, 400, "PUNCH_OUT_REQUIRED",
-            "Punch Out time is required"
-        );
-    }
+            if (!punchOutTimeIST) {
+                return abortAndRespond(
+                    session, res, 400, "PUNCH_OUT_REQUIRED",
+                    "Punch Out time is required"
+                );
+            }
 
-    const outTimeUTC = new Date(punchOut);
+            const outTimeUTC = new Date(punchOut);
 
-    /* Anti-spam check */
-    const lastPunch = attendance.punchHistory?.[attendance.punchHistory.length - 1];
-    if (lastPunch) {
-        const lastPunchTimeIST = getPunchTimeIST(new Date(lastPunch.punchOut));
-        const gap = diffMinutes(lastPunchTimeIST, punchOutTimeIST);
-        if (gap < 3) {
-            return abortAndRespond(
-                session, res, 429, "PUNCH_TOO_FREQUENT",
-                "Punch registered too soon. Please wait 3 minutes before trying again.",
-                {
-                    lastPunchTime: lastPunch.punchOut,
-                    minimumGapMinutes: 3,
-                    currentGapMinutes: gap
+            /* Anti-spam check */
+            const lastPunch = attendance.punchHistory?.[attendance.punchHistory.length - 1];
+            if (lastPunch) {
+                const lastPunchTimeIST = getPunchTimeIST(new Date(lastPunch.punchOut));
+                const gap = diffMinutes(lastPunchTimeIST, punchOutTimeIST);
+                if (gap < 3) {
+                    return abortAndRespond(
+                        session, res, 429, "PUNCH_TOO_FREQUENT",
+                        "Punch registered too soon. Please wait 3 minutes before trying again.",
+                        {
+                            lastPunchTime: lastPunch.punchOut,
+                            minimumGapMinutes: 3,
+                            currentGapMinutes: gap
+                        }
+                    );
                 }
-            );
-        }
-    }
+            }
 
-    /* Add to punch history */
-    attendance.punchHistory.push({
-        punchOut: outTimeUTC,
-        geoLocation: {
-            type: "Point",
-            coordinates: geoLocation.coordinates,
-            accuracy: geoLocation.accuracy,
-            verified: geoVerified,
-            source: geoLocation.source || "gps"
-        },
-        deviceInfo,
-        source: deviceInfo?.source || "mobile",
-        createdAt: new Date()
-    });
+            /* Add to punch history */
+            attendance.punchHistory.push({
+                punchOut: outTimeUTC,
+                geoLocation: {
+                    type: "Point",
+                    coordinates: geoLocation.coordinates,
+                    accuracy: geoLocation.accuracy,
+                    verified: geoVerified,
+                    source: geoLocation.source || "gps"
+                },
+                deviceInfo,
+                source: deviceInfo?.source || "mobile",
+                createdAt: new Date()
+            });
 
-    attendance.lastPunchAt = outTimeUTC;
+            attendance.lastPunchAt = outTimeUTC;
 
-    /* Recalculate all metrics using IST times */
-    const inTimeUTC = new Date(attendance.punchIn);
-    const inTimeIST = getPunchTimeIST(inTimeUTC);
+            /* Recalculate all metrics using IST times */
+            const inTimeUTC = new Date(attendance.punchIn);
+            const inTimeIST = getPunchTimeIST(inTimeUTC);
 
-    let totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
-    let isSuspicious = false;
+            let totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+            let isSuspicious = false;
 
-    console.log(`  Punch Out (IST): ${punchOutTimeIST.toISOString()}`);
-    console.log(`  Total Work Time: ${totalMinutes} mins`);
+            console.log(`  Punch Out (IST): ${punchOutTimeIST.toISOString()}`);
+            console.log(`  Total Work Time: ${totalMinutes} mins`);
 
-    /* ===== CHECK IF ATTENDANCE IS MARKED AS ABSENT ===== */
-    if (attendance.status === "absent") {
-        console.log(`  ⚠️  Attendance already marked as ABSENT`);
-        console.log(`  Punch-in was outside afterAbsentMark grace period`);
-        // Status remains "absent" even though punch-out is provided
-    } else {
-        /* ===== GRACE PERIOD FOR LATE ENTRY (USING IST) ===== */
-        const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
-        const lateMinutes = applyGracePeriod(inTimeIST, shiftStartTimeIST, gracePeriodLate);
+            /* ===== CHECK IF ATTENDANCE IS MARKED AS ABSENT ===== */
+            if (attendance.status === "absent") {
+                console.log(`  ⚠️  Attendance already marked as ABSENT`);
+                console.log(`  Punch-in was outside afterAbsentMark grace period`);
+                // Status remains "absent" even though punch-out is provided
+            } else {
+                /* ===== GRACE PERIOD FOR LATE ENTRY (USING IST) ===== */
+                const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
+                const lateMinutes = applyGracePeriod(inTimeIST, shiftStartTimeIST, gracePeriodLate);
 
-        console.log(`  Grace Period (Late Entry): ${gracePeriodLate} mins`);
-        console.log(`  Late Minutes (after grace): ${lateMinutes}`);
+                console.log(`  Grace Period (Late Entry): ${gracePeriodLate} mins`);
+                console.log(`  Late Minutes (after grace): ${lateMinutes}`);
 
-        /* Calculate overtime with early exit grace (using IST) */
-        let overtimeMinutes = 0;
-        if (punchOutTimeIST > shiftEndTimeIST) {
-            const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
-            const rawOvertime = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
-            overtimeMinutes = Math.max(0, rawOvertime - earlyExitGrace);
+                /* Calculate overtime with early exit grace (using IST) */
+                let overtimeMinutes = 0;
+                if (punchOutTimeIST > shiftEndTimeIST) {
+                    const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
+                    const rawOvertime = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
+                    overtimeMinutes = Math.max(0, rawOvertime - earlyExitGrace);
 
-            console.log(`  Overtime: ${rawOvertime}mins - ${earlyExitGrace}mins grace = ${overtimeMinutes}mins`);
+                    console.log(`  Overtime: ${rawOvertime}mins - ${earlyExitGrace}mins grace = ${overtimeMinutes}mins`);
 
-            // Check overtime limit
-            const maxOvertimeMinutes = (shiftData.overtime?.maxHoursPerDay || 4) * 60;
-            if (overtimeMinutes > maxOvertimeMinutes && !shiftData.overtime?.allowed) {
-                isSuspicious = true;
-                console.log(`  ⚠ Overtime suspicious: ${overtimeMinutes}mins exceeds ${maxOvertimeMinutes}mins`);
+                    // Check overtime limit
+                    const maxOvertimeMinutes = (shiftData.overtime?.maxHoursPerDay || 4) * 60;
+                    if (overtimeMinutes > maxOvertimeMinutes && !shiftData.overtime?.allowed) {
+                        isSuspicious = true;
+                        console.log(`  ⚠ Overtime suspicious: ${overtimeMinutes}mins exceeds ${maxOvertimeMinutes}mins`);
+                    }
+                }
+
+                /* Calculate early leave (using IST) */
+                let earlyLeaveMinutes = 0;
+                if (punchOutTimeIST < shiftEndTimeIST) {
+                    earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
+                    console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
+                }
+
+                /* Calculate payable minutes */
+                const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
+                const finalStatus = determineStatus(
+                    payableMinutes,
+                    shiftDurationMinutes,
+                    attendance.status === "holiday"
+                );
+
+                console.log(`  Final Status: ${finalStatus}`);
+
+                /* Update attendance */
+                attendance.punchOut = outTimeUTC;
+                attendance.status = finalStatus;
+                attendance.workSummary = {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: Math.max(0, payableMinutes),
+                    overtimeMinutes: Math.max(0, overtimeMinutes),
+                    lateMinutes: Math.max(0, lateMinutes),
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                };
+                attendance.lateByMinutes = Math.max(0, lateMinutes);
+                attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+
+                /* Device fraud detection */
+                if (
+                    attendance.deviceInfo?.deviceId &&
+                    deviceInfo?.deviceId &&
+                    attendance.deviceInfo.deviceId !== deviceInfo.deviceId
+                ) {
+                    isSuspicious = true;
+                    console.log(`  ⚠ Device change detected: ${attendance.deviceInfo.deviceId} → ${deviceInfo.deviceId}`);
+                }
+
+                attendance.isSuspicious = isSuspicious;
             }
         }
 
-        /* Calculate early leave (using IST) */
-        let earlyLeaveMinutes = 0;
-        if (punchOutTimeIST < shiftEndTimeIST) {
-            earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
-            console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
-        }
+        /* ===========================
+           14. SAVE & COMMIT TRANSACTION
+        =========================== */
 
-        /* Calculate payable minutes */
-        const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
-        const finalStatus = determineStatus(
-            payableMinutes,
-            shiftDurationMinutes,
-            attendance.status === "holiday"
-        );
+        await attendance.save({ session });
+        await session.commitTransaction();
+        session.endSession();
 
-        console.log(`  Final Status: ${finalStatus}`);
+        console.log(`✓ Attendance marked successfully for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
 
-        /* Update attendance */
-        attendance.punchOut = outTimeUTC;
-        attendance.status = finalStatus;
-        attendance.workSummary = {
-            totalMinutes: Math.max(0, totalMinutes),
-            payableMinutes: Math.max(0, payableMinutes),
-            overtimeMinutes: Math.max(0, overtimeMinutes),
-            lateMinutes: Math.max(0, lateMinutes),
-            earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
-        };
-        attendance.lateByMinutes = Math.max(0, lateMinutes);
-        attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+        // Convert response times to IST for display
+        const punchInIST = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
+        const punchOutIST = attendance.punchOut ? getPunchTimeIST(attendance.punchOut) : null;
 
-        /* Device fraud detection */
-        if (
-            attendance.deviceInfo?.deviceId &&
-            deviceInfo?.deviceId &&
-            attendance.deviceInfo.deviceId !== deviceInfo.deviceId
-        ) {
-            isSuspicious = true;
-            console.log(`  ⚠ Device change detected: ${attendance.deviceInfo.deviceId} → ${deviceInfo.deviceId}`);
-        }
-
-        attendance.isSuspicious = isSuspicious;
-    }
-}
-
-/* ===========================
-   14. SAVE & COMMIT TRANSACTION
-=========================== */
-
-await attendance.save({ session });
-await session.commitTransaction();
-session.endSession();
-
-console.log(`✓ Attendance marked successfully for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
-
-// Convert response times to IST for display
-const punchInIST = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
-const punchOutIST = attendance.punchOut ? getPunchTimeIST(attendance.punchOut) : null;
-
-return res.status(201).json({
-    success: true,
-    message: `Attendance ${punchInIST} processed ${attendance.status} successfully`,
-    data: {
-        attendanceId: attendance._id,
-        employeeId: employee._id,
-        employeeCode: employee.empCode,
-        employeeName: employee.user_name,
-        date: attendanceDateIST,
-        status: attendance.status,
-        punchIn: punchInIST,
-        punchOut: punchOutIST,
-        shift: {
-            name: attendance.shift.name,
-            startTime: attendance.shift.startTime,
-            endTime: attendance.shift.endTime
-        },
-        workSummary: attendance.workSummary,
-        geoVerified: attendance.geoLocation?.verified,
-        isSuspicious: attendance.isSuspicious,
-        approvalStatus: attendance.approvalStatus,
-        remarks: attendance.remarks
-    }
-});
+        return res.status(201).json({
+            success: true,
+            message: `Attendance ${punchInIST} processed ${attendance.status} successfully`,
+            data: {
+                attendanceId: attendance._id,
+                employeeId: employee._id,
+                employeeCode: employee.empCode,
+                employeeName: employee.user_name,
+                date: attendanceDateIST,
+                status: attendance.status,
+                punchIn: punchInIST,
+                punchOut: punchOutIST,
+                shift: {
+                    name: attendance.shift.name,
+                    startTime: attendance.shift.startTime,
+                    endTime: attendance.shift.endTime
+                },
+                workSummary: attendance.workSummary,
+                geoVerified: attendance.geoLocation?.verified,
+                isSuspicious: attendance.isSuspicious,
+                approvalStatus: attendance.approvalStatus,
+                remarks: attendance.remarks
+            }
+        });
 
     } catch (error) {
 
-    try {
-        await session.abortTransaction();
-    } catch (e) {
-        console.error("Error aborting transaction:", e);
-    } finally {
-        session.endSession();
+        try {
+            await session.abortTransaction();
+        } catch (e) {
+            console.error("Error aborting transaction:", e);
+        } finally {
+            session.endSession();
+        }
+
+        console.error("❌ Attendance Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            errorCode: "ATTENDANCE_ERROR",
+            message: "Failed to process attendance",
+            error: process.env.NODE_ENV === "development" ? error.message : undefined
+        });
     }
-
-    console.error("❌ Attendance Error:", error);
-
-    return res.status(500).json({
-        success: false,
-        errorCode: "ATTENDANCE_ERROR",
-        message: "Failed to process attendance",
-        error: process.env.NODE_ENV === "development" ? error.message : undefined
-    });
-}
 };
 
 // ─── DTO helpers (defined once, reused) ──────────────────────────────────────
