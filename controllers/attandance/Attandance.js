@@ -606,7 +606,6 @@ export const markAttendance = async (req, res) => {
 
             if (finalStatus === "absent" && !isFlexible) {
                 // Punch-in is AFTER the grace period → Mark as ABSENT
-                console.log(`❌ ABSENT MARKING: Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
                 // finalStatus = "absent";
 
                 attendance = new Attendance({
