@@ -28,6 +28,7 @@ import SalesRoute from './routes/Attandance/Sales/Sales.routes.js';
 import SalesReoprts from './routes/Attandance/Sales/Sales.Reports.js';
 import lunchRoute from './routes/Attandance/BreakRoute.js';
 import comapnayAdmin from './routes/Admin/compay.admin.js';
+import Bulkcreation from './routes/Admin/bulkCreation.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 dotenv.config();
@@ -80,7 +81,7 @@ app.use("/api/attendance/requests", attendanceRequestRoutes);
 app.use('/api/patnerProfile', patnerProfile);
 app.use('/api/subscriptionsdata', subscriptionsdata);
 app.use('/api/admin/company', comapnayAdmin); 
-
+app.use('/api/admin/bulk', Bulkcreation);
 
 
 
