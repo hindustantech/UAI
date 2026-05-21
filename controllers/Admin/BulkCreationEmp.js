@@ -373,7 +373,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                     finalCoordinates = partnerUser.latestLocation.coordinates;
                 }
 
-                
+
 
                 if (!finalCoordinates) {
                     errors.push({
@@ -453,7 +453,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                     user_name: (row.user_name || user.name || `${user.firstName || ''} ${user.lastName || ''}`).trim() || user.phone,
                     weeklyOff: row.weeklyOff ? row.weeklyOff.split(",").map(day => day.trim()) : ["Sunday"],
                     empCode: row.empCode ? row.empCode.trim() : `EMP${Date.now()}${rowNumber}`,
-                    referalCode: row.referalCode ? row.referalCode.trim() : null,
+                    referalCode: row.referalCode ? row.referalCode.trim() : null || user.referalCode ,
                     jobInfo: {
                         designation: (row.designation || "Staff").trim(),
                         department: (row.department || "General").trim(),
