@@ -335,15 +335,45 @@ export const createEmployeesFromCSV = async (req, res) => {
                     (user.latitude && user.longitude ? [user.longitude, user.latitude] : null);
 
                 // Validate coordinates from CSV or user
-                let finalCoordinates = null;
+                // Get coordinates from CSV first
                 const csvLat = row.latitude || row.lat;
                 const csvLng = row.longitude || row.lng || row.lon;
 
+                let finalCoordinates = null;
+
+                // 1. Check CSV coordinates
                 if (csvLat && csvLng && validateCoordinates(csvLat, csvLng)) {
-                    finalCoordinates = [parseFloat(csvLng), parseFloat(csvLat)];
-                } else if (userCoordinates && userCoordinates.length === 2 && validateCoordinates(userCoordinates[1], userCoordinates[0])) {
-                    finalCoordinates = userCoordinates;
+                    finalCoordinates = [
+                        parseFloat(csvLng),
+                        parseFloat(csvLat)
+                    ];
                 }
+
+                // 2. Check user latest location
+                else if (
+                    user?.latestLocation?.coordinates &&
+                    user.latestLocation.coordinates.length === 2 &&
+                    validateCoordinates(
+                        user.latestLocation.coordinates[1],
+                        user.latestLocation.coordinates[0]
+                    )
+                ) {
+                    finalCoordinates = user.latestLocation.coordinates;
+                }
+
+                // 3. Check partner latest location
+                else if (
+                    partnerUser?.latestLocation?.coordinates &&
+                    partnerUser.latestLocation.coordinates.length === 2 &&
+                    validateCoordinates(
+                        partnerUser.latestLocation.coordinates[1],
+                        partnerUser.latestLocation.coordinates[0]
+                    )
+                ) {
+                    finalCoordinates = partnerUser.latestLocation.coordinates;
+                }
+
+                
 
                 if (!finalCoordinates) {
                     errors.push({
