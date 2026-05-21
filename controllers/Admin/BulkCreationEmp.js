@@ -349,17 +349,17 @@ export const createEmployeesFromCSV = async (req, res) => {
                     ];
                 }
 
-                // 2. Check user latest location
-                else if (
-                    user?.latestLocation?.coordinates &&
-                    user.latestLocation.coordinates.length === 2 &&
-                    validateCoordinates(
-                        user.latestLocation.coordinates[1],
-                        user.latestLocation.coordinates[0]
-                    )
-                ) {
-                    finalCoordinates = user.latestLocation.coordinates;
-                }
+                // // 2. Check user latest location
+                // else if (
+                //     user?.latestLocation?.coordinates &&
+                //     user.latestLocation.coordinates.length === 2 &&
+                //     validateCoordinates(
+                //         user.latestLocation.coordinates[1],
+                //         user.latestLocation.coordinates[0]
+                //     )
+                // ) {
+                //     finalCoordinates = user.latestLocation.coordinates;
+                // }
 
                 // 3. Check partner latest location
                 else if (
