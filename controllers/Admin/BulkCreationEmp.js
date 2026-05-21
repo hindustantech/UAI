@@ -210,7 +210,6 @@ export const createEmployeesFromCSV = async (req, res) => {
         try {
             availableShifts = await Shift.find({
                 companyId: companyId,
-                status: "active"
             }).session(session);
         } catch (error) {
             await session.abortTransaction();
