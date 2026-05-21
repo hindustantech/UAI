@@ -604,15 +604,29 @@ export const markAttendance = async (req, res) => {
 
 
                 }
+                // Return error response instead of throwing
+                return abortAndRespond(
+                    session,
+                    res,
+                    400,
+                    "LATE_PUNCH_ABSENT",
+                    `Punch-in is ${absentGraceCheck.minutesAfterShiftStart} minutes after shift start, which exceeds the absent marking grace period of ${afterAbsentMarkGrace} minutes. Attendance marked as ABSENT.`,
+                    {
+                        minutesLate: absentGraceCheck.minutesAfterShiftStart,
+                        gracePeriod: afterAbsentMarkGrace,
+                        shiftStartTime: shiftData.startTime,
+                        shiftEndTime: shiftData.endTime,
+                        punchInTime: punchInTimeIST,
+                        shiftType: shiftData.shiftType
+                    }
+                );
             }
 
             if (finalStatus === "absent" && !isFlexible) {
                 // Punch-in is AFTER the grace period → Mark as ABSENT
                 // console.log(`❌ ABSENT MARKING: Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
                 // finalStatus = "absent";
-                const absentGraceCheck = checkAfterAbsentMarkGrace(punchInTimeIST, shiftStartTimeIST, afterAbsentMarkGrace);
 
-                throw new Error(`Punch-in is ${absentGraceCheck.minutesAfterShiftStart}minutes after shift start, which exceeds the absent marking grace period of ${afterAbsentMarkGrace} minutes. Attendance marked as ABSENT.`);
 
                 attendance = new Attendance({
                     companyId,
