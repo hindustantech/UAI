@@ -640,7 +640,7 @@ export const markAttendance = async (req, res) => {
                     },
                     lateByMinutes: 0,
                     totalWorkingHours: 0,
-                    remarks: remarks || `Marked absent - Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift start (grace: ${afterAbsentMarkGrace}mins)`,
+                    remarks: isFlexible ? (remarks || "Flexible shift - no late penalties applied") : remarks,
                     isSuspicious: false,
                     punchHistory: outTimeUTC
                         ? [
@@ -740,10 +740,10 @@ export const markAttendance = async (req, res) => {
                         totalMinutes: Math.max(0, totalMinutes),
                         payableMinutes: Math.max(0, finalPayableMinutes),
                         overtimeMinutes: Math.max(0, overtimeMinutes),
-                        lateMinutes: Math.max(0, lateMinutes),
+                        lateMinutes: isFlexible ? 0 : Math.max(0, lateMinutes),  // Force 0 for flexible
                         earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
                     },
-                    lateByMinutes: Math.max(0, lateMinutes),
+                    lateByMinutes: isFlexible ? 0 : Math.max(0, lateMinutes),  // Force 0 for flexible
                     totalWorkingHours: Math.max(0, totalMinutes / 60),
                     remarks: isFlexible ? (remarks || "Flexible shift - no late penalties applied") : remarks,
                     isSuspicious,
