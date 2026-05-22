@@ -3,9 +3,19 @@
 import mongoose from "mongoose";
 import Employee from "../../models/Attandance/Employee.js";
 import User from "../../models/userModel.js";
-import Shift from '../../models/Attandance/Shift.js'
+import Shift from '../../models/Attandance/Shift.js';
 import csv from "csv-parser";
 import { Readable } from "stream";
+import {
+    canCreateEmployee,
+    getEmployeeLimit,
+    getRemainingEmployeeSlots,
+    getEmployeeBreakdown,
+    isNearingEmployeeLimit,
+    getCurrentEmployeeCount
+} from "../../services/featureAccess.service.js";
+import { getActiveSubscription } from "../../services/subscription.service.js";
+import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
 
 // Helper function to parse CSV buffer with validation
 const parseCSV = (buffer) => {
@@ -205,7 +215,25 @@ export const createEmployeesFromCSV = async (req, res) => {
 
         const companyId = partnerUser._id;
 
-        // Step 2: Find available shifts for this company
+        // Step 2: Get active subscription
+        const subscription = await Subscription.findOne({
+            company: companyId,
+            status: "ACTIVE",
+            isActive: true,
+            endDate: { $gte: new Date() }
+        }).session(session);
+
+        if (!subscription) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({
+                success: false,
+                message: "No active subscription",
+                error: "No active subscription found for this company"
+            });
+        }
+
+        // Step 3: Find available shifts for this company
         let availableShifts;
         try {
             availableShifts = await Shift.find({
@@ -235,7 +263,7 @@ export const createEmployeesFromCSV = async (req, res) => {
 
         const defaultShiftId = availableShifts[0]._id;
 
-        // Step 3: Parse CSV file
+        // Step 4: Parse CSV file
         let csvData;
         try {
             csvData = await parseCSV(csvFile.buffer);
@@ -250,12 +278,122 @@ export const createEmployeesFromCSV = async (req, res) => {
             });
         }
 
+        // Step 5: Pre-validate subscription limits for all valid employees in CSV
+        const employeeTypeCounts = {
+            sales: 0,
+            pro_sales: 0,
+            non_sales: 0
+        };
+
+        // Count valid employees by type first
+        for (const row of csvData) {
+            const employeeType = ["sales", "pro_sales", "non_sales"].includes(row.employeeType) 
+                ? row.employeeType 
+                : "non_sales";
+            
+            const userPhone = (row.phone || row.user_phone || row.mobile || row.phoneNumber || "").toString().trim();
+            
+            // Skip invalid rows
+            if (!userPhone || !validatePhoneNumber(userPhone)) continue;
+            
+            employeeTypeCounts[employeeType]++;
+        }
+
+        // Check if we can create all employees
+        const currentUsage = {
+            employeesUsed: subscription.usage?.employeesUsed || 0,
+            no_of_sales_person_employeesUsed: subscription.usage?.no_of_sales_person_employeesUsed || 0,
+            no_of_pro_sales_person_employeesUsed: subscription.usage?.no_of_pro_sales_person_employeesUsed || 0
+        };
+
+        const simulatedUsage = {
+            employeesUsed: currentUsage.employeesUsed + (employeeTypeCounts.sales + employeeTypeCounts.pro_sales + employeeTypeCounts.non_sales),
+            no_of_sales_person_employeesUsed: currentUsage.no_of_sales_person_employeesUsed + employeeTypeCounts.sales,
+            no_of_pro_sales_person_employeesUsed: currentUsage.no_of_pro_sales_person_employeesUsed + employeeTypeCounts.pro_sales
+        };
+
+        // Validate each type limit
+        if (employeeTypeCounts.sales > 0) {
+            const salesCheck = canCreateEmployee(
+                { ...subscription.toObject(), usage: currentUsage },
+                "sales"
+            );
+            if (!salesCheck.canCreate) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(403).json({
+                    success: false,
+                    message: "Sales employee limit exceeded",
+                    error: salesCheck.message,
+                    details: {
+                        required: employeeTypeCounts.sales,
+                        available: getRemainingEmployeeSlots(
+                            { usage: currentUsage },
+                            "sales"
+                        )
+                    }
+                });
+            }
+        }
+
+        if (employeeTypeCounts.pro_sales > 0) {
+            const proSalesCheck = canCreateEmployee(
+                { ...subscription.toObject(), usage: currentUsage },
+                "pro_sales"
+            );
+            if (!proSalesCheck.canCreate) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(403).json({
+                    success: false,
+                    message: "Pro Sales employee limit exceeded",
+                    error: proSalesCheck.message,
+                    details: {
+                        required: employeeTypeCounts.pro_sales,
+                        available: getRemainingEmployeeSlots(
+                            { usage: currentUsage },
+                            "pro_sales"
+                        )
+                    }
+                });
+            }
+        }
+
+        // Check overall non-sales limit
+        const nonSalesCheck = canCreateEmployee(
+            { ...subscription.toObject(), usage: currentUsage },
+            "non_sales"
+        );
+        if (!nonSalesCheck.canCreate) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({
+                success: false,
+                message: "Employee limit exceeded",
+                error: nonSalesCheck.message,
+                details: {
+                    required: employeeTypeCounts.non_sales,
+                    available: getRemainingEmployeeSlots(
+                        { usage: currentUsage },
+                        "non_sales"
+                    )
+                }
+            });
+        }
+
         const createdEmployees = [];
         const errors = [];
         const warnings = [];
         let successfulRows = 0;
 
-        // Step 4: Process each row from CSV
+        // Track cumulative usage updates
+        const cumulativeIncrement = {
+            "usage.employeesUsed": 0,
+            "usage.no_of_sales_person_employeesUsed": 0,
+            "usage.no_of_pro_sales_person_employeesUsed": 0
+        };
+
+        // Step 6: Process each row from CSV
         for (let index = 0; index < csvData.length; index++) {
             const row = csvData[index];
             const rowNumber = index + 1;
@@ -293,7 +431,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                     continue;
                 }
 
-                // Step 5: Find user by phone number
+                // Find user by phone number
                 let user;
                 try {
                     user = await User.findOne({ phone: userPhone }).session(session);
@@ -328,14 +466,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                     continue;
                 }
 
-                // Get user's coordinates with multiple fallback options
-                const userCoordinates = user.location?.coordinates ||
-                    user.address?.coordinates ||
-                    user.currentLocation?.coordinates ||
-                    (user.latitude && user.longitude ? [user.longitude, user.latitude] : null);
-
-                // Validate coordinates from CSV or user
-                // Get coordinates from CSV first
+                // Get coordinates from CSV first, then fallback to user/partner location
                 const csvLat = row.latitude || row.lat;
                 const csvLng = row.longitude || row.lng || row.lon;
 
@@ -348,20 +479,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                         parseFloat(csvLat)
                     ];
                 }
-
-                // // 2. Check user latest location
-                // else if (
-                //     user?.latestLocation?.coordinates &&
-                //     user.latestLocation.coordinates.length === 2 &&
-                //     validateCoordinates(
-                //         user.latestLocation.coordinates[1],
-                //         user.latestLocation.coordinates[0]
-                //     )
-                // ) {
-                //     finalCoordinates = user.latestLocation.coordinates;
-                // }
-
-                // 3. Check partner latest location
+                // 2. Check partner latest location
                 else if (
                     partnerUser?.latestLocation?.coordinates &&
                     partnerUser.latestLocation.coordinates.length === 2 &&
@@ -373,13 +491,11 @@ export const createEmployeesFromCSV = async (req, res) => {
                     finalCoordinates = partnerUser.latestLocation.coordinates;
                 }
 
-
-
                 if (!finalCoordinates) {
                     errors.push({
                         row: rowNumber,
                         phone: userPhone,
-                        error: "Valid coordinates not found. Please provide latitude/longitude in CSV or ensure user has location set.",
+                        error: "Valid coordinates not found. Please provide latitude/longitude in CSV or ensure partner has location set.",
                         data: row
                     });
                     continue;
@@ -445,6 +561,11 @@ export const createEmployeesFromCSV = async (req, res) => {
                     });
                 }
 
+                // Determine employee type
+                const employeeType = ["sales", "pro_sales", "non_sales"].includes(row.employeeType) 
+                    ? row.employeeType 
+                    : "non_sales";
+
                 // Prepare employee data with validation
                 const employeeData = {
                     companyId: companyId,
@@ -453,7 +574,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                     user_name: (row.user_name || user.name || `${user.firstName || ''} ${user.lastName || ''}`).trim() || user.phone,
                     weeklyOff: row.weeklyOff ? row.weeklyOff.split(",").map(day => day.trim()) : ["Sunday"],
                     empCode: row.empCode ? row.empCode.trim() : `EMP${Date.now()}${rowNumber}`,
-                    referalCode: row.referalCode ? row.referalCode.trim() : null || user.referalCode ,
+                    referalCode: row.referalCode ? row.referalCode.trim() : null || user.referalCode,
                     jobInfo: {
                         designation: (row.designation || "Staff").trim(),
                         department: (row.department || "General").trim(),
@@ -463,7 +584,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                         joiningDate: row.joiningDate && validateDate(row.joiningDate) ? new Date(row.joiningDate) : new Date(),
                         reportingManager: row.reportingManagerId && mongoose.Types.ObjectId.isValid(row.reportingManagerId) ? row.reportingManagerId : null
                     },
-                    employeeType: ["non_sales", "sales", "pro_sales"].includes(row.employeeType) ? row.employeeType : "non_sales",
+                    employeeType: employeeType,
                     role: ["employee", "manager", "hr", "admin", "sales", "super_admin"].includes(row.role) ? row.role : "employee",
                     salaryStructure: {
                         basic: parseNumericValue(row.basic, 0),
@@ -489,12 +610,20 @@ export const createEmployeesFromCSV = async (req, res) => {
                     employmentStatus: "active"
                 };
 
-                // Create employee with error handling
+                // Create employee
                 let employee;
                 try {
                     employee = new Employee(employeeData);
                     await employee.save({ session });
                     successfulRows++;
+
+                    // Track cumulative increments
+                    cumulativeIncrement["usage.employeesUsed"]++;
+                    if (employeeType === "sales") {
+                        cumulativeIncrement["usage.no_of_sales_person_employeesUsed"]++;
+                    } else if (employeeType === "pro_sales") {
+                        cumulativeIncrement["usage.no_of_pro_sales_person_employeesUsed"]++;
+                    }
 
                     createdEmployees.push({
                         row: rowNumber,
@@ -502,7 +631,8 @@ export const createEmployeesFromCSV = async (req, res) => {
                         userId: user._id,
                         name: employee.user_name,
                         empCode: employee.empCode,
-                        phone: userPhone
+                        phone: userPhone,
+                        employeeType: employeeType
                     });
                 } catch (error) {
                     // Handle mongoose validation errors
@@ -531,7 +661,6 @@ export const createEmployeesFromCSV = async (req, res) => {
                     }
                     continue;
                 }
-
             } catch (error) {
                 console.error(`Unexpected error processing row ${rowNumber}:`, error);
                 errors.push({
@@ -542,8 +671,14 @@ export const createEmployeesFromCSV = async (req, res) => {
             }
         }
 
-        // Commit transaction if at least one employee was created successfully
-        if (successfulRows > 0) {
+        // Step 7: Update subscription usage with cumulative increments
+        if (successfulRows > 0 && (cumulativeIncrement["usage.employeesUsed"] > 0)) {
+            await Subscription.updateOne(
+                { _id: subscription._id },
+                { $inc: cumulativeIncrement },
+                { session }
+            );
+            
             await session.commitTransaction();
         } else {
             await session.abortTransaction();
@@ -556,7 +691,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                     totalRows: csvData.length,
                     errors: errors.length,
                     warnings: warnings.length,
-                    errorsList: errors.slice(0, 10), // Limit error display
+                    errorsList: errors.slice(0, 10),
                     warningsList: warnings.slice(0, 10)
                 }
             });
@@ -564,10 +699,18 @@ export const createEmployeesFromCSV = async (req, res) => {
 
         session.endSession();
 
-        // Return response with comprehensive summary
-        return res.status(successfulRows > 0 ? 200 : 400).json({
-            success: successfulRows > 0,
-            message: successfulRows > 0 ? "Employee creation completed" : "Employee creation failed",
+        // Step 8: Prepare response with quota info
+        const updatedUsage = {
+            employeesUsed: (subscription.usage?.employeesUsed || 0) + cumulativeIncrement["usage.employeesUsed"],
+            no_of_sales_person_employeesUsed: (subscription.usage?.no_of_sales_person_employeesUsed || 0) + cumulativeIncrement["usage.no_of_sales_person_employeesUsed"],
+            no_of_pro_sales_person_employeesUsed: (subscription.usage?.no_of_pro_sales_person_employeesUsed || 0) + cumulativeIncrement["usage.no_of_pro_sales_person_employeesUsed"]
+        };
+
+        const breakdown = getEmployeeBreakdown({ usage: updatedUsage });
+
+        const response = {
+            success: true,
+            message: "Employee creation completed",
             summary: {
                 totalRowsInCSV: csvData.length,
                 successfullyCreated: createdEmployees.length,
@@ -576,7 +719,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                 successRate: `${((createdEmployees.length / csvData.length) * 100).toFixed(2)}%`
             },
             data: {
-                createdEmployees: createdEmployees.slice(0, 100), // Limit response size
+                createdEmployees: createdEmployees.slice(0, 100),
                 companyInfo: {
                     companyId: companyId,
                     companyName: partnerUser.name || partnerUser.email || partnerUser.phone,
@@ -585,20 +728,65 @@ export const createEmployeesFromCSV = async (req, res) => {
                     shiftName: availableShifts[0]?.name || "Default Shift"
                 }
             },
+            quota: {
+                breakdown: {
+                    total: breakdown.total,
+                    sales: breakdown.sales,
+                    proSales: breakdown.proSales,
+                    nonSales: breakdown.nonSales
+                },
+                limits: {
+                    sales: getEmployeeLimit({ usage: updatedUsage }, "sales"),
+                    proSales: getEmployeeLimit({ usage: updatedUsage }, "pro_sales"),
+                    nonSales: getEmployeeLimit({ usage: updatedUsage }, "non_sales")
+                },
+                remaining: {
+                    sales: getRemainingEmployeeSlots({ usage: updatedUsage }, "sales"),
+                    proSales: getRemainingEmployeeSlots({ usage: updatedUsage }, "pro_sales"),
+                    nonSales: getRemainingEmployeeSlots({ usage: updatedUsage }, "non_sales")
+                }
+            },
             errors: {
                 count: errors.length,
-                list: errors.slice(0, 20), // Limit error display
+                list: errors.slice(0, 20),
                 message: errors.length > 20 ? `And ${errors.length - 20} more errors...` : undefined
             },
-            warnings: {
-                count: warnings.length,
-                list: warnings.slice(0, 10)
-            }
-        });
+            warnings: []
+        };
+
+        // Add limit warnings
+        const salesWarning = isNearingEmployeeLimit({ usage: updatedUsage }, "sales", 80);
+        const proSalesWarning = isNearingEmployeeLimit({ usage: updatedUsage }, "pro_sales", 80);
+        const nonSalesWarning = isNearingEmployeeLimit({ usage: updatedUsage }, "non_sales", 80);
+
+        if (salesWarning.isNearing) {
+            response.warnings.push({
+                type: "SALES_LIMIT_WARNING",
+                message: `Sales employees: ${breakdown.sales}/${getEmployeeLimit({ usage: updatedUsage }, "sales")} (${salesWarning.percentage}%)`
+            });
+        }
+
+        if (proSalesWarning.isNearing) {
+            response.warnings.push({
+                type: "PRO_SALES_LIMIT_WARNING",
+                message: `Pro Sales employees: ${breakdown.proSales}/${getEmployeeLimit({ usage: updatedUsage }, "pro_sales")} (${proSalesWarning.percentage}%)`
+            });
+        }
+
+        if (nonSalesWarning.isNearing) {
+            response.warnings.push({
+                type: "NON_SALES_LIMIT_WARNING",
+                message: `Non-Sales employees: ${breakdown.nonSales}/${getEmployeeLimit({ usage: updatedUsage }, "non_sales")} (${nonSalesWarning.percentage}%)`
+            });
+        }
+
+        return res.status(200).json(response);
 
     } catch (error) {
         // Rollback transaction on any unexpected error
-        await session.abortTransaction();
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
         session.endSession();
 
         console.error("Critical error in createEmployeesFromCSV:", error);
