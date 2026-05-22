@@ -253,8 +253,8 @@ export const getCurrentEmployeeCount = (subscription, employeeType = "non_sales"
             const total = usage.employeesUsed || 0;
             const sales = usage.no_of_sales_person_employeesUsed || 0;
             const proSales = usage.no_of_pro_sales_person_employeesUsed || 0;
-            return Math.max(0, total - sales - proSales);
             console.log("252 : Non-sales employee count calculated:", Math.max(0, total - sales - proSales));
+            return Math.max(0, total - sales - proSales);
     }
 };
 
