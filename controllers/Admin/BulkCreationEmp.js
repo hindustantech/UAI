@@ -287,23 +287,26 @@ export const createEmployeesFromCSV = async (req, res) => {
 
         // Count valid employees by type first
         for (const row of csvData) {
-            const employeeType = ["sales", "pro_sales", "non_sales"].includes(row.employeeType) 
-                ? row.employeeType 
+            const employeeType = ["sales", "pro_sales", "non_sales"].includes(row.employeeType)
+                ? row.employeeType
                 : "non_sales";
-            
+
             const userPhone = (row.phone || row.user_phone || row.mobile || row.phoneNumber || "").toString().trim();
-            
+
             // Skip invalid rows
             if (!userPhone || !validatePhoneNumber(userPhone)) continue;
-            
+
             employeeTypeCounts[employeeType]++;
         }
 
         // Get current usage from subscription
         const currentUsage = {
             employeesUsed: subscription.usage?.employeesUsed || 0,
+            maxEmployees: subscription.usage?.maxEmployees || 0,
             no_of_sales_person_employeesUsed: subscription.usage?.no_of_sales_person_employeesUsed || 0,
-            no_of_pro_sales_person_employeesUsed: subscription.usage?.no_of_pro_sales_person_employeesUsed || 0
+            no_of_sales_person_maxEmployees: subscription.usage?.no_of_sales_person_maxEmployees || 0,
+            no_of_pro_sales_person_employeesUsed: subscription.usage?.no_of_pro_sales_person_employeesUsed || 0,
+            no_of_pro_sales_person_maxEmployees: subscription.usage?.no_of_pro_sales_person_maxEmployees || 0,
         };
 
         // Create subscription object with current usage for validation
@@ -353,7 +356,7 @@ export const createEmployeesFromCSV = async (req, res) => {
 
         if (employeeTypeCounts.non_sales > 0) {
             const remainingNonSales = getRemainingEmployeeSlots(subscriptionWithUsage, "non_sales");
-                console.log("Remaining non-sales slots:", remainingNonSales);
+            console.log("Remaining non-sales slots:", remainingNonSales);
             if (employeeTypeCounts.non_sales > remainingNonSales) {
                 await session.abortTransaction();
                 session.endSession();
@@ -571,8 +574,8 @@ export const createEmployeesFromCSV = async (req, res) => {
                 }
 
                 // Determine employee type
-                const employeeType = ["sales", "pro_sales", "non_sales"].includes(row.employeeType) 
-                    ? row.employeeType 
+                const employeeType = ["sales", "pro_sales", "non_sales"].includes(row.employeeType)
+                    ? row.employeeType
                     : "non_sales";
 
                 // Prepare employee data with validation
@@ -687,7 +690,7 @@ export const createEmployeesFromCSV = async (req, res) => {
                 { $inc: cumulativeIncrement },
                 { session }
             );
-            
+
             await session.commitTransaction();
         } else {
             await session.abortTransaction();
