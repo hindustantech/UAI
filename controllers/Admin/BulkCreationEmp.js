@@ -353,6 +353,7 @@ export const createEmployeesFromCSV = async (req, res) => {
 
         if (employeeTypeCounts.non_sales > 0) {
             const remainingNonSales = getRemainingEmployeeSlots(subscriptionWithUsage, "non_sales");
+                console.log("Remaining non-sales slots:", remainingNonSales);
             if (employeeTypeCounts.non_sales > remainingNonSales) {
                 await session.abortTransaction();
                 session.endSession();
