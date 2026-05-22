@@ -235,10 +235,11 @@ export const getEmployeeLimit = (subscription, employeeType = "non_sales") => {
  * @returns {number} - Current employees of this type
  */
 export const getCurrentEmployeeCount = (subscription, employeeType = "non_sales") => {
+    console.log("238 :Subscription object in getCurrentEmployeeCount:", subscription);
     if (!subscription || !subscription.usage) return 0;
 
     const usage = subscription.usage;
-
+    console.log("242 : Usage object in getCurrentEmployeeCount:", usage);
     switch (employeeType) {
         case "sales":
             return usage.no_of_sales_person_employeesUsed || 0;
@@ -249,6 +250,7 @@ export const getCurrentEmployeeCount = (subscription, employeeType = "non_sales"
             const sales = usage.no_of_sales_person_employeesUsed || 0;
             const proSales = usage.no_of_pro_sales_person_employeesUsed || 0;
             return Math.max(0, total - sales - proSales);
+            console.log("252 : Non-sales employee count calculated:", Math.max(0, total - sales - proSales));
     }
 };
 
