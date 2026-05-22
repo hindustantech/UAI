@@ -304,10 +304,11 @@ export const getEmployeeBreakdown = (subscription) => {
  * @returns {number} - Remaining employee slots
  */
 export const getRemainingEmployeeSlots = (subscription, employeeType = "non_sales") => {
+    console.log("307: Subscription object in getRemainingEmployeeSlots:", subscription);
     const limit = getEmployeeLimit(subscription, employeeType);
-    console.log(`257 : Employee limit for ${employeeType}:`, limit);
+    console.log(`309 : Employee limit for ${employeeType}:`, limit);
     const used = getCurrentEmployeeCount(subscription, employeeType);
-    console.log(`260 : Remaining ${employeeType} slots:`, Math.max(0, limit - used));
+    console.log(`311 : Remaining ${employeeType} slots:`, Math.max(0, limit - used));
     return Math.max(0, limit - used);
 };
 
