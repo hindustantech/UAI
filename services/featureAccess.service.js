@@ -215,7 +215,7 @@ export const hasPlanType = (subscription, planType) => {
  */
 export const getEmployeeLimit = (subscription, employeeType = "non_sales") => {
     if (!subscription || !subscription.usage) return 0;
-
+    console.log("218 : Subscription object in getEmployeeLimit:", subscription);
     const usage = subscription.usage;
 
     switch (employeeType) {
