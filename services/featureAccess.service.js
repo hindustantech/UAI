@@ -240,11 +240,15 @@ export const getCurrentEmployeeCount = (subscription, employeeType = "non_sales"
 
     const usage = subscription.usage;
     console.log("242 : Usage object in getCurrentEmployeeCount:", usage);
+    console.log("244 : Employee type requested:", employeeType);
+
     switch (employeeType) {
         case "sales":
             return usage.no_of_sales_person_employeesUsed || 0;
+            console.log("246 : Sales employee count:", usage.no_of_sales_person_employeesUsed || 0);
         case "pro_sales":
             return usage.no_of_pro_sales_person_employeesUsed || 0;
+            console.log("248 : Pro Sales employee count:", usage.no_of_pro_sales_person_employeesUsed || 0);    
         default: // non_sales (derived)
             const total = usage.employeesUsed || 0;
             const sales = usage.no_of_sales_person_employeesUsed || 0;
