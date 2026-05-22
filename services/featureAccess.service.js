@@ -10,7 +10,7 @@ export const hasDataSeeAccess = (subscription) => {
     if (!subscription) return false;
     if (subscription.status !== "ACTIVE") return false;
     if (subscription.endDate < new Date()) return false;
-    
+
     return subscription.usage?.DATA_SEE === true;
 };
 
@@ -23,7 +23,7 @@ export const hasDataExportAccess = (subscription) => {
     if (!subscription) return false;
     if (subscription.status !== "ACTIVE") return false;
     if (subscription.endDate < new Date()) return false;
-    
+
     return subscription.usage?.DATA_EXPORT === true;
 };
 
@@ -37,9 +37,9 @@ export const hasFeatureAccess = (subscription, featureKey) => {
     if (!subscription) return false;
     if (subscription.status !== "ACTIVE") return false;
     if (subscription.endDate < new Date()) return false;
-    
+
     // Handle specific features based on schema fields
-    switch(featureKey) {
+    switch (featureKey) {
         case 'DATA_SEE':
             return subscription.usage?.DATA_SEE === true;
         case 'DATA_EXPORT':
@@ -64,7 +64,7 @@ export const hasFeatureAccess = (subscription, featureKey) => {
  */
 export const getAllFeatures = (subscription) => {
     if (!subscription) return {};
-    
+
     const features = {
         // Dedicated fields from usage
         DATA_SEE: subscription.usage?.DATA_SEE || false,
@@ -72,17 +72,17 @@ export const getAllFeatures = (subscription) => {
         MAX_EMPLOYEES: getEmployeeLimit(subscription),
         CURRENT_EMPLOYEES: getCurrentEmployeeCount(subscription),
         REMAINING_EMPLOYEES: getRemainingEmployeeSlots(subscription),
-        
+
         // Plan info
         PLAN_NAME: subscription.planSnapshot?.name,
         PLAN_PRICE: subscription.planSnapshot?.finalPrice,
         VALIDITY_DAYS: subscription.planSnapshot?.validityDays,
-        
+
         // Status
         IS_ACTIVE: subscription.status === "ACTIVE",
         AUTO_RENEW: subscription.autoRenew || false,
     };
-    
+
     return features;
 };
 
@@ -93,15 +93,15 @@ export const getAllFeatures = (subscription) => {
  */
 export const canUpgradeEmployees = (subscription) => {
     if (!subscription) return false;
-    
+
     // Check if subscription is active
     if (subscription.status !== "ACTIVE") return false;
     if (subscription.endDate < new Date()) return false;
-    
+
     // Check if already at max limit
     const limit = getEmployeeLimit(subscription);
     const used = getCurrentEmployeeCount(subscription);
-    
+
     return used >= limit && limit > 0;
 };
 
@@ -121,12 +121,12 @@ export const getSubscriptionStatus = (subscription) => {
             daysRemaining: 0
         };
     }
-    
+
     const now = new Date();
     const isExpired = subscription.endDate < now;
     const isActive = subscription.status === "ACTIVE" && !isExpired;
     const daysRemaining = Math.ceil((subscription.endDate - now) / (1000 * 60 * 60 * 24));
-    
+
     return {
         isValid: isActive,
         status: subscription.status,
@@ -138,7 +138,7 @@ export const getSubscriptionStatus = (subscription) => {
         startDate: subscription.startDate,
         endDate: subscription.endDate,
         autoRenew: subscription.autoRenew,
-        message: isActive 
+        message: isActive
             ? `Subscription active for ${Math.max(0, daysRemaining)} more days`
             : `Subscription ${subscription.status.toLowerCase()}`
     };
@@ -155,10 +155,10 @@ export const incrementEmployeeCount = async (subscription) => {
     if (!canCreateEmployee(subscription)) {
         throw new Error("Cannot create more employees. Limit reached.");
     }
-    
+
     subscription.usage.employeesUsed += 1;
     await subscription.save();
-    
+
     return subscription;
 };
 
@@ -172,7 +172,7 @@ export const decrementEmployeeCount = async (subscription) => {
         subscription.usage.employeesUsed -= 1;
         await subscription.save();
     }
-    
+
     return subscription;
 };
 
