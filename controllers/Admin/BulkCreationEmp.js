@@ -299,88 +299,97 @@ export const createEmployeesFromCSV = async (req, res) => {
             employeeTypeCounts[employeeType]++;
         }
 
-        // Check if we can create all employees
+        // Get current usage from subscription
         const currentUsage = {
             employeesUsed: subscription.usage?.employeesUsed || 0,
             no_of_sales_person_employeesUsed: subscription.usage?.no_of_sales_person_employeesUsed || 0,
             no_of_pro_sales_person_employeesUsed: subscription.usage?.no_of_pro_sales_person_employeesUsed || 0
         };
 
-        const simulatedUsage = {
-            employeesUsed: currentUsage.employeesUsed + (employeeTypeCounts.sales + employeeTypeCounts.pro_sales + employeeTypeCounts.non_sales),
-            no_of_sales_person_employeesUsed: currentUsage.no_of_sales_person_employeesUsed + employeeTypeCounts.sales,
-            no_of_pro_sales_person_employeesUsed: currentUsage.no_of_pro_sales_person_employeesUsed + employeeTypeCounts.pro_sales
+        // Create subscription object with current usage for validation
+        const subscriptionWithUsage = {
+            ...subscription.toObject(),
+            usage: currentUsage
         };
 
-        // Validate each type limit
+        // Validate each type has enough slots for all employees in CSV
         if (employeeTypeCounts.sales > 0) {
-            const salesCheck = canCreateEmployee(
-                { ...subscription.toObject(), usage: currentUsage },
-                "sales"
-            );
-            if (!salesCheck.canCreate) {
+            const remainingSales = getRemainingEmployeeSlots(subscriptionWithUsage, "sales");
+            if (employeeTypeCounts.sales > remainingSales) {
                 await session.abortTransaction();
                 session.endSession();
                 return res.status(403).json({
                     success: false,
                     message: "Sales employee limit exceeded",
-                    error: salesCheck.message,
+                    error: `You can only add ${remainingSales} more sales employees, but CSV requires ${employeeTypeCounts.sales}`,
                     details: {
+                        type: "sales",
                         required: employeeTypeCounts.sales,
-                        available: getRemainingEmployeeSlots(
-                            { usage: currentUsage },
-                            "sales"
-                        )
+                        available: remainingSales,
+                        limit: getEmployeeLimit(subscriptionWithUsage, "sales")
                     }
                 });
             }
         }
 
         if (employeeTypeCounts.pro_sales > 0) {
-            const proSalesCheck = canCreateEmployee(
-                { ...subscription.toObject(), usage: currentUsage },
-                "pro_sales"
-            );
-            if (!proSalesCheck.canCreate) {
+            const remainingProSales = getRemainingEmployeeSlots(subscriptionWithUsage, "pro_sales");
+            if (employeeTypeCounts.pro_sales > remainingProSales) {
                 await session.abortTransaction();
                 session.endSession();
                 return res.status(403).json({
                     success: false,
                     message: "Pro Sales employee limit exceeded",
-                    error: proSalesCheck.message,
+                    error: `You can only add ${remainingProSales} more pro sales employees, but CSV requires ${employeeTypeCounts.pro_sales}`,
                     details: {
+                        type: "pro_sales",
                         required: employeeTypeCounts.pro_sales,
-                        available: getRemainingEmployeeSlots(
-                            { usage: currentUsage },
-                            "pro_sales"
-                        )
+                        available: remainingProSales,
+                        limit: getEmployeeLimit(subscriptionWithUsage, "pro_sales")
                     }
                 });
             }
         }
 
-        // Check overall non-sales limit
-        const nonSalesCheck = canCreateEmployee(
-            { ...subscription.toObject(), usage: currentUsage },
-            "non_sales"
-        );
-        if (!nonSalesCheck.canCreate) {
+        if (employeeTypeCounts.non_sales > 0) {
+            const remainingNonSales = getRemainingEmployeeSlots(subscriptionWithUsage, "non_sales");
+            if (employeeTypeCounts.non_sales > remainingNonSales) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(403).json({
+                    success: false,
+                    message: "Non-Sales employee limit exceeded",
+                    error: `You can only add ${remainingNonSales} more non-sales employees, but CSV requires ${employeeTypeCounts.non_sales}`,
+                    details: {
+                        type: "non_sales",
+                        required: employeeTypeCounts.non_sales,
+                        available: remainingNonSales,
+                        limit: getEmployeeLimit(subscriptionWithUsage, "non_sales")
+                    }
+                });
+            }
+        }
+
+        // Check total limit
+        const totalRequired = employeeTypeCounts.sales + employeeTypeCounts.pro_sales + employeeTypeCounts.non_sales;
+        const remainingTotal = getRemainingEmployeeSlots(subscriptionWithUsage, "total");
+        if (totalRequired > remainingTotal) {
             await session.abortTransaction();
             session.endSession();
             return res.status(403).json({
                 success: false,
-                message: "Employee limit exceeded",
-                error: nonSalesCheck.message,
+                message: "Total employee limit exceeded",
+                error: `You can only add ${remainingTotal} more employees in total, but CSV requires ${totalRequired}`,
                 details: {
-                    required: employeeTypeCounts.non_sales,
-                    available: getRemainingEmployeeSlots(
-                        { usage: currentUsage },
-                        "non_sales"
-                    )
+                    type: "total",
+                    required: totalRequired,
+                    available: remainingTotal,
+                    limit: getEmployeeLimit(subscriptionWithUsage, "total")
                 }
             });
         }
 
+        // Step 6: Process each row from CSV
         const createdEmployees = [];
         const errors = [];
         const warnings = [];
@@ -393,7 +402,6 @@ export const createEmployeesFromCSV = async (req, res) => {
             "usage.no_of_pro_sales_person_employeesUsed": 0
         };
 
-        // Step 6: Process each row from CSV
         for (let index = 0; index < csvData.length; index++) {
             const row = csvData[index];
             const rowNumber = index + 1;
@@ -707,6 +715,7 @@ export const createEmployeesFromCSV = async (req, res) => {
         };
 
         const breakdown = getEmployeeBreakdown({ usage: updatedUsage });
+        const subscriptionWithUpdatedUsage = { ...subscription.toObject(), usage: updatedUsage };
 
         const response = {
             success: true,
@@ -736,14 +745,14 @@ export const createEmployeesFromCSV = async (req, res) => {
                     nonSales: breakdown.nonSales
                 },
                 limits: {
-                    sales: getEmployeeLimit({ usage: updatedUsage }, "sales"),
-                    proSales: getEmployeeLimit({ usage: updatedUsage }, "pro_sales"),
-                    nonSales: getEmployeeLimit({ usage: updatedUsage }, "non_sales")
+                    sales: getEmployeeLimit(subscriptionWithUpdatedUsage, "sales"),
+                    proSales: getEmployeeLimit(subscriptionWithUpdatedUsage, "pro_sales"),
+                    nonSales: getEmployeeLimit(subscriptionWithUpdatedUsage, "non_sales")
                 },
                 remaining: {
-                    sales: getRemainingEmployeeSlots({ usage: updatedUsage }, "sales"),
-                    proSales: getRemainingEmployeeSlots({ usage: updatedUsage }, "pro_sales"),
-                    nonSales: getRemainingEmployeeSlots({ usage: updatedUsage }, "non_sales")
+                    sales: getRemainingEmployeeSlots(subscriptionWithUpdatedUsage, "sales"),
+                    proSales: getRemainingEmployeeSlots(subscriptionWithUpdatedUsage, "pro_sales"),
+                    nonSales: getRemainingEmployeeSlots(subscriptionWithUpdatedUsage, "non_sales")
                 }
             },
             errors: {
@@ -755,28 +764,28 @@ export const createEmployeesFromCSV = async (req, res) => {
         };
 
         // Add limit warnings
-        const salesWarning = isNearingEmployeeLimit({ usage: updatedUsage }, "sales", 80);
-        const proSalesWarning = isNearingEmployeeLimit({ usage: updatedUsage }, "pro_sales", 80);
-        const nonSalesWarning = isNearingEmployeeLimit({ usage: updatedUsage }, "non_sales", 80);
+        const salesWarning = isNearingEmployeeLimit(subscriptionWithUpdatedUsage, "sales", 80);
+        const proSalesWarning = isNearingEmployeeLimit(subscriptionWithUpdatedUsage, "pro_sales", 80);
+        const nonSalesWarning = isNearingEmployeeLimit(subscriptionWithUpdatedUsage, "non_sales", 80);
 
         if (salesWarning.isNearing) {
             response.warnings.push({
                 type: "SALES_LIMIT_WARNING",
-                message: `Sales employees: ${breakdown.sales}/${getEmployeeLimit({ usage: updatedUsage }, "sales")} (${salesWarning.percentage}%)`
+                message: `Sales employees: ${breakdown.sales}/${getEmployeeLimit(subscriptionWithUpdatedUsage, "sales")} (${salesWarning.percentage}%)`
             });
         }
 
         if (proSalesWarning.isNearing) {
             response.warnings.push({
                 type: "PRO_SALES_LIMIT_WARNING",
-                message: `Pro Sales employees: ${breakdown.proSales}/${getEmployeeLimit({ usage: updatedUsage }, "pro_sales")} (${proSalesWarning.percentage}%)`
+                message: `Pro Sales employees: ${breakdown.proSales}/${getEmployeeLimit(subscriptionWithUpdatedUsage, "pro_sales")} (${proSalesWarning.percentage}%)`
             });
         }
 
         if (nonSalesWarning.isNearing) {
             response.warnings.push({
                 type: "NON_SALES_LIMIT_WARNING",
-                message: `Non-Sales employees: ${breakdown.nonSales}/${getEmployeeLimit({ usage: updatedUsage }, "non_sales")} (${nonSalesWarning.percentage}%)`
+                message: `Non-Sales employees: ${breakdown.nonSales}/${getEmployeeLimit(subscriptionWithUpdatedUsage, "non_sales")} (${nonSalesWarning.percentage}%)`
             });
         }
 
@@ -824,3 +833,5 @@ export const helpers = {
     parseNumericValue,
     validateDate
 };
+
+/* --------------------------------------------------   */
