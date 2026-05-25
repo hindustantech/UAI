@@ -119,7 +119,7 @@ class PunchAutomationCron {
             // ==========================================
             if (shift.isFlexible()) {
                 const twelveHoursLater = new Date(
-                    punchInTime.getTime() + 12 * 60 * 60 * 1000
+                    punchInTime.getTime() + 13 * 60 * 60 * 1000
                 );
 
                 if (currentTime >= twelveHoursLater) {
