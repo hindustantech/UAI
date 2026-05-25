@@ -349,7 +349,7 @@ export const validateLocation = (location) => {
 
   // 🔥 CASE 2: string → try JSON.parse
   if (typeof location === "string") {
-    try {
+    try { 
       const parsed = JSON.parse(location);
       return normalizeLocation(parsed);
     } catch (e) {

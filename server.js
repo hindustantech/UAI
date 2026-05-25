@@ -31,6 +31,7 @@ import comapnayAdmin from './routes/Admin/compay.admin.js';
 import Bulkcreation from './routes/Admin/bulkCreation.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
+import './cron/markpunchout.cron.js'
 dotenv.config();
 await connectDB();
 // START BACKGROUND WORKER HERE
