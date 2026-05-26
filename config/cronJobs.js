@@ -1,6 +1,6 @@
 // config/cronJobs.js
 
-import PunchAutomationcron from '../controllers/attandance/cron/punchAutomationCron.js';
+import PunchAutomationcron from '../controllers/attandance/crons/punchAutomationCron.js';
 /**
  * Initialize all cron jobs
  * Call this in your main app.js or server.js file

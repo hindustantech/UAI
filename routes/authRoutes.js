@@ -60,6 +60,7 @@ router.get('/updateProfileImage', authMiddleware, upload.single('profileImage'),
 // router.post('/signout', signout);
 
 router.post('/signup', signup);
+router.get('/resendOtp', resendOtp);
 router.post("/find-by-phone", findUserByPhone);
 router.get("/getUserProfile", authMiddleware, getUserProfile);
 router.delete("/deleteUser", authMiddleware, deleteUser);
@@ -81,7 +82,7 @@ router.get('/findUserByReferralOwner/:code', authMiddleware, findUserByReferralO
 
 router.post('/verifyOtp', verifyOtp);
 router.post('/login', login);
-router.post('/resendOtp', resendOtp);
+// router.post('/resendOtp', resendOtp);
 router.post('/signout', signout);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);

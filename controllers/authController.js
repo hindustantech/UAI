@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import User from '../models/userModel.js';
 import { generateToken } from '../config/jwt.js';
 import { sendWhatsAppOtp, verifyWhatsAppOtp } from '../utils/whatapp.js';
+import { QuicksendWhatsAppOtp } from '../utils/whatapp_otp.js';
 import { generateReferralCode } from '../utils/Referalcode.js';
 import fs from 'fs';
 import path from 'path';
@@ -2261,29 +2262,26 @@ const login = async (req, res) => {
 
 const resendOtp = async (req, res) => {
   try {
-    const { userId } = req.body;
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    const { phone, otp } = req.body;
 
     // Send new WhatsApp OTP
-    const otpResponse = await sendWhatsAppOtp(user.phone);
-    if (!otpResponse.success) {
-      return res.status(500).json({ message: 'Failed to send OTP', error: otpResponse.error });
-    }
+    const otpResponse = await QuicksendWhatsAppOtp(phone, otp);
 
-    // Update WhatsApp UID
-    user.whatsapp_uid = otpResponse.data || null;
-    await user.save();
+    logger.info(`OTP resend response for phone ${phone}: ${JSON.stringify(otpResponse)}`);
+    
+    if (!otpResponse.success) {
+      return res.status(500).json({ message: 'Failed to resend OTP', error: otpResponse.error });
+    }
 
     res.status(200).json({
       message: 'OTP resent successfully',
-      whatsapp_uid: user.whatsapp_uid
+      data: otpResponse.data
     });
+    
   } catch (error) {
     res.status(500).json({ message: 'Failed to resend OTP', error: error.message });
+  } finally {
+    logger.info('OTP resend attempt');
   }
 };
 

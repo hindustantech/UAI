@@ -238,7 +238,6 @@ const abortAndRespond = async (session, res, statusCode, errorCode, message, dat
 /* ===========================
    MAIN CONTROLLER
 =========================== */
-
 export const markAttendance = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -292,10 +291,6 @@ export const markAttendance = async (req, res) => {
 
         let decoded;
         try {
-            // logger.info(`Verifying JWT for attendance marking, user ID: ${u_id}`);
-            // logger.info(`Received token: ${token}`);
-            // logger.info(`JWT_SECRET used: ${process.env.JWT_SECRET ? 'Available' : 'MISSING'}`);
-
             decoded = jwt.verify(token, process.env.JWT_SECRET);
             logger.info(`JWT decoded successfully for user ${decoded.userId}`);
         } catch (err) {
@@ -551,6 +546,8 @@ export const markAttendance = async (req, res) => {
            12. PUNCH IN (NEW ATTENDANCE)
         =========================== */
 
+        let responseData = null;
+
         if (!attendance) {
             console.log(`→ Creating NEW attendance record for ${dateString}`);
 
@@ -564,9 +561,6 @@ export const markAttendance = async (req, res) => {
             const inTimeUTC = new Date(punchIn); // Store original UTC time
             const outTimeUTC = punchOut ? new Date(punchOut) : null;
 
-            /* ===== GRACE PERIOD HANDLING (USING IST TIMES) ===== */
-
-
             /* ===== GRACE PERIOD HANDLING - Skip for flexible ===== */
             let lateMinutes = 0;
             if (!isFlexible) {
@@ -578,13 +572,6 @@ export const markAttendance = async (req, res) => {
                 console.log(`  Grace Period (Late Entry): ${gracePeriodLate} mins`);
                 console.log(`  Late Minutes (after grace): ${lateMinutes}`);
             }
-            // const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
-            // const lateMinutes = applyGracePeriod(punchInTimeIST, shiftStartTimeIST, gracePeriodLate);
-
-            // console.log(`  Shift Start (IST): ${shiftStartTimeIST.toISOString()}`);
-            // console.log(`  Punch In (IST): ${punchInTimeIST.toISOString()}`);
-            // console.log(`  Grace Period (Late Entry): ${gracePeriodLate} mins`);
-            // console.log(`  Late Minutes (after grace): ${lateMinutes}`);
 
             /* ===== CALCULATE WORK TIME ===== */
             let totalMinutes = 0;
@@ -593,8 +580,6 @@ export const markAttendance = async (req, res) => {
             let isSuspicious = false;
             let finalStatus = baseStatus;
 
-
-
             if (!isFlexible) {
                 const absentGraceCheck = checkAfterAbsentMarkGrace(punchInTimeIST, shiftStartTimeIST, afterAbsentMarkGrace);
 
@@ -602,32 +587,26 @@ export const markAttendance = async (req, res) => {
                     console.log(`❌ ABSENT MARKING: Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
                     finalStatus = "absent";
 
-
+                    // Return error response instead of throwing
+                    return abortAndRespond(
+                        session,
+                        res,
+                        400,
+                        "LATE_PUNCH_ABSENT",
+                        `Punch-in is ${absentGraceCheck.minutesAfterShiftStart} minutes after shift start, which exceeds the absent marking grace period of ${afterAbsentMarkGrace} minutes. Attendance marked as ABSENT.`,
+                        {
+                            minutesLate: absentGraceCheck.minutesAfterShiftStart,
+                            gracePeriod: afterAbsentMarkGrace,
+                            shiftStartTime: shiftData.startTime,
+                            shiftEndTime: shiftData.endTime,
+                            punchInTime: punchInTimeIST,
+                            shiftType: shiftData.shiftType
+                        }
+                    );
                 }
-                // Return error response instead of throwing
-                return abortAndRespond(
-                    session,
-                    res,
-                    400,
-                    "LATE_PUNCH_ABSENT",
-                    `Punch-in is ${absentGraceCheck.minutesAfterShiftStart} minutes after shift start, which exceeds the absent marking grace period of ${afterAbsentMarkGrace} minutes. Attendance marked as ABSENT.`,
-                    {
-                        minutesLate: absentGraceCheck.minutesAfterShiftStart,
-                        gracePeriod: afterAbsentMarkGrace,
-                        shiftStartTime: shiftData.startTime,
-                        shiftEndTime: shiftData.endTime,
-                        punchInTime: punchInTimeIST,
-                        shiftType: shiftData.shiftType
-                    }
-                );
             }
 
             if (finalStatus === "absent" && !isFlexible) {
-                // Punch-in is AFTER the grace period → Mark as ABSENT
-                // console.log(`❌ ABSENT MARKING: Punch-in ${absentGraceCheck.minutesAfterShiftStart}mins after shift (grace: ${afterAbsentMarkGrace}mins)`);
-                // finalStatus = "absent";
-
-
                 attendance = new Attendance({
                     companyId,
                     employeeId: employee._id,
@@ -680,15 +659,11 @@ export const markAttendance = async (req, res) => {
                     lastPunchAt: outTimeUTC || inTimeUTC,
                     approvalStatus: "pending"
                 });
-
             } else {
                 // Punch-in is WITHIN grace period → Calculate normal attendance
 
                 if (outTimeUTC) {
                     totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
-
-                    // Deduct breaks
-                    const payableMinutes = calculatePayableMinutes(totalMinutes, breaks);
 
                     // Calculate overtime (using IST times)
                     if (punchOutTimeIST > shiftEndTimeIST) {
@@ -716,6 +691,7 @@ export const markAttendance = async (req, res) => {
                     isSuspicious = true;
                     console.log(`  ⚠ Incomplete: Punch-out not provided`);
                 }
+
                 const finalPayableMinutes = calculatePayableMinutes(totalMinutes, breaks);
 
                 if (isFlexible) {
@@ -729,7 +705,6 @@ export const markAttendance = async (req, res) => {
                         baseStatus === "holiday"
                     );
                 }
-
 
                 console.log(`  Final Status: ${finalStatus}`);
 
@@ -760,10 +735,10 @@ export const markAttendance = async (req, res) => {
                         totalMinutes: Math.max(0, totalMinutes),
                         payableMinutes: Math.max(0, finalPayableMinutes),
                         overtimeMinutes: Math.max(0, overtimeMinutes),
-                        lateMinutes: isFlexible ? 0 : Math.max(0, lateMinutes),  // Force 0 for flexible
+                        lateMinutes: isFlexible ? 0 : Math.max(0, lateMinutes),
                         earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
                     },
-                    lateByMinutes: isFlexible ? 0 : Math.max(0, lateMinutes),  // Force 0 for flexible
+                    lateByMinutes: isFlexible ? 0 : Math.max(0, lateMinutes),
                     totalWorkingHours: Math.max(0, totalMinutes / 60),
                     remarks: isFlexible ? (remarks || "Flexible shift - no late penalties applied") : remarks,
                     isSuspicious,
@@ -787,12 +762,49 @@ export const markAttendance = async (req, res) => {
                     approvalStatus: "pending"
                 });
             }
+
+            // Save new attendance
+            await attendance.save({ session });
+            await session.commitTransaction();
+            session.endSession();
+
+            console.log(`✓ New attendance created for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
+
+            // Prepare response data
+            const punchInISTResponse = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
+            const punchOutISTResponse = attendance.punchOut ? getPunchTimeIST(attendance.punchOut) : null;
+
+            responseData = {
+                attendanceId: attendance._id,
+                employeeId: employee._id,
+                employeeCode: employee.empCode,
+                employeeName: employee.user_name,
+                date: attendanceDateIST,
+                status: attendance.status,
+                punchIn: punchInISTResponse,
+                punchOut: punchOutISTResponse,
+                shift: {
+                    name: attendance.shift.name,
+                    startTime: attendance.shift.startTime,
+                    endTime: attendance.shift.endTime
+                },
+                workSummary: attendance.workSummary,
+                geoVerified: attendance.geoLocation?.verified,
+                isSuspicious: attendance.isSuspicious,
+                approvalStatus: attendance.approvalStatus,
+                remarks: attendance.remarks
+            };
+
+            return res.status(201).json({
+                success: true,
+                message: `Attendance marked successfully`,
+                data: responseData
+            });
         }
 
         /* ===========================
            13. PUNCH OUT (EXISTING ATTENDANCE)
         =========================== */
-
         else {
             console.log(`→ Updating EXISTING attendance record for ${dateString}`);
 
@@ -804,6 +816,11 @@ export const markAttendance = async (req, res) => {
             }
 
             const outTimeUTC = new Date(punchOut);
+            
+            // DEBUG: Log before update
+            console.log("=== PUNCH OUT DEBUG BEFORE UPDATE ===");
+            console.log("Current attendance.punchOut:", attendance.punchOut);
+            console.log("New outTimeUTC:", outTimeUTC);
 
             /* Anti-spam check */
             const lastPunch = attendance.punchHistory?.[attendance.punchHistory.length - 1];
@@ -839,6 +856,13 @@ export const markAttendance = async (req, res) => {
             });
 
             attendance.lastPunchAt = outTimeUTC;
+            
+            // ✅ IMPORTANT: Set the punchOut field
+            attendance.punchOut = outTimeUTC;
+            
+            // DEBUG: Log after assignment
+            console.log("=== PUNCH OUT DEBUG AFTER ASSIGNMENT ===");
+            console.log("attendance.punchOut after assignment:", attendance.punchOut);
 
             /* Recalculate all metrics using IST times */
             const inTimeUTC = new Date(attendance.punchIn);
@@ -855,6 +879,17 @@ export const markAttendance = async (req, res) => {
                 console.log(`  ⚠️  Attendance already marked as ABSENT`);
                 console.log(`  Punch-in was outside afterAbsentMark grace period`);
                 // Status remains "absent" even though punch-out is provided
+                
+                // Still update punch-out but keep status as absent
+                attendance.punchOut = outTimeUTC;
+                attendance.workSummary = {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: 0,
+                    overtimeMinutes: 0,
+                    lateMinutes: 0,
+                    earlyLeaveMinutes: 0
+                };
+                attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
             } else {
                 /* ===== GRACE PERIOD FOR LATE ENTRY (USING IST) ===== */
                 const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
@@ -898,7 +933,6 @@ export const markAttendance = async (req, res) => {
                 console.log(`  Final Status: ${finalStatus}`);
 
                 /* Update attendance */
-                attendance.punchOut = outTimeUTC;
                 attendance.status = finalStatus;
                 attendance.workSummary = {
                     totalMinutes: Math.max(0, totalMinutes),
@@ -922,49 +956,62 @@ export const markAttendance = async (req, res) => {
 
                 attendance.isSuspicious = isSuspicious;
             }
-        }
 
-        /* ===========================
-           14. SAVE & COMMIT TRANSACTION
-        =========================== */
+            // DEBUG: Log before save
+            console.log("=== PUNCH OUT DEBUG BEFORE SAVE ===");
+            console.log("attendance.punchOut before save:", attendance.punchOut);
+            
+            // Save the updated attendance
+            await attendance.save({ session });
+            await session.commitTransaction();
+            session.endSession();
 
-        await attendance.save({ session });
-        await session.commitTransaction();
-        session.endSession();
+            // DEBUG: Log after save (re-fetch to verify)
+            const savedAttendance = await Attendance.findById(attendance._id).lean();
+            console.log("=== PUNCH OUT DEBUG AFTER SAVE ===");
+            console.log("savedAttendance.punchOut from DB:", savedAttendance.punchOut);
+            console.log("savedAttendance.status:", savedAttendance.status);
 
-        console.log(`✓ Attendance marked successfully for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
+            console.log(`✓ Attendance updated successfully for ${employee.empCode} on ${dateString} | Status: ${savedAttendance.status}`);
 
-        // Convert response times to IST for display
-        const punchInIST = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
-        const punchOutIST = attendance.punchOut ? getPunchTimeIST(attendance.punchOut) : null;
+            // ✅ IMPORTANT: Use savedAttendance from database for response
+            const punchInISTResponse = savedAttendance.punchIn ? getPunchTimeIST(savedAttendance.punchIn) : null;
+            const punchOutISTResponse = savedAttendance.punchOut ? getPunchTimeIST(savedAttendance.punchOut) : null;
+            
+            console.log("=== RESPONSE DATA ===");
+            console.log("punchInISTResponse:", punchInISTResponse);
+            console.log("punchOutISTResponse:", punchOutISTResponse);
+            console.log("Raw savedAttendance.punchOut:", savedAttendance.punchOut);
 
-        return res.status(201).json({
-            success: true,
-            message: `Attendance ${punchInIST} processed ${attendance.status} successfully`,
-            data: {
-                attendanceId: attendance._id,
+            responseData = {
+                attendanceId: savedAttendance._id,
                 employeeId: employee._id,
                 employeeCode: employee.empCode,
                 employeeName: employee.user_name,
                 date: attendanceDateIST,
-                status: attendance.status,
-                punchIn: punchInIST,
-                punchOut: punchOutIST,
+                status: savedAttendance.status,
+                punchIn: punchInISTResponse,
+                punchOut: punchOutISTResponse, // This will now have the actual punch-out time
                 shift: {
-                    name: attendance.shift.name,
-                    startTime: attendance.shift.startTime,
-                    endTime: attendance.shift.endTime
+                    name: savedAttendance.shift?.name,
+                    startTime: savedAttendance.shift?.startTime,
+                    endTime: savedAttendance.shift?.endTime
                 },
-                workSummary: attendance.workSummary,
-                geoVerified: attendance.geoLocation?.verified,
-                isSuspicious: attendance.isSuspicious,
-                approvalStatus: attendance.approvalStatus,
-                remarks: attendance.remarks
-            }
-        });
+                workSummary: savedAttendance.workSummary,
+                geoVerified: savedAttendance.geoLocation?.verified,
+                isSuspicious: savedAttendance.isSuspicious,
+                approvalStatus: savedAttendance.approvalStatus,
+                remarks: savedAttendance.remarks
+            };
+
+            return res.status(201).json({
+                success: true,
+                message: `Attendance ${savedAttendance.status} processed successfully`,
+                data: responseData
+            });
+        }
 
     } catch (error) {
-
         try {
             await session.abortTransaction();
         } catch (e) {
