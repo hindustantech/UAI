@@ -2471,31 +2471,162 @@ export const findUserByReferralOwner = async (req, res) => {
 
 
 
-const resendOtp = async (req, res) => {
+ const resendOtp = async (
+  req,
+  res
+) => {
   try {
-    const { phone, otp } = req.body;
 
-    // Send new WhatsApp OTP
-    const otpResponse = await QuicksendWhatsAppOtp(phone, otp);
+    const {
+      userId,
+    } = req.body;
 
-    logger.info(`OTP resend response for phone ${phone}: ${JSON.stringify(otpResponse)}`);
+    /* ---------------- VALIDATION ---------------- */
 
-    if (!otpResponse.success) {
-      return res.status(500).json({ message: 'Failed to resend OTP', error: otpResponse.error });
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "userId is required",
+      });
     }
 
-    res.status(200).json({
-      message: 'OTP resent successfully',
-      data: otpResponse.data
+    /* ---------------- FIND USER ---------------- */
+
+    const user =
+      await User.findById(userId)
+        .select(
+          "_id phone type suspend"
+        )
+        .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "User not found",
+      });
+    }
+
+    /* ---------------- SUSPEND CHECK ---------------- */
+
+    if (user.suspend) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Account suspended",
+      });
+    }
+
+    /* ---------------- RATE LIMIT ---------------- */
+
+    const recentOtp =
+      await Otp.findOne({
+        userId: user._id,
+
+        createdAt: {
+          $gt: new Date(
+            Date.now() -
+            60 * 1000
+          ),
+        },
+      }).lean();
+
+    if (recentOtp) {
+      return res.status(429).json({
+        success: false,
+        message:
+          "Please wait 1 minute before resending OTP",
+      });
+    }
+
+    /* ---------------- DELETE OLD OTP ---------------- */
+
+    await Otp.deleteMany({
+      userId: user._id,
+    });
+
+    /* ---------------- GENERATE NEW OTP ---------------- */
+
+    const code = generateOTP();
+
+    /* ---------------- SAVE OTP ---------------- */
+
+    await Otp.create({
+      userId: user._id,
+
+      phone: user.phone,
+
+      otp: code,
+
+      attempts: 0,
+
+      expiresAt: new Date(
+        Date.now() +
+        5 * 60 * 1000
+      ),
+    });
+
+    /* ---------------- SEND OTP ---------------- */
+
+    const otpResponse =
+      await QuicksendWhatsAppOtp(
+        user.phone,
+        code
+      );
+
+    logger.info(
+      `OTP resend response for ${user.phone}`,
+      otpResponse
+    );
+
+    if (!otpResponse.success) {
+
+      logger.error(
+        "OTP resend failed",
+        otpResponse.error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Failed to resend OTP",
+
+        error:
+          otpResponse.error,
+      });
+    }
+
+    /* ---------------- RESPONSE ---------------- */
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "OTP resent successfully",
     });
 
   } catch (error) {
-    res.status(500).json({ message: 'Failed to resend OTP', error: error.message });
+
+    logger.error(
+      "resendOtp Error",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to resend OTP",
+
+      error: error.message,
+    });
+
   } finally {
-    logger.info('OTP resend attempt');
+
+    logger.info(
+      "OTP resend attempt completed"
+    );
   }
 };
-
 
 
 const signout = (req, res) => {
@@ -2613,7 +2744,7 @@ const getProfileImageUrl = async (req, res) => {
 };
 
 export {
- 
+
   resendOtp,
 
   signout,
