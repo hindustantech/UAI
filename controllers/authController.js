@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/userModel.js';
 import { generateToken } from '../config/jwt.js';
-import { sendWhatsAppOtp, verifyWhatsAppOtp } from '../utils/whatapp.js';
+import { sendWhatsAppOtp, verifyWhatsAppOtp, generateOTP } from '../utils/whatapp.js';
 import { QuicksendWhatsAppOtp } from '../utils/whatapp_otp.js';
 import { generateReferralCode } from '../utils/Referalcode.js';
 import fs from 'fs';
@@ -18,7 +18,7 @@ import { verifyGoogleOwnership, verifyGoogleWebOwnership } from '../config/OAuth
 import { Parser } from 'json2csv';
 import { newgenerateToken } from '../config/new_user_jwt.js';
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep this secret in env
-
+import Otp from '../models/Otp.js';
 
 
 
@@ -1457,357 +1457,870 @@ export const generateUniqueReferralCode = async () => {
 };
 
 
+// export const startAuth = async (req, res) => {
+//   try {
+//     const { phone, deviceId, type, referralCode } = req.body;
+
+//     /* ---------- Validation ---------- */
+
+//     if (!phone || !type) {
+//       return res.status(400).json({
+//         message: "phone, deviceId and type required",
+//       });
+//     }
+
+//     const allowed = ["user", "partner", "agency", 'admin', 'super_admin'];
+
+//     if (!allowed.includes(type)) {
+//       return res.status(401).json({
+//         message: "Invalid type",
+//       });
+//     }
+
+//     // Optional referral validation
+//     if (referralCode && !/^IND\d{3}$/.test(referralCode)) {
+//       return res.status(400).json({
+//         message: "Invalid referral code format",
+//       });
+//     }
+
+//     const cleanPhone = phone.trim();
+
+//     const code =  generateOTP();
+
+//     /* ---------- Find User ---------- */
+
+//     let user = await User.findOne({ phone: cleanPhone });
+
+//     let isNew = false;
+
+//     /* ---------- Create If New ---------- */
+
+//     if (!user) {
+//       // Generate own referral
+//       const ownReferral = await generateUniqueReferralCode();
+
+//       user = await User.create({
+//         phone: cleanPhone,
+//         type,
+//         referalCode: ownReferral,       // user's own code
+//         referredBy: referralCode || null, // who referred him (optional)
+//         isVerified: false,
+//       });
+
+//       isNew = true;
+//     }
+
+//     /* ---------- Type Lock ---------- */
+
+//     if (user.suspend) {
+//       return res.status(403).json({
+//         message: "Account suspended",
+//       });
+//     }
+
+
+
+//     /* ---------- Save WhatsApp UID ---------- */
+//     const otpResponse = await sendWhatsAppOtp(phone,code);
+
+//     if (!otpResponse.success) {
+
+
+//       return res.status(500).json({ message: 'Failed to send OTP', error: otpResponse.error });
+//     }
+
+//     // Store WhatsApp UID
+
+
+//     await User.findByIdAndUpdate(
+//       user._id,
+//       { otp: code, whatsapp_uid: otpResponse.data, lastOtpSentAt: new Date() },
+//       { new: true }
+//     );
+
+//     /* ---------- Response ---------- */
+
+//     return res.json({
+//       message: isNew
+//         ? "Registered. OTP sent"
+//         : "Login OTP sent",
+
+//       userId: user._id,
+//       isNewUser: isNew,
+//       type: user.type,
+//     });
+
+//   } catch (err) {
+//     console.error(err);
+
+//     res.status(500).json({
+//       message: "Auth start failed",
+//       error: err.message,
+//     });
+//   }
+// };
+
+
+
+
 export const startAuth = async (req, res) => {
   try {
-    const { phone, deviceId, type, referralCode } = req.body;
+    const {
+      phone,
+      type,
+      referralCode,
+    } = req.body;
 
-    /* ---------- Validation ---------- */
+    /* ---------------- VALIDATION ---------------- */
 
     if (!phone || !type) {
       return res.status(400).json({
-        message: "phone, deviceId and type required",
+        success: false,
+        message: "phone and type required",
       });
     }
 
-    const allowed = ["user", "partner", "agency", 'admin', 'super_admin'];
+    const allowedTypes = [
+      "user",
+      "partner",
+      "agency",
+      "admin",
+      "super_admin",
+    ];
 
-    if (!allowed.includes(type)) {
-      return res.status(401).json({
+    if (!allowedTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
         message: "Invalid type",
       });
     }
 
-    // Optional referral validation
-    if (referralCode && !/^IND\d{3}$/.test(referralCode)) {
-      return res.status(400).json({
-        message: "Invalid referral code format",
+    const cleanPhone = phone.trim();
+
+    /* ---------------- RATE LIMIT ---------------- */
+
+    const recentOtp = await Otp.findOne({
+      phone: cleanPhone,
+      createdAt: {
+        $gt: new Date(
+          Date.now() - 60 * 1000
+        ),
+      },
+    }).lean();
+
+    if (recentOtp) {
+      return res.status(429).json({
+        success: false,
+        message:
+          "Please wait 1 minute before requesting another OTP",
       });
     }
 
-    const cleanPhone = phone.trim();
+    /* ---------------- FIND USER ---------------- */
 
+    let user = await User.findOne({
+      phone: cleanPhone,
+    });
 
+    let isNewUser = false;
 
-    /* ---------- Find User ---------- */
-
-    let user = await User.findOne({ phone: cleanPhone });
-
-    let isNew = false;
-
-    /* ---------- Create If New ---------- */
+    /* ---------------- CREATE USER ---------------- */
 
     if (!user) {
-      // Generate own referral
-      const ownReferral = await generateUniqueReferralCode();
+
+      /* OPTIONAL REFERRAL VALIDATION */
+
+      let referredUser = null;
+
+      if (referralCode) {
+
+        referredUser = await User.findOne({
+          referalCode: referralCode,
+        }).select("_id referalCode");
+
+        if (!referredUser) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid referral code",
+          });
+        }
+      }
+
+      /* USER OWN REFERRAL CODE */
+
+      const ownReferralCode =
+        await generateUniqueReferralCode();
 
       user = await User.create({
         phone: cleanPhone,
         type,
-        referalCode: ownReferral,       // user's own code
-        referredBy: referralCode || null, // who referred him (optional)
+
+        /* USER OWN CODE */
+        referalCode: ownReferralCode,
+
+        /* OPTIONAL */
+        referredBy: referralCode || null,
+
         isVerified: false,
       });
 
-      isNew = true;
+      isNewUser = true;
     }
 
-    /* ---------- Type Lock ---------- */
+    /* ---------------- SUSPEND CHECK ---------------- */
 
     if (user.suspend) {
       return res.status(403).json({
+        success: false,
         message: "Account suspended",
       });
     }
 
+    /* ---------------- DELETE OLD OTP ---------------- */
 
+    await Otp.deleteMany({
+      userId: user._id,
+    });
 
-    /* ---------- Save WhatsApp UID ---------- */
-    const otpResponse = await sendWhatsAppOtp(phone);
+    /* ---------------- GENERATE OTP ---------------- */
+
+    const code = generateOTP();
+
+    /* ---------------- SAVE OTP ---------------- */
+
+    await Otp.create({
+      userId: user._id,
+      phone: cleanPhone,
+      otp: code,
+
+      attempts: 0,
+
+      expiresAt: new Date(
+        Date.now() + 5 * 60 * 1000
+      ),
+    });
+
+    /* ---------------- SEND OTP ---------------- */
+
+    const otpResponse =
+      await QuicksendWhatsAppOtp(
+        cleanPhone,
+        code
+      );
 
     if (!otpResponse.success) {
 
-
-      return res.status(500).json({ message: 'Failed to send OTP', error: otpResponse.error });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send OTP",
+        error: otpResponse.error,
+      });
     }
 
-    // Store WhatsApp UID
+    /* ---------------- RESPONSE ---------------- */
 
+    return res.status(200).json({
+      success: true,
 
-    await User.findByIdAndUpdate(
-      user._id,
-      { whatsapp_uid: otpResponse.data }
-    );
-
-    /* ---------- Response ---------- */
-
-    return res.json({
-      message: isNew
-        ? "Registered. OTP sent"
+      message: isNewUser
+        ? "Registered successfully. OTP sent"
         : "Login OTP sent",
 
       userId: user._id,
-      isNewUser: isNew,
+
+      isNewUser,
+
       type: user.type,
     });
 
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
 
-    res.status(500).json({
+    console.error(
+      "startAuth Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
       message: "Auth start failed",
-      error: err.message,
+      error: error.message,
     });
   }
 };
+
+
+
 
 
 export const completOtp = async (req, res) => {
   try {
-    const { userId, otp, deviceId } = req.body;
+    const {
+      userId,
+      otp,
+      deviceId,
+    } = req.body;
+
+    /* ---------------- VALIDATION ---------------- */
 
     if (!userId || !otp) {
       return res.status(400).json({
-        message: "userId, otp, deviceId required",
+        success: false,
+        message: "userId and otp required",
       });
     }
 
-    // 1. Get user
-    const user = await User.findById(userId);
+    /* ---------------- FIND USER ---------------- */
+
+    const user = await User.findById(userId)
+      .select(
+        "_id phone type suspend isVerified"
+      )
+      .lean();
 
     if (!user) {
       return res.status(404).json({
+        success: false,
         message: "User not found",
       });
     }
 
-    // 2. Verify OTP
-    const verifyResponse = await verifyWhatsAppOtp(user.whatsapp_uid, otp);
-    logger.info(`OTP verification response for user ${userId}: ${JSON.stringify(verifyResponse)}`);
-    if (!verifyResponse.success) {
-      return res.status(400).json({ message: "Invalid OTP", error: verifyResponse.error });
+    /* ---------------- SUSPEND CHECK ---------------- */
+
+    if (user.suspend) {
+      return res.status(403).json({
+        success: false,
+        message: "Account suspended",
+      });
     }
 
+    /* ---------------- FIND OTP ---------------- */
 
+    const otpDoc = await Otp.findOne({
+      userId: user._id,
+      verified: false,
+    });
 
-    // 3. Verify OTP and activate user (Device-Agnostic)
+    if (!otpDoc) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP expired or not found",
+      });
+    }
 
-    const updated = await User.findOneAndUpdate(
-      {
-        _id: userId,
-      },
-      {
-        $set: {
-          isVerified: true,
-          otp: null,              // Clear OTP after success
-          lastLoginAt: new Date() // Optional audit field (recommended)
+    /* ---------------- EXPIRE CHECK ---------------- */
+
+    if (
+      new Date() > new Date(otpDoc.expiresAt)
+    ) {
+
+      await Otp.deleteMany({
+        userId: user._id,
+      });
+
+      return res.status(400).json({
+        success: false,
+        message: "OTP expired",
+      });
+    }
+
+    /* ---------------- ATTEMPTS CHECK ---------------- */
+
+    if (
+      otpDoc.attempts >=
+      otpDoc.maxAttempts
+    ) {
+
+      return res.status(429).json({
+        success: false,
+        message:
+          "Too many invalid attempts",
+      });
+    }
+
+    /* ---------------- INVALID OTP ---------------- */
+
+    if (otpDoc.otp !== otp) {
+
+      otpDoc.attempts += 1;
+
+      await otpDoc.save();
+
+      const attemptsLeft =
+        otpDoc.maxAttempts -
+        otpDoc.attempts;
+
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP",
+        attemptsLeft:
+          attemptsLeft < 0
+            ? 0
+            : attemptsLeft,
+      });
+    }
+
+    /* ---------------- MARK VERIFIED ---------------- */
+
+    otpDoc.verified = true;
+
+    if (deviceId) {
+      otpDoc.deviceId = deviceId;
+    }
+
+    await otpDoc.save();
+
+    /* ---------------- UPDATE USER ---------------- */
+
+    const updatedUser =
+      await User.findByIdAndUpdate(
+        user._id,
+        {
+          $set: {
+            isVerified: true,
+            lastLoginAt: new Date(),
+          },
+        },
+        {
+          new: true,
         }
-      },
-      { new: true }
-    );
+      ).lean();
 
+    /* ---------------- DELETE OTP ---------------- */
 
+    await Otp.deleteMany({
+      userId: user._id,
+    });
 
-    // 4. JWT
+    /* ---------------- GENERATE JWT ---------------- */
+
     const token = await generateToken(
-      updated._id,
-      updated.type
+      updatedUser._id,
+      updatedUser.type
     );
 
-    console.log(`Generated JWT for user ${userId}:`, token);
-    logger.info(`Login success for user ${userId}`, {
-      id: updated._id,
-      phone: updated.phone,
-      type: updated.type,
-      isVerified: true,
-    },);
-    return res.json({
+    /* ---------------- RESPONSE ---------------- */
+
+    return res.status(200).json({
+      success: true,
       message: "Login success",
+
       token,
 
       user: {
-        id: updated._id,
-        phone: updated.phone,
-        type: updated.type,
-        isVerified: true,
+        id: updatedUser._id,
+        phone: updatedUser.phone,
+        type: updatedUser.type,
+        isVerified:
+          updatedUser.isVerified,
       },
     });
 
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
 
-    res.status(500).json({
-      message: "OTP verify failed",
-      error: err.message,
+    console.error(
+      "completOtp Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "OTP verification failed",
+      error: error.message,
     });
   }
 };
 
-export const startAdminAuth = async (req, res) => {
-  try {
-    const { phone, type } = req.body;
 
-    /* ---------- Validation ---------- */
+
+
+/* =========================================================
+   START SUPER ADMIN AUTH
+========================================================= */
+
+export const startAdminAuth = async (
+  req,
+  res
+) => {
+  try {
+
+    const {
+      phone,
+      type,
+    } = req.body;
+
+    /* ---------------- VALIDATION ---------------- */
+
     if (!phone || !type) {
       return res.status(400).json({
         success: false,
-        message: "Phone and type are required"
+        message:
+          "phone and type required",
       });
     }
 
-    // Only allow super_admin type
-    if (type !== 'super_admin') {
-      return res.status(401).json({
+    /* ONLY SUPER ADMIN */
+
+    if (type !== "super_admin") {
+      return res.status(403).json({
         success: false,
-        message: "Invalid access type"
+        message:
+          "Only super admin access allowed",
       });
     }
 
     const cleanPhone = phone.trim();
 
-    // Validate phone format (basic validation)
-    const phoneRegex = /^[0-9]{10,15}$/;
-    if (!phoneRegex.test(cleanPhone.replace(/[^0-9]/g, ''))) {
+    /* PHONE VALIDATION */
+
+    const phoneRegex =
+      /^[0-9]{10,15}$/;
+
+    if (
+      !phoneRegex.test(
+        cleanPhone.replace(/\D/g, "")
+      )
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Invalid phone number format"
+        message:
+          "Invalid phone number format",
       });
     }
 
-    /* ---------- Find Existing Super Admin ---------- */
+    /* ---------------- FIND USER ---------------- */
+
     const user = await User.findOne({
       phone: cleanPhone,
-      type: 'super_admin' // Ensure only super_admin can login through this endpoint
+      type: "super_admin",
     });
 
-    // Don't create new user - super admin must exist in system
+    /* SUPER ADMIN MUST EXIST */
+
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: "Invalid credentials. Super admin account not found."
+        message:
+          "Super admin account not found",
       });
     }
 
-    /* ---------- Send OTP ---------- */
-    const otpResponse = await sendWhatsAppOtp(phone);
+    /* SUSPEND CHECK */
+
+    if (user.suspend) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Account suspended",
+      });
+    }
+
+    /* ---------------- RATE LIMIT ---------------- */
+
+    const recentOtp = await Otp.findOne({
+      userId: user._id,
+      createdAt: {
+        $gt: new Date(
+          Date.now() - 60 * 1000
+        ),
+      },
+    }).lean();
+
+    if (recentOtp) {
+      return res.status(429).json({
+        success: false,
+        message:
+          "Please wait 1 minute before requesting another OTP",
+      });
+    }
+
+    /* ---------------- DELETE OLD OTP ---------------- */
+
+    await Otp.deleteMany({
+      userId: user._id,
+    });
+
+    /* ---------------- GENERATE OTP ---------------- */
+
+    const code = generateOTP();
+
+    /* ---------------- SAVE OTP ---------------- */
+
+    await Otp.create({
+      userId: user._id,
+      phone: cleanPhone,
+      otp: code,
+      attempts: 0,
+
+      expiresAt: new Date(
+        Date.now() + 5 * 60 * 1000
+      ),
+    });
+
+    /* ---------------- SEND WHATSAPP OTP ---------------- */
+
+    const otpResponse =
+      await QuicksendWhatsAppOtp(
+        cleanPhone,
+        code
+      );
 
     if (!otpResponse.success) {
-      // Log the error for monitoring
-      console.error(`Failed to send OTP to super admin ${phone}:`, otpResponse.error);
+
+      console.error(
+        "Admin OTP send failed:",
+        otpResponse.error
+      );
 
       return res.status(500).json({
         success: false,
-        message: 'Failed to send OTP. Please try again later.'
+        message:
+          "Failed to send OTP",
       });
     }
 
-    /* ---------- Update User with OTP Info ---------- */
-    await User.findByIdAndUpdate(
-      user._id,
-      {
-        whatsapp_uid: otpResponse.data,
-        lastOtpSentAt: new Date(),
-      }
+    /* ---------------- RESPONSE ---------------- */
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "OTP sent successfully",
+
+      userId: user._id,
+
+      phone: user.phone,
+    });
+
+  } catch (error) {
+
+    console.error(
+      "startAdminAuth Error:",
+      error
     );
 
-    /* ---------- Response ---------- */
-    return res.json({
-      success: true,
-      message: "OTP sent successfully",
-      userId: user._id,
-      phone: user.phone,
-
-    });
-
-  } catch (err) {
-    console.error('Admin auth start error:', err);
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Authentication failed. Please try again later."
+      message:
+        "Authentication failed",
+      error: error.message,
     });
   }
 };
 
-export const completeAdminOtp = async (req, res) => {
-  try {
-    const { userId, otp } = req.body;
-
-    /* ---------- Validation ---------- */
-    if (!userId || !otp) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID and OTP are required"
-      });
-    }
-
-    if (!otp.match(/^\d{4}$/)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP format. OTP must be 6 digits."
-      });
-    }
-
-    /* ---------- Find User ---------- */
-    const user = await User.findById(userId);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
-    }
-
-    // Verify this is a super admin account
-    if (user.type !== 'super_admin') {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. Invalid account type."
-      });
-    }
 
 
+/* =========================================================
+   COMPLETE SUPER ADMIN OTP
+========================================================= */
 
+export const completeAdminOtp =
+  async (req, res) => {
 
+    try {
 
-    /* ---------- Verify OTP ---------- */
-    const verifyResponse = await verifyWhatsAppOtp(user.whatsapp_uid, otp);
+      const {
+        userId,
+        otp,
+      } = req.body;
 
-    if (!verifyResponse.success) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid OTP. ${remainingAttempts} attempts remaining.`,
-        remainingAttempts: remainingAttempts
-      });
-    }
+      /* ---------------- VALIDATION ---------------- */
 
-    /* ---------- Generate JWT Token ---------- */
-    const token = generateToken(user._id, user.type);
-
-
-
-
-    /* ---------- Response with Minimal User Info ---------- */
-    return res.json({
-      success: true,
-      message: "Login successful",
-      token,
-      user: {
-        id: user._id,
-        phone: user.phone,
-        type: user.type,
+      if (!userId || !otp) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "userId and otp required",
+        });
       }
-    });
 
-  } catch (err) {
-    console.error('Admin OTP verification error:', err);
+      /* 4 DIGIT OTP */
 
-    res.status(500).json({
-      success: false,
-      message: "OTP verification failed. Please try again."
-    });
-  }
-};
+      if (!/^\d{4}$/.test(otp)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "OTP must be 4 digits",
+        });
+      }
 
+      /* ---------------- FIND USER ---------------- */
+
+      const user =
+        await User.findById(userId)
+          .select(
+            "_id phone type suspend"
+          )
+          .lean();
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "User not found",
+        });
+      }
+
+      /* ONLY SUPER ADMIN */
+
+      if (
+        user.type !== "super_admin"
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Access denied",
+        });
+      }
+
+      /* SUSPEND CHECK */
+
+      if (user.suspend) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Account suspended",
+        });
+      }
+
+      /* ---------------- FIND OTP ---------------- */
+
+      const otpDoc =
+        await Otp.findOne({
+          userId: user._id,
+          verified: false,
+        });
+
+      if (!otpDoc) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "OTP expired or not found",
+        });
+      }
+
+      /* ---------------- EXPIRE CHECK ---------------- */
+
+      if (
+        new Date() >
+        new Date(
+          otpDoc.expiresAt
+        )
+      ) {
+
+        await Otp.deleteMany({
+          userId: user._id,
+        });
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "OTP expired",
+        });
+      }
+
+      /* ---------------- ATTEMPTS CHECK ---------------- */
+
+      if (
+        otpDoc.attempts >=
+        otpDoc.maxAttempts
+      ) {
+
+        return res.status(429).json({
+          success: false,
+          message:
+            "Too many invalid attempts",
+        });
+      }
+
+      /* ---------------- INVALID OTP ---------------- */
+
+      if (otpDoc.otp !== otp) {
+
+        otpDoc.attempts += 1;
+
+        await otpDoc.save();
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid OTP",
+
+          remainingAttempts:
+            otpDoc.maxAttempts -
+            otpDoc.attempts,
+        });
+      }
+
+      /* ---------------- MARK VERIFIED ---------------- */
+
+      otpDoc.verified = true;
+
+      await otpDoc.save();
+
+      /* ---------------- UPDATE USER ---------------- */
+
+      const updatedUser =
+        await User.findByIdAndUpdate(
+          user._id,
+          {
+            $set: {
+              isVerified: true,
+              lastLoginAt:
+                new Date(),
+            },
+          },
+          {
+            new: true,
+          }
+        ).lean();
+
+      /* ---------------- DELETE OTP ---------------- */
+
+      await Otp.deleteMany({
+        userId: user._id,
+      });
+
+      /* ---------------- JWT TOKEN ---------------- */
+
+      const token =
+        await generateToken(
+          updatedUser._id,
+          updatedUser.type
+        );
+
+      /* ---------------- RESPONSE ---------------- */
+
+      return res.status(200).json({
+        success: true,
+        message:
+          "Login successful",
+
+        token,
+
+        user: {
+          id: updatedUser._id,
+          phone:
+            updatedUser.phone,
+          type:
+            updatedUser.type,
+        },
+      });
+
+    } catch (error) {
+
+      console.error(
+        "completeAdminOtp Error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "OTP verification failed",
+        error: error.message,
+      });
+    }
+  };
 export const completeProfile = async (req, res) => {
   try {
     const userId = req.user.id; // from JWT middleware
@@ -1956,308 +2469,6 @@ export const findUserByReferralOwner = async (req, res) => {
   }
 };
 
-const signup = async (req, res) => {
-  try {
-    // deviceId,
-    const { name, phone, email, type, password, referralCode, deviceId
-    } = req.body;
-
-
-    if (!name || !phone || !password) {
-      return res.status(400).json({ message: 'Name, phone, and password are required' });
-    }
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
-    }
-    if (referralCode && !/^(IND\d{3})$/.test(referralCode)) {
-      return res.status(400).json({ message: 'Invalid referral code format' });
-    }
-
-
-    if (!["user", "partner", "agency"].includes(type)) {
-      return res.status(401).json({ success: false, message: "Unauthorized Access Denied" });
-    }
-
-    // Find user by email, phone, or deviceId
-    const existingUser = await User.findOne({
-      $or: [
-        phone ? { phone } : null,
-        deviceId ? { deviceId } : null
-      ].filter(Boolean)
-    });
-
-    if (email) {
-      const emailExists = await User.findOne({ email: email.toLowerCase().trim() });
-      if (emailExists) {
-        return res.status(400).json({
-          message: 'Email already registered. Please login.'
-        });
-      }
-    }
-    if (existingUser) {
-      // ✅ If device is already registered with another phone/email
-      if (
-        existingUser.deviceId === deviceId &&
-        (existingUser.phone !== phone)
-      ) {
-        return res.status(400).json({
-          message: 'This device is already registered with another account.'
-        });
-      }
-
-      // ✅ If same user tries again (same device + same email/phone)
-      if (
-        existingUser.deviceId === deviceId &&
-        existingUser.phone === phone
-      ) {
-        return res.status(200).json({
-          message: 'You are already registered. Please log in instead.'
-        });
-      }
-
-      // ✅ If email or phone already exists for another device
-
-      if (existingUser.phone === phone) {
-        return res.status(400).json({ message: 'Phone number is already registered.' });
-      }
-    }
-
-    // Generate referral code
-    let uniqueReferralCode = null;
-    let isUnique = false;
-    let attempts = 0;
-    const maxAttempts = 5;
-
-    while (!isUnique && attempts < maxAttempts) {
-      uniqueReferralCode = generateReferralCode();
-      const existingCode = await User.findOne({ referalCode: uniqueReferralCode });
-      if (!existingCode) {
-        isUnique = true;
-      }
-      attempts++;
-    }
-
-    if (!isUnique) {
-      return res.status(500).json({ message: 'Could not generate unique referral code' });
-    }
-
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create new user
-    const newUser = new User({
-      name,                              // deviceId,
-      type,
-      phone,
-      email: email ? email.toLowerCase().trim() : undefined,
-      password: hashedPassword,
-      referalCode: uniqueReferralCode,
-      referredBy: referralCode || null,
-    });
-
-
-    await newUser.save(); // SAVE FIRST
-
-    // Send WhatsApp OTP
-    const otpResponse = await sendWhatsAppOtp(phone);
-
-
-    if (!otpResponse.success) {
-      await User.findByIdAndDelete(newUser._id); // rollback
-
-      return res.status(500).json({ message: 'Failed to send OTP', error: otpResponse.error });
-    }
-
-    // Store WhatsApp UID
-    newUser.whatsapp_uid = otpResponse.data || null;
-    await newUser.save();
-
-    res.status(201).json({
-      message: 'Signup successful, OTP sent to WhatsApp',
-      userId: newUser._id,
-      whatsapp_uid: newUser.whatsapp_uid
-    });
-  } catch (error) {
-    console.log(error)
-    logger.info("error", error);
-    res.status(500).json({ message: 'Signup failed', error: error.message });
-  }
-};
-
-const verifyOtp = async (req, res) => {
-  try {
-    const { userId, otp, deviceId } = req.body;
-
-    if (!userId || !otp || !deviceId) {
-      return res.status(400).json({ message: "userId, otp and deviceId are required" });
-    }
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // 1. Verify WhatsApp OTP
-    const verifyResponse = await verifyWhatsAppOtp(user.whatsapp_uid, otp);
-    if (!verifyResponse.success) {
-      return res.status(400).json({ message: "Invalid OTP", error: verifyResponse.error });
-    }
-
-    // 2. Check if deviceId already belongs to another user
-    const existingDeviceUser = await User.findOne({
-      deviceId,
-      _id: { $ne: user._id }
-    }).select("_id");
-
-    if (existingDeviceUser) {
-      return res.status(409).json({
-        message: "This device is already registered with another account"
-      });
-    }
-
-    // 3. Atomic update (prevents race conditions)
-    user.isVerified = true;
-    user.deviceId = deviceId;
-    user.otp = null;
-
-    await user.save();
-
-
-
-    // 5. Token response
-    res.json({
-      message: "OTP verified successfully",
-      token: generateToken(user._id, user.type),
-      name: user.name,
-      type: user.type,
-      isVerified: true,
-      isProfileCompleted: user.isProfileCompleted
-    });
-
-  } catch (error) {
-
-    // Handle Mongo duplicate key error safely
-    if (error.code === 11000 && error.keyPattern?.deviceId) {
-      return res.status(409).json({
-        message: "Device already registered with another account"
-      });
-    }
-
-    res.status(500).json({
-      message: "OTP verification failed",
-      error: error.message
-    });
-  }
-};
-
-
-
-
-const login = async (req, res) => {
-  try {
-    const { phone, password, deviceId, deviceToken } = req.body;
-
-    // ✅ 1. Basic validation for phone & password only
-    if (!phone || !password) {
-      return res.status(400).json({
-        message: 'Phone and password are required'
-      });
-    }
-
-
-    // ✅ 2. Find user by phone
-    const user = await User.findOne({ phone });
-    if (!user) {
-      return res.status(400).json({ message: 'Invalid phone number or password' });
-    }
-
-    if (user.isVerified === false) {
-      return res.status(403).json({
-        message: 'Account not verified. Please complete OTP verification.'
-      });
-    }
-
-    if (user.suspend === true) {
-      return res.status(403).json({
-        message: 'Account suspended. Contact support.'
-      });
-    }
-
-    // ✅ 3. Compare password
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid phone number or password' });
-    }
-
-    // ✅ 4. Roles that require deviceId & deviceToken
-    const requiresDevice = !['super_admin', 'admin', 'partner'].includes(user.type);
-
-    if (requiresDevice) {
-      if (!deviceId || !deviceToken) {
-        return res.status(400).json({
-          message: 'deviceId and deviceToken are required for your account type'
-        });
-      }
-
-      // Check if deviceId already used by another user
-      const deviceIdInUse = await User.findOne({
-        deviceId,
-        _id: { $ne: user._id }
-      });
-      if (deviceIdInUse) {
-        return res.status(400).json({
-          message: 'This device ID is already registered with another account.'
-        });
-      }
-
-      // Check if deviceToken already used by another user
-      const deviceTokenInUse = await User.findOne({
-        deviceToken,
-        _id: { $ne: user._id }
-      });
-      if (deviceTokenInUse) {
-        return res.status(400).json({
-          message: 'This device token is already registered with another account.'
-        });
-      }
-
-      // Save or update deviceId & deviceToken if changed
-      let updated = false;
-      if (user.deviceId !== deviceId) {
-        user.deviceId = deviceId;
-        updated = true;
-      }
-      if (user.deviceToken !== deviceToken) {
-        user.deviceToken = deviceToken;
-        updated = true;
-      }
-      if (updated) await user.save();
-    }
-
-    // ✅ 5. Generate JWT token
-    const token = generateToken(user._id.toString(), user.type);
-
-    // ✅ 6. Send response
-    return res.status(200).json({
-      success: true,
-      token,
-      name: user.name,
-      type: user.type,
-      isApproved: user.isVerified,
-      isProfileCompleted: user.isProfileCompleted,
-      message: 'Login successful'
-    });
-
-  } catch (error) {
-    console.error('Login Error:', error);
-    return res.status(500).json({
-      message: 'Login failed',
-      error: error.message
-    });
-  }
-};
-
-
 
 
 const resendOtp = async (req, res) => {
@@ -2268,7 +2479,7 @@ const resendOtp = async (req, res) => {
     const otpResponse = await QuicksendWhatsAppOtp(phone, otp);
 
     logger.info(`OTP resend response for phone ${phone}: ${JSON.stringify(otpResponse)}`);
-    
+
     if (!otpResponse.success) {
       return res.status(500).json({ message: 'Failed to resend OTP', error: otpResponse.error });
     }
@@ -2277,7 +2488,7 @@ const resendOtp = async (req, res) => {
       message: 'OTP resent successfully',
       data: otpResponse.data
     });
-    
+
   } catch (error) {
     res.status(500).json({ message: 'Failed to resend OTP', error: error.message });
   } finally {
@@ -2285,60 +2496,7 @@ const resendOtp = async (req, res) => {
   }
 };
 
-const forgotPassword = async (req, res) => {
-  try {
-    const { phone } = req.body;
 
-    const user = await User.findOne({ phone });
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Send WhatsApp OTP
-    const otpResponse = await sendWhatsAppOtp(phone);
-    if (!otpResponse.success) {
-      return res.status(500).json({ message: 'Failed to send OTP', error: otpResponse.error });
-    }
-
-    // Store WhatsApp UID
-    user.whatsapp_uid = otpResponse.data || null;
-    await user.save();
-
-    res.status(200).json({
-      message: 'OTP sent to WhatsApp',
-      userId: user._id,
-      whatsapp_uid: user.whatsapp_uid
-    });
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to send OTP', error: error.message });
-  }
-};
-
-const resetPassword = async (req, res) => {
-  try {
-    const { userId, otp, newPassword } = req.body;
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Verify WhatsApp OTP
-    const verifyResponse = await verifyWhatsAppOtp(user.whatsapp_uid, otp);
-    if (!verifyResponse.success) {
-      return res.status(400).json({ message: 'Invalid OTP', error: verifyResponse.error });
-    }
-
-    // Update password
-    user.password = await bcrypt.hash(newPassword, 10);
-    user.whatsapp_uid = null;
-    await user.save();
-
-    res.json({ message: 'Password reset successful' });
-  } catch (error) {
-    res.status(500).json({ message: 'Password reset failed', error: error.message });
-  }
-};
 
 const signout = (req, res) => {
   // Clear device token
@@ -2455,13 +2613,11 @@ const getProfileImageUrl = async (req, res) => {
 };
 
 export {
-  signup,
-  verifyOtp,
+ 
   resendOtp,
-  login,
+
   signout,
-  forgotPassword,
-  resetPassword,
+
   updateProfile,
   getProfileData,
   uploadProfileImage,

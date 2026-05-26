@@ -1,6 +1,17 @@
 import dotenv from 'dotenv';  // <-- make sure you import it
 import axios from "axios";
+import User from '../models/userModel.js';
+import logger from "./logger.js";
+
+import crypto from "crypto";
+
 dotenv.config();
+
+
+export const generateOTP = () => {
+    return crypto.randomInt(1000, 10000).toString();
+};
+
 
 
 const QUICKHUB_API_KEY = process.env.QUICKHUB_API_KEY;
@@ -73,3 +84,6 @@ export async function verifyWhatsAppOtp(uid, otp) {
         };
     }
 }
+
+
+

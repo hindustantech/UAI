@@ -2,15 +2,14 @@ import express from 'express';
 import multer from 'multer'; // Add this at the top
 
 import {
-    signup,
+
     updateUserLocation,
     UpdateManualAddress,
-    verifyOtp,
-    login,
+  
+  
     resendOtp,
     signout,
-    forgotPassword,
-    resetPassword,
+  
     updateProfile,
     getProfileData,
     uploadProfileImage,
@@ -59,7 +58,7 @@ router.get('/updateProfileImage', authMiddleware, upload.single('profileImage'),
 
 // router.post('/signout', signout);
 
-router.post('/signup', signup);
+
 router.get('/resendOtp', resendOtp);
 router.post("/find-by-phone", findUserByPhone);
 router.get("/getUserProfile", authMiddleware, getUserProfile);
@@ -80,12 +79,11 @@ router.post('/requestAccountDeletion', authMiddleware, requestAccountDeletion);
 router.get('/getDeletionStatus', authMiddleware, getDeletionStatus);
 router.get('/findUserByReferralOwner/:code', authMiddleware, findUserByReferralOwner);
 
-router.post('/verifyOtp', verifyOtp);
-router.post('/login', login);
+
+
 // router.post('/resendOtp', resendOtp);
 router.post('/signout', signout);
-router.post('/forgot-password', forgotPassword);
-router.post('/reset-password', resetPassword);
+
 router.put('/update-profile', authMiddleware, updateProfile);
 router.get('/profile-data', authMiddleware, getProfileData);
 router.get('/getOwner/:ownerId', authMiddleware, getOwner);

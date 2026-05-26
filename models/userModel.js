@@ -1,5 +1,6 @@
 // const mongoose = require('mongoose');
 import mongoose from "mongoose";
+
 const userSchema = new mongoose.Schema({
   uid: {
     type: String, unique: true
@@ -21,10 +22,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: false
   },
-  otp: {
-    type: String,
-    default: null
-  },
+ 
   suspend: {
     type: Boolean,
     default: false
@@ -234,6 +232,8 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  
+
 
 }, {
   timestamps: true
