@@ -61,7 +61,7 @@ class PunchAutomationCron {
                 },
                 punchIn: { $ne: null },
                 punchOut: null, // No punch-out yet
-                status: "present"
+                // status: "present" // Only consider those marked as present (manual punch-in)
             })
                 .populate("employeeId")
                 .populate("companyId")
