@@ -20,7 +20,7 @@ export const QuicksendWhatsAppOtp = async (number, code) => {
     try {
         const payload = {
             to: number.startsWith("+") ? number : `+${number}`,
-            templateName: "otp_auth",
+            templateName:"otp_auth",
             params: [String(code)],
         };
         logger.info("Sending WhatsApp OTP", { number, code });
