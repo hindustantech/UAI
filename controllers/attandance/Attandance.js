@@ -44,6 +44,7 @@ const normalizeDateIST = (date) => {
 
 const isFlexibleShift = (shiftData) => {
     return shiftData?.shiftType === "flexible";
+    console.log(` 43 : Shift Type: ${shiftData.shiftType} | Is Flexible: ${shiftData?.shiftType === "flexible"}`);
 };
 
 /**
@@ -607,6 +608,7 @@ export const markAttendance = async (req, res) => {
             }
 
             if (finalStatus === "absent" && !isFlexible) {
+                console.log(`line no : 611 : Employee marked as ABSENT due to late punch-in. No work time calculated.`,);
                 attendance = new Attendance({
                     companyId,
                     employeeId: employee._id,
