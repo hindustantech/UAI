@@ -471,7 +471,6 @@ export const markAttendance = async (req, res) => {
         let punchOutTimeIST = null;
 
         if (punchIn) {
-            // Convert incoming punchIn (assumed to be IST string or UTC) to UTC for storage
             const punchInUTC = new Date(punchIn);
             punchInTimeIST = getPunchTimeIST(punchInUTC);
             console.log(`🕐 Punch In Time (IST): ${punchInTimeIST.toISOString()}`);
@@ -555,7 +554,6 @@ export const markAttendance = async (req, res) => {
             if (isFlexible) {
                 console.log("🟢 FLEXIBLE SHIFT DETECTED - No absent checks, always allowed");
 
-                // Flexible shifts are ALWAYS present on punch-in
                 let finalStatus = baseStatus === "holiday" ? "holiday" : "present";
                 console.log(`  ✅ Flexible shift punch-in - Status: ${finalStatus}`);
 
@@ -563,7 +561,6 @@ export const markAttendance = async (req, res) => {
                 let overtimeMinutes = 0;
                 let earlyLeaveMinutes = 0;
 
-                // Calculate work time if punch-out is provided with punch-in
                 if (outTimeUTC) {
                     totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
 
@@ -611,7 +608,7 @@ export const markAttendance = async (req, res) => {
                     },
                     lateByMinutes: 0,
                     totalWorkingHours: Math.max(0, totalMinutes / 60),
-                    remarks: remarks || "Flexible shift - no late/absent penalties",
+                    remarks: remarks || "Flexible shift - Punch-in recorded",
                     isSuspicious: false,
                     punchHistory: outTimeUTC ? [{
                         punchOut: outTimeUTC,
@@ -629,7 +626,6 @@ export const markAttendance = async (req, res) => {
                     approvalStatus: "pending"
                 });
 
-                // Save and return for flexible shift
                 await attendance.save({ session });
                 await session.commitTransaction();
                 session.endSession();
@@ -663,21 +659,19 @@ export const markAttendance = async (req, res) => {
                 });
             }
 
-            // ========== REGULAR SHIFT HANDLING (with strict late rejection) ==========
+            // ========== REGULAR SHIFT HANDLING ==========
             else {
                 console.log("🔴 REGULAR SHIFT DETECTED - Applying strict attendance rules");
 
-                // Calculate minutes after shift start
                 const minutesAfterShiftStart = diffMinutes(shiftStartTimeIST, punchInTimeIST);
                 console.log(`  Minutes after shift start: ${minutesAfterShiftStart}`);
 
-                // Check if punch is too late (exceeds absent marking grace period)
+                // Check if punch is too late
                 if (minutesAfterShiftStart > afterAbsentMarkGrace) {
                     const shiftStartTimeFormatted = shiftData.startTime;
 
-                    console.log(`❌ PUNCH REJECTED - Too late by ${minutesAfterShiftStart} minutes (max allowed: ${afterAbsentMarkGrace})`);
+                    console.log(`❌ PUNCH REJECTED - Too late by ${minutesAfterShiftStart} minutes`);
 
-                    // Return error - DO NOT create attendance record
                     return abortAndRespond(
                         session,
                         res,
@@ -698,15 +692,21 @@ export const markAttendance = async (req, res) => {
                 // Calculate late minutes after grace period
                 const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
                 let lateMinutes = Math.max(0, minutesAfterShiftStart - gracePeriodLate);
+
+                // Format late minutes for remarks
+                const lateRemarks = lateMinutes > 0 ? ` (Late by ${lateMinutes} minutes after ${gracePeriodLate}min grace)` : "";
+
                 console.log(`  Late Minutes (after ${gracePeriodLate} mins grace): ${lateMinutes}`);
 
                 let totalMinutes = 0;
                 let overtimeMinutes = 0;
                 let earlyLeaveMinutes = 0;
                 let isSuspicious = false;
-                let finalStatus = baseStatus;
 
-                // Normal attendance within allowed time
+                // ✅ FIX: For punch-in only, status is "present"
+                let finalStatus = baseStatus === "holiday" ? "holiday" : "present";
+
+                // Only calculate if punch-out is provided
                 if (outTimeUTC) {
                     totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
 
@@ -726,19 +726,29 @@ export const markAttendance = async (req, res) => {
                         earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
                         console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
                     }
+
+                    const finalPayableMinutes = calculatePayableMinutes(totalMinutes, breaks || []);
+                    finalStatus = determineStatus(
+                        finalPayableMinutes,
+                        shiftDurationMinutes,
+                        baseStatus === "holiday"
+                    );
+                    console.log(`  Final Status (after punch-out): ${finalStatus}`);
                 } else {
-                    isSuspicious = true;
-                    console.log(`  ⚠ Incomplete: Punch-out not provided`);
+                    console.log(`  ✅ Punch-in only - Status set to: PRESENT`);
                 }
 
-                const finalPayableMinutes = calculatePayableMinutes(totalMinutes, breaks || []);
-                finalStatus = determineStatus(
-                    finalPayableMinutes,
-                    shiftDurationMinutes,
-                    baseStatus === "holiday"
-                );
-
                 console.log(`  Final Status: ${finalStatus}`);
+
+                // ✅ Create remarks based on punch-in only or with punch-out
+                let finalRemarks = remarks || "";
+                if (!finalRemarks) {
+                    if (!outTimeUTC) {
+                        finalRemarks = `Punch-in recorded at ${shiftData.startTime} shift start${lateRemarks}`;
+                    } else {
+                        finalRemarks = `Punch-in and punch-out completed${lateRemarks}`;
+                    }
+                }
 
                 attendance = new Attendance({
                     companyId,
@@ -764,15 +774,15 @@ export const markAttendance = async (req, res) => {
                     deviceInfo,
                     workSummary: {
                         totalMinutes: Math.max(0, totalMinutes),
-                        payableMinutes: Math.max(0, finalPayableMinutes),
+                        payableMinutes: Math.max(0, calculatePayableMinutes(totalMinutes, breaks || [])),
                         overtimeMinutes: Math.max(0, overtimeMinutes),
-                        lateMinutes: Math.max(0, lateMinutes),
+                        lateMinutes: lateMinutes,
                         earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
                     },
-                    lateByMinutes: Math.max(0, lateMinutes),
+                    lateByMinutes: lateMinutes,
                     totalWorkingHours: Math.max(0, totalMinutes / 60),
-                    remarks: remarks,
-                    isSuspicious,
+                    remarks: finalRemarks,
+                    isSuspicious: outTimeUTC ? isSuspicious : false, // ✅ false for punch-in only
                     punchHistory: outTimeUTC ? [{
                         punchOut: outTimeUTC,
                         geoLocation: {
@@ -789,14 +799,12 @@ export const markAttendance = async (req, res) => {
                     approvalStatus: "pending"
                 });
 
-                // Save new attendance
                 await attendance.save({ session });
                 await session.commitTransaction();
                 session.endSession();
 
                 console.log(`✓ New attendance created for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
 
-                // Prepare response data
                 const punchInISTResponse = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
                 const punchOutISTResponse = attendance.punchOut ? getPunchTimeIST(attendance.punchOut) : null;
 
@@ -821,9 +829,8 @@ export const markAttendance = async (req, res) => {
                     remarks: attendance.remarks
                 };
 
-                // Add warning message if late but within grace
-                const responseMessage = lateMinutes > 0
-                    ? `Attendance marked as ${finalStatus} (You were ${lateMinutes} minutes late)`
+                const responseMessage = !outTimeUTC
+                    ? `Punch-in recorded successfully. Final status will be updated on punch-out.`
                     : `Attendance marked as ${finalStatus} successfully`;
 
                 return res.status(201).json({
@@ -851,6 +858,7 @@ export const markAttendance = async (req, res) => {
 
             console.log("=== PUNCH OUT DEBUG ===");
             console.log("Current attendance.status:", attendance.status);
+            console.log("Current attendance.remarks:", attendance.remarks);
             console.log("Shift type:", isFlexible ? "FLEXIBLE" : "REGULAR");
 
             /* Anti-spam check */
@@ -916,7 +924,6 @@ export const markAttendance = async (req, res) => {
                 }
 
                 const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
-                // Flexible shifts: present if any work done
                 const finalStatus = totalMinutes > 0 ? "present" : "absent";
 
                 console.log(`  Total minutes: ${totalMinutes}`);
@@ -932,6 +939,7 @@ export const markAttendance = async (req, res) => {
                 };
                 attendance.lateByMinutes = 0;
                 attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+                attendance.remarks = `Punch-out completed. Total work: ${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
             }
             else {
                 console.log("🔴 Regular shift punch-out - Calculating final metrics");
@@ -961,14 +969,50 @@ export const markAttendance = async (req, res) => {
                 }
 
                 const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
-                const finalStatus = determineStatus(
-                    payableMinutes,
-                    shiftDurationMinutes,
-                    attendance.status === "holiday"
-                );
 
-                console.log(`  Late minutes: ${lateMinutes}`);
-                console.log(`  Final Status: ${finalStatus}`);
+                // ✅ Calculate final status based on actual work done
+                let finalStatus;
+                const percentageWorked = (payableMinutes / shiftDurationMinutes) * 100;
+
+                console.log(`  Percentage of shift completed: ${percentageWorked.toFixed(1)}%`);
+
+                if (punchOutTimeIST >= shiftEndTimeIST) {
+                    finalStatus = "present";
+                    console.log(`  ✅ Completed full shift - Status: PRESENT`);
+                }
+                else if (percentageWorked >= 50) {
+                    finalStatus = "present";
+                    console.log(`  ✅ Worked ${percentageWorked.toFixed(1)}% of shift - Status: PRESENT`);
+                }
+                else if (percentageWorked > 0 && percentageWorked < 50) {
+                    finalStatus = "half_day";
+                    console.log(`  ⚠ Worked only ${percentageWorked.toFixed(1)}% of shift - Status: HALF_DAY`);
+                }
+                else {
+                    finalStatus = "absent";
+                    console.log(`  ❌ No work done - Status: ABSENT`);
+                }
+
+                // Format remarks
+                const workDurationStr = `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+                let statusRemark = "";
+
+                if (finalStatus === "half_day") {
+                    statusRemark = `Half day - Worked ${percentageWorked.toFixed(1)}% of shift (${workDurationStr} / ${Math.floor(shiftDurationMinutes / 60)}h ${shiftDurationMinutes % 60}m)`;
+                } else if (finalStatus === "present" && punchOutTimeIST < shiftEndTimeIST) {
+                    statusRemark = `Present - Left early (${workDurationStr} worked)`;
+                } else if (finalStatus === "present" && punchOutTimeIST >= shiftEndTimeIST) {
+                    statusRemark = `Present - Completed full shift (${workDurationStr})`;
+                } else {
+                    statusRemark = `Punch-out completed. Total work: ${workDurationStr}`;
+                }
+
+                if (lateMinutes > 0) {
+                    statusRemark += ` (Late by ${lateMinutes} minutes)`;
+                }
+
+                attendance.remarks = statusRemark;
+                console.log(`  Remarks: ${statusRemark}`);
 
                 attendance.status = finalStatus;
                 attendance.workSummary = {
@@ -1027,9 +1071,16 @@ export const markAttendance = async (req, res) => {
                 remarks: savedAttendance.remarks
             };
 
+            let successMessage = `Punch-out recorded successfully. `;
+            if (savedAttendance.status === "half_day") {
+                successMessage += `Marked as HALF DAY because you worked less than 50% of shift duration.`;
+            } else if (savedAttendance.status === "present") {
+                successMessage += `Marked as PRESENT.`;
+            }
+
             return res.status(201).json({
                 success: true,
-                message: `Attendance ${savedAttendance.status} processed successfully`,
+                message: successMessage,
                 data: responseData
             });
         }
