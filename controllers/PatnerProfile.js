@@ -5,37 +5,7 @@ import { uploadToCloudinary } from "../utils/Cloudinary.js";
 import mongoose from "mongoose";
 import logger from "../utils/logger.js";
 
-export const getme = async (req, res) => {
-    try {
-        const userId = req.user.id;
 
-        logger.info(`Fetching profile for user ID: ${userId}`);
-        // Select only required fields
-        const profile = await User.findById(userId)
-            .select("-password -otp -refreshToken")
-            .lean();
-
-        if (!profile) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found",
-            });
-        }
-
-        return res.status(200).json({
-            success: true,
-            data: profile,
-        });
-
-    } catch (error) {
-        console.error("Error in getme:", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
-    }
-};
 
 export const createOrUpdateProfile = async (req, res) => {
     const session = await mongoose.startSession();
