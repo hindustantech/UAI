@@ -6,7 +6,7 @@ import mongoose from "mongoose";
 
 export const getme = async (req, res) => {
     try {
-        const userId = req.user._id;
+        const userId = req.user._id || req.user.id;
         const profile = await User.findById(userId).lean();
         if (!profile) {
             return res.status(404).json({
