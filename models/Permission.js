@@ -14,6 +14,7 @@ const PermissionSchema = new Schema({
     key: { type: String, required: true, unique: true, index: true },
     description: { type: String, default: '' },
     system: { type: Boolean, default: false },
+    adminOnly: { type: Boolean, default: false },
     meta: { type: Schema.Types.Mixed, default: {} }
 }, { timestamps: true });
 

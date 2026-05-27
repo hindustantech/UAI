@@ -23,12 +23,12 @@ export const assignPermission = async (req, res) => {
 
     await AssingPermission.assignToUser(company, userId, permissionKey, performedBy);
 
-    await PermissionLog.create({ 
-      companyId: company, 
-      userId, 
-      permissionKey, 
-      actionType: 'ASSIGNED', 
-      performedBy 
+    await PermissionLog.create({
+      companyId: company,
+      userId,
+      permissionKey,
+      actionType: 'ASSIGNED',
+      performedBy
     });
 
     const assignment = await AssingPermission.findOne({ companyId: company, userId }).populate('assignedBy', 'name email');
@@ -55,12 +55,12 @@ export const removePermission = async (req, res) => {
 
     await AssingPermission.removeFromUser(company, userId, permissionKey);
 
-    await PermissionLog.create({ 
-      companyId: company, 
-      userId, 
-      permissionKey, 
-      actionType: 'REMOVED', 
-      performedBy 
+    await PermissionLog.create({
+      companyId: company,
+      userId,
+      permissionKey,
+      actionType: 'REMOVED',
+      performedBy
     });
 
     const assignment = await AssingPermission.findOne({ companyId: company, userId });
@@ -93,7 +93,7 @@ export const getUserPermissions = async (req, res) => {
 
 
 
-              
+
 
 
 /**
@@ -101,7 +101,7 @@ export const getUserPermissions = async (req, res) => {
  */
 export const createPermission = async (req, res) => {
   try {
-    const { resource, action, name, description, system } = req.body;
+    const { resource, action, adminOnly, name, description, system } = req.body;
     if (!resource || !action) {
       return res.status(400).json({ message: 'Resource and action are required' });
     }
@@ -117,6 +117,7 @@ export const createPermission = async (req, res) => {
       name: name || `${resource} ${action}`,
       description,
       system: !!system,
+      adminOnly: !!adminOnly
     });
 
     await perm.save();
@@ -133,7 +134,21 @@ export const createPermission = async (req, res) => {
 export const getAllPermissions = async (req, res) => {
   try {
     const { page = 1, limit = 50, search = '' } = req.query;
-    const query = search ? { $or: [{ key: { $regex: search, $options: 'i' } }, { resource: { $regex: search, $options: 'i' } }] } : {};
+
+    const query = {};
+
+    // ✅ Hide adminOnly permissions for non-super_admin users
+    if (req.user.type !== 'super_admin') {
+      query.adminOnly = { $ne: true };
+    }
+
+    // ✅ Search filter
+    if (search) {
+      query.$or = [
+        { key: { $regex: search, $options: 'i' } },
+        { resource: { $regex: search, $options: 'i' } }
+      ];
+    }
 
     const permissions = await Permission.find(query)
       .sort({ key: 1 })
@@ -151,8 +166,12 @@ export const getAllPermissions = async (req, res) => {
         total,
       },
     });
+
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
