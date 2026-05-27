@@ -3,12 +3,13 @@ import PatnerProfile from "../models/PatnerProfile.js";
 import User from "../models/userModel.js";
 import { uploadToCloudinary } from "../utils/Cloudinary.js";
 import mongoose from "mongoose";
+import logger from "../utils/logger.js";
 
 export const getme = async (req, res) => {
     try {
         const userId = req.user.id;
 
-        
+        logger.info(`Fetching profile for user ID: ${userId}`);
         // Select only required fields
         const profile = await User.findById(userId)
             .select("-password -otp -refreshToken")
