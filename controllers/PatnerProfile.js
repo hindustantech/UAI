@@ -8,6 +8,7 @@ export const getme = async (req, res) => {
     try {
         const userId = req.user.id;
 
+        
         // Select only required fields
         const profile = await User.findById(userId)
             .select("-password -otp -refreshToken")
