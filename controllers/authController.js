@@ -2471,7 +2471,7 @@ export const findUserByReferralOwner = async (req, res) => {
 
 
 
- const resendOtp = async (
+const resendOtp = async (
   req,
   res
 ) => {
