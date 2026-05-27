@@ -1961,11 +1961,10 @@ export const startAdminAuth = async (
 
     /* ONLY SUPER ADMIN */
 
-    if (type !== "super_admin") {
+    if (type !== "super_admin" && type !== "admin") {
       return res.status(403).json({
         success: false,
-        message:
-          "Only super admin access allowed",
+        message: "Only admin and super admin access allowed",
       });
     }
 
@@ -1992,10 +1991,10 @@ export const startAdminAuth = async (
 
     const user = await User.findOne({
       phone: cleanPhone,
-      type: "super_admin",
+      type: type,
     });
 
-    /* SUPER ADMIN MUST EXIST */
+    /* USER MUST EXIST */
 
     if (!user) {
       return res.status(401).json({
@@ -2163,12 +2162,12 @@ export const completeAdminOtp =
       /* ONLY SUPER ADMIN */
 
       if (
-        user.type !== "super_admin"
+        user.type !== "super_admin" &&
+        user.type !== "admin"
       ) {
         return res.status(403).json({
           success: false,
-          message:
-            "Access denied",
+          message: "Access denied",
         });
       }
 
