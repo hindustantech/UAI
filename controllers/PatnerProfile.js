@@ -6,24 +6,34 @@ import mongoose from "mongoose";
 
 export const getme = async (req, res) => {
     try {
-        const userId = req.user._id || req.user.id;
-        const profile = await User.findById(userId).lean();
+        const userId = req.user.id;
+
+        // Select only required fields
+        const profile = await User.findById(userId)
+            .select("-password -otp -refreshToken")
+            .lean();
+
         if (!profile) {
             return res.status(404).json({
                 success: false,
                 message: "User not found",
             });
         }
-        res.status(200).json({
+
+        return res.status(200).json({
             success: true,
             data: profile,
         });
+
     } catch (error) {
         console.error("Error in getme:", error);
-        res.status(500).json({ success: false, message: error.message });
-    }
 
-}
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+};
 
 export const createOrUpdateProfile = async (req, res) => {
     const session = await mongoose.startSession();
