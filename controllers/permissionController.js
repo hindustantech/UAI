@@ -196,7 +196,7 @@ export const getPermission = async (req, res) => {
 export const updatePermission = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, system } = req.body;
+    const { name, description, system ,adminOnly } = req.body;
 
     const perm = await Permission.findById(id);
     if (!perm) return res.status(404).json({ message: 'Permission not found' });
@@ -204,7 +204,7 @@ export const updatePermission = async (req, res) => {
     if (name) perm.name = name;
     if (description !== undefined) perm.description = description;
     if (system !== undefined) perm.system = !!system;
-
+    if (adminOnly !== undefined) perm.adminOnly = !!adminOnly;
     await perm.save();
 
     res.json({ success: true, message: 'Permission updated', permission: perm });
