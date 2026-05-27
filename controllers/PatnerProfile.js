@@ -4,6 +4,26 @@ import User from "../models/userModel.js";
 import { uploadToCloudinary } from "../utils/Cloudinary.js";
 import mongoose from "mongoose";
 
+export const getme = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const profile = await User.findById(userId).lean();
+        if (!profile) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
+            });
+        }
+        res.status(200).json({
+            success: true,
+            data: profile,
+        });
+    } catch (error) {
+        console.error("Error in getme:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+
+}
 
 export const createOrUpdateProfile = async (req, res) => {
     const session = await mongoose.startSession();

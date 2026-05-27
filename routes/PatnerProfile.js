@@ -1,6 +1,6 @@
 import express from "express";
 import multer from "multer";
-import { createOrUpdateProfile, getProfile } from "../controllers/PatnerProfile.js";
+import { createOrUpdateProfile, getProfile, getme } from "../controllers/PatnerProfile.js";
 import authMiddleware from '../middlewares/authMiddleware.js';
 import { updateProfileMedia } from "../controllers/authController.js";
 
@@ -42,5 +42,6 @@ router.put(
 );
 // Get Profile by User ID
 router.get("/:userId", getProfile);
+router.get("/me",authMiddleware ,getme);
 
 export default router;
