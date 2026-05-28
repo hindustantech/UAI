@@ -1,4 +1,5 @@
 import User from "../models/userModel.js";
+import logger from "../utils/logger.js";
 // Common function for pagination + search + filter
 export const fetchUsers = async (req, res) => {
     try {
@@ -44,7 +45,7 @@ export const fetchUsers = async (req, res) => {
 
 export const getme = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user.id || req.user._id;
 
         logger.info(`Fetching profile for user ID: ${userId}`);
         // Select only required fields
