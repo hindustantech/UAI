@@ -318,10 +318,15 @@ const normalizeColumnName = (key) => {
     return columnMap[normalized] || key;
 };
 
+// controllers/billController.js
 
-/**
- * Controller: Get all bills with reminder status
- */
+
+
+
+
+
+
+// Enhanced function with server selection
 export const getAllBillsWithReminderStatus = async (req, res) => {
     try {
         const today = new Date();
@@ -334,7 +339,7 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
         const allBills = await Bill.find({
             status: { $ne: 'cancelled' }
         })
-            .select('billDate bill_id customerName phone serviceName baseServiceName staffName status followUpCount followUpMax reminderStatus lastReminderSentAt nextReminderDate serviceIntervalDays createdAt')
+            .select('billDate bill_id customerName phone serviceName baseServiceName staffName status followUpCount followUpMax reminderStatus lastReminderSentAt nextReminderDate serviceIntervalDays createdAt serverLocation')
             .sort({ billDate: -1 })
             .lean();
 
@@ -345,9 +350,13 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
                 totalBills: 0,
                 summary: { due: 0, valid: 0, expired: 0, maxReached: 0, totalGroups: 0 },
                 data: [],
-                availableServices: []
+                availableServices: [],
+                availableServers: []
             });
         }
+
+        // Extract unique servers
+        const availableServers = [...new Set(allBills.map(bill => bill.serverLocation || 'Default').filter(Boolean))].sort();
 
         // Group by phone + baseServiceName
         const groupedBills = {};
@@ -366,7 +375,7 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
             groupedBills[key].bills.push(bill);
         }
 
-        // Process groups
+        // Process groups with server filtering
         const processedBills = [];
         const summary = {
             due: 0,
@@ -376,8 +385,18 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
             totalGroups: Object.keys(groupedBills).length
         };
 
+        const { server, filterStatus, search, service, dateRange, timeRange, page = 1, limit = 10 } = req.query;
+
         for (const [key, group] of Object.entries(groupedBills)) {
             const bills = group.bills;
+
+            // Filter by server if specified
+            let filteredBills = bills;
+            if (server && server !== 'all') {
+                filteredBills = bills.filter(bill => bill.serverLocation === server);
+                if (filteredBills.length === 0) continue;
+            }
+
             const serviceInterval = getDefaultServiceDays(group.baseServiceName);
 
             let hasRecentService = false;
@@ -385,17 +404,15 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
             let maxDaysDiff = 0;
 
             // Check all bills in group
-            for (const bill of bills) {
+            for (const bill of filteredBills) {
                 const billDate = new Date(bill.billDate);
                 const diffDays = Math.floor((today - billDate) / (1000 * 60 * 60 * 24));
 
-                // If any bill within service interval → skip group
                 if (diffDays < serviceInterval) {
                     hasRecentService = true;
                     break;
                 }
 
-                // Track oldest bill in valid range
                 if (diffDays >= serviceInterval && diffDays <= 365) {
                     if (diffDays > maxDaysDiff) {
                         maxDaysDiff = diffDays;
@@ -405,7 +422,7 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
             }
 
             // Assign status
-            for (const bill of bills) {
+            for (const bill of filteredBills) {
                 const billDate = new Date(bill.billDate);
                 const diffDays = Math.floor((today - billDate) / (1000 * 60 * 60 * 24));
 
@@ -415,7 +432,7 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
                     serviceDays: serviceInterval,
                     daysSinceService: diffDays,
                     groupKey: key,
-                    groupSize: bills.length
+                    groupSize: filteredBills.length
                 };
 
                 // Determine status
@@ -444,36 +461,42 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
             }
         }
 
-        // Sort
-        processedBills.sort((a, b) => {
-            const order = { 'due': 1, 'due_duplicate': 2, 'valid': 3, 'expired': 4, 'max_reached': 5 };
-            return (order[a.reminderStatus] || 99) - (order[b.reminderStatus] || 99);
-        });
+        // Apply date and time filters
+        let filteredResults = [...processedBills];
 
-        // Extract unique services for the filter dropdown
-        const uniqueServices = [...new Set(processedBills.map(bill => bill.baseServiceName))].sort();
+        if (dateRange && dateRange.start && dateRange.end) {
+            const startDate = new Date(dateRange.start);
+            const endDate = new Date(dateRange.end);
+            filteredResults = filteredResults.filter(bill => {
+                const billDate = new Date(bill.billDate);
+                return billDate >= startDate && billDate <= endDate;
+            });
+        }
 
-        // Filters & Pagination
-        const { filterStatus, search, service, page = 1, limit = 10 } = req.query;
-        let filteredBills = processedBills;
+        if (timeRange && timeRange.start && timeRange.end) {
+            filteredResults = filteredResults.filter(bill => {
+                const billTime = new Date(bill.createdAt || bill.billDate);
+                const hours = billTime.getHours();
+                const minutes = billTime.getMinutes();
+                const timeValue = hours + minutes / 60;
+                return timeValue >= timeRange.start && timeValue <= timeRange.end;
+            });
+        }
 
-        // Apply service filter
+        // Apply other filters
         if (service) {
-            filteredBills = filteredBills.filter(b =>
-                b.baseServiceName === service ||
-                b.serviceName === service
+            filteredResults = filteredResults.filter(b =>
+                b.baseServiceName === service || b.serviceName === service
             );
         }
 
-        // Apply status filter
         if (filterStatus) {
-            filteredBills = filteredBills.filter(b => b.reminderStatus === filterStatus);
+            filteredResults = filteredResults.filter(b => b.reminderStatus === filterStatus);
         }
 
-        // Apply search filter
         if (search) {
             const s = search.toLowerCase();
-            filteredBills = filteredBills.filter(b =>
+            filteredResults = filteredResults.filter(b =>
                 b.customerName?.toLowerCase().includes(s) ||
                 b.phone?.includes(s) ||
                 b.serviceName?.toLowerCase().includes(s) ||
@@ -481,20 +504,31 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
             );
         }
 
+        // Sort
+        filteredResults.sort((a, b) => {
+            const order = { 'due': 1, 'due_duplicate': 2, 'valid': 3, 'expired': 4, 'max_reached': 5 };
+            return (order[a.reminderStatus] || 99) - (order[b.reminderStatus] || 99);
+        });
+
+        // Extract unique services
+        const uniqueServices = [...new Set(filteredResults.map(bill => bill.baseServiceName))].sort();
+
+        // Pagination
         const startIndex = (parseInt(page) - 1) * parseInt(limit);
-        const paginatedBills = filteredBills.slice(startIndex, startIndex + parseInt(limit));
+        const paginatedBills = filteredResults.slice(startIndex, startIndex + parseInt(limit));
 
         return res.status(200).json({
             success: true,
             totalBills: processedBills.length,
-            filteredCount: filteredBills.length,
+            filteredCount: filteredResults.length,
             summary,
             availableServices: uniqueServices,
+            availableServers,
             pagination: {
                 currentPage: parseInt(page),
-                totalPages: Math.ceil(filteredBills.length / parseInt(limit)),
+                totalPages: Math.ceil(filteredResults.length / parseInt(limit)),
                 limit: parseInt(limit),
-                hasNext: (startIndex + parseInt(limit)) < filteredBills.length,
+                hasNext: (startIndex + parseInt(limit)) < filteredResults.length,
                 hasPrevious: startIndex > 0
             },
             data: paginatedBills
@@ -510,7 +544,250 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
     }
 };
 
+// // Send WhatsApp notifications for filtered bills
+// export const sendWhatsAppNotifications = async (req, res) => {
+//     try {
+//         const {
+//             filters,
+//             messageTemplate,
+//             includeTestMessage = false,
+//             testPhoneNumber
+//         } = req.body;
 
+//         // Fetch filtered bills based on provided filters
+//         const filteredBills = await getFilteredBills(filters);
+
+//         if (!filteredBills || filteredBills.length === 0) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'No bills found matching the filters'
+//             });
+//         }
+
+//         // Group by phone number to avoid duplicate messages
+//         const uniqueCustomers = new Map();
+
+//         for (const bill of filteredBills) {
+//             if (!uniqueCustomers.has(bill.phone)) {
+//                 uniqueCustomers.set(bill.phone, {
+//                     phone: bill.phone,
+//                     customerName: bill.customerName,
+//                     bills: []
+//                 });
+//             }
+//             uniqueCustomers.get(bill.phone).bills.push(bill);
+//         }
+
+//         const results = {
+//             total: uniqueCustomers.size,
+//             successful: 0,
+//             failed: 0,
+//             details: []
+//         };
+
+//         // Send test message if requested
+//         if (includeTestMessage && testPhoneNumber) {
+//             const testResult = await sendWhatsAppMessage(
+//                 testPhoneNumber,
+//                 '🧪 TEST MESSAGE\n\n' + messageTemplate,
+//                 { isTest: true }
+//             );
+//             results.details.push({
+//                 phone: testPhoneNumber,
+//                 type: 'test',
+//                 success: testResult.success,
+//                 error: testResult.error
+//             });
+//         }
+
+//         // Send messages to all customers
+//         for (const [phone, customer] of uniqueCustomers) {
+//             try {
+//                 // Personalize message with customer's bills
+//                 const personalizedMessage = personalizeMessage(messageTemplate, customer);
+
+//                 const result = await sendWhatsAppMessage(phone, personalizedMessage);
+
+//                 if (result.success) {
+//                     results.successful++;
+//                     // Update reminder sent status in database
+//                     await updateReminderStatus(customer.bills, result.messageSid);
+//                 } else {
+//                     results.failed++;
+//                 }
+
+//                 results.details.push({
+//                     phone,
+//                     customerName: customer.customerName,
+//                     success: result.success,
+//                     error: result.error,
+//                     billCount: customer.bills.length
+//                 });
+
+//                 // Add delay between messages to avoid rate limiting
+//                 await new Promise(resolve => setTimeout(resolve, 1000));
+
+//             } catch (error) {
+//                 results.failed++;
+//                 results.details.push({
+//                     phone,
+//                     customerName: customer.customerName,
+//                     success: false,
+//                     error: error.message
+//                 });
+//             }
+//         }
+
+//         return res.status(200).json({
+//             success: true,
+//             message: `WhatsApp notifications sent: ${results.successful} successful, ${results.failed} failed`,
+//             results
+//         });
+
+//     } catch (error) {
+//         console.error('WhatsApp notification error:', error);
+//         return res.status(500).json({
+//             success: false,
+//             message: 'Failed to send WhatsApp notifications',
+//             error: error.message
+//         });
+//     }
+// };
+
+// // Helper function to get filtered bills
+// async function getFilteredBills(filters) {
+//     const today = new Date();
+//     today.setHours(0, 0, 0, 0);
+
+//     let query = Bill.find({ status: { $ne: 'cancelled' } });
+
+//     // Apply filters
+//     if (filters.server && filters.server !== 'all') {
+//         query = query.where('serverLocation').equals(filters.server);
+//     }
+
+//     if (filters.status) {
+//         query = query.where('status').equals(filters.status);
+//     }
+
+//     if (filters.service) {
+//         query = query.where('baseServiceName').equals(filters.service);
+//     }
+
+//     if (filters.dateRange && filters.dateRange.start && filters.dateRange.end) {
+//         query = query.where('billDate').gte(new Date(filters.dateRange.start)).lte(new Date(filters.dateRange.end));
+//     }
+
+//     if (filters.reminderStatus) {
+//         // You'll need to compute this based on your logic
+//         const bills = await query.lean();
+//         return filterByReminderStatus(bills, filters.reminderStatus);
+//     }
+
+//     const bills = await query.lean();
+
+//     // Apply reminder status filter if needed
+//     if (filters.reminderStatus) {
+//         return filterByReminderStatus(bills, filters.reminderStatus);
+//     }
+
+//     return bills;
+// }
+
+// // Helper function to send WhatsApp message
+// async function sendWhatsAppMessage(to, message, options = {}) {
+//     try {
+//         // Format phone number (ensure it has country code)
+//         let formattedNumber = to;
+//         if (!to.startsWith('+')) {
+//             formattedNumber = `+91${to}`; // Default to India country code
+//         }
+
+//         const messageResponse = await twilioClient.messages.create({
+//             body: message,
+//             from: WHATSAPP_FROM,
+//             to: `whatsapp:${formattedNumber}`
+//         });
+
+//         return {
+//             success: true,
+//             messageSid: messageResponse.sid,
+//             status: messageResponse.status
+//         };
+//     } catch (error) {
+//         console.error('Twilio error:', error);
+//         return {
+//             success: false,
+//             error: error.message
+//         };
+//     }
+// }
+
+// // Helper function to personalize message
+// function personalizeMessage(template, customer) {
+//     let message = template;
+
+//     // Replace placeholders
+//     message = message.replace(/{{customerName}}/g, customer.customerName);
+//     message = message.replace(/{{billCount}}/g, customer.bills.length);
+
+//     // Add service details
+//     const serviceList = customer.bills.map(bill =>
+//         `- ${bill.serviceName} (${formatDate(bill.billDate)})`
+//     ).join('\n');
+
+//     message = message.replace(/{{serviceList}}/g, serviceList);
+
+//     // Add days since service for oldest bill
+//     const oldestBill = customer.bills.reduce((oldest, bill) => {
+//         return new Date(bill.billDate) < new Date(oldest.billDate) ? bill : oldest;
+//     });
+//     const daysSince = Math.floor((new Date() - new Date(oldestBill.billDate)) / (1000 * 60 * 60 * 24));
+//     message = message.replace(/{{daysSince}}/g, daysSince);
+
+//     return message;
+// }
+
+// // Helper function to update reminder status in database
+// async function updateReminderStatus(bills, messageSid) {
+//     for (const bill of bills) {
+//         await Bill.findByIdAndUpdate(bill._id, {
+//             $inc: { followUpCount: 1 },
+//             lastReminderSentAt: new Date(),
+//             lastReminderMessageSid: messageSid
+//         });
+//     }
+// }
+
+// // Helper function to filter by reminder status
+// function filterByReminderStatus(bills, status) {
+//     const today = new Date();
+//     today.setHours(0, 0, 0, 0);
+
+//     return bills.filter(bill => {
+//         const billDate = new Date(bill.billDate);
+//         const diffDays = Math.floor((today - billDate) / (1000 * 60 * 60 * 24));
+//         const serviceInterval = getDefaultServiceDays(bill.baseServiceName);
+
+//         switch (status) {
+//             case 'due':
+//                 return diffDays >= serviceInterval && diffDays <= 365 && bill.followUpCount < bill.followUpMax;
+//             case 'valid':
+//                 return diffDays < serviceInterval;
+//             case 'expired':
+//                 return diffDays > 365;
+//             case 'max_reached':
+//                 return bill.followUpCount >= bill.followUpMax;
+//             default:
+//                 return true;
+//         }
+//     });
+// }
+
+// function formatDate(dateString) {
+//     const date = new Date(dateString);
+//     return date.toLocaleDateString('en-IN');
+// }
 
 
 export const uploadCSVFile = async (req, res) => {
