@@ -847,12 +847,43 @@ export const markAttendance = async (req, res) => {
         else {
             console.log(`→ Updating EXISTING attendance record for ${dateString}`);
 
+
             if (!punchOutTimeIST) {
+                // Enhanced error message with context
+                let errorMessage = "Punch Out time is required";
+                let errorDetails = {};
+
+                // Add context based on attendance status
+                if (attendance.status === "holiday") {
+                    errorMessage = "Cannot punch out on a holiday. This day is already marked as holiday.";
+                    errorDetails = {
+                        date: dateString,
+                        status: attendance.status,
+                        action: "Holiday detected - No punch-out required"
+                    };
+                } else if (attendance.status === "weekly_off") {
+                    errorMessage = "Cannot punch out on a weekly off. This day is already marked as weekly off.";
+                    errorDetails = {
+                        date: dateString,
+                        status: attendance.status,
+                        action: "Weekly off detected - No punch-out required"
+                    };
+                } else if (attendance.punchIn && !attendance.punchOut) {
+                    errorMessage = "Punch Out time is required to complete your attendance";
+                    errorDetails = {
+                        punchInTime: attendance.punchIn,
+                        currentStatus: "pending_punch_out",
+                        suggestion: "Please provide punchOut time to mark attendance as complete"
+                    };
+                }
+
                 return abortAndRespond(
                     session, res, 400, "PUNCH_OUT_REQUIRED",
-                    "Punch Out time is required"
+                    errorMessage,
+                    errorDetails
                 );
             }
+
 
             const outTimeUTC = new Date(punchOut);
 

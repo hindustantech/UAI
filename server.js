@@ -29,6 +29,7 @@ import SalesReoprts from './routes/Attandance/Sales/Sales.Reports.js';
 import lunchRoute from './routes/Attandance/BreakRoute.js';
 import comapnayAdmin from './routes/Admin/compay.admin.js';
 import Bulkcreation from './routes/Admin/bulkCreation.js';
+import billedDateRoutes from './routes/BilledDate/billedDate.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
@@ -81,6 +82,7 @@ app.use('/api/payment', payment);
 app.use("/api/attendance/requests", attendanceRequestRoutes);
 app.use('/api/patnerProfile', patnerProfile);
 app.use('/api/subscriptionsdata', subscriptionsdata);
+app.use('/api/billedDate', billedDateRoutes);
 app.use('/api/admin/company', comapnayAdmin); 
 app.use('/api/admin/bulk', Bulkcreation);
 
