@@ -1,5 +1,5 @@
 // controllers/BilledData/billedDateController.js
-import Bill from '../../models/BilledDate/billedDate.js';
+import Bill, { extractServiceInfo, getDefaultServiceDays } from '../../models/BilledDate/billedDate.js';
 import fs from 'fs';
 import csv from 'csv-parser';
 import XLSX from 'xlsx';
@@ -60,7 +60,7 @@ const parseDate_DDMMYYYY = (dateValue) => {
 
     // Convert to string and trim
     let dateStr = String(dateValue).trim();
-    
+
     console.log(`\n📅 Parsing date: "${dateStr}"`);
 
     // Handle Excel serial numbers (if date appears as a number like 45678)
@@ -77,14 +77,14 @@ const parseDate_DDMMYYYY = (dateValue) => {
     // Remove any time portion if present (e.g., "31-12-2025 10:30:00")
     dateStr = dateStr.split(' ')[0];
     dateStr = dateStr.split('T')[0];
-    
+
     // Normalize all separators to "-"
     // Replace /, ., and spaces with -
     let normalized = dateStr.replace(/[\/.\s]+/g, '-');
-    
+
     // Remove any non-digit, non-dash characters
     normalized = normalized.replace(/[^\d-]/g, '');
-    
+
     console.log(`   Normalized: "${normalized}"`);
 
     // Match DD-MM-YYYY or DD-MM-YY pattern
@@ -97,11 +97,11 @@ const parseDate_DDMMYYYY = (dateValue) => {
     }
 
     let [_, day, month, year] = match;
-    
+
     day = parseInt(day, 10);
     month = parseInt(month, 10);
     year = parseInt(year, 10);
-    
+
     console.log(`   Extracted: Day=${day}, Month=${month}, Year=${year}`);
 
     // Handle 2-digit years (assume 20xx for years 00-99)
@@ -163,33 +163,33 @@ const parseExcelFile = (filePath) => {
     return new Promise((resolve, reject) => {
         try {
             log.info('Reading Excel file:', { filePath });
-            
+
             const workbook = XLSX.readFile(filePath, {
                 cellDates: false, // Don't auto-convert dates
                 raw: true, // Get raw values
             });
-            
+
             const sheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[sheetName];
-            
+
             log.info('Excel file details:', {
                 sheetName,
                 sheets: workbook.SheetNames,
             });
-            
+
             // Get raw data first
-            const rawData = XLSX.utils.sheet_to_json(worksheet, { 
+            const rawData = XLSX.utils.sheet_to_json(worksheet, {
                 raw: true,
                 defval: '',
             });
-            
+
             // Process each row to handle dates properly
             const data = rawData.map(row => {
                 const processedRow = {};
-                
+
                 for (const key in row) {
                     let value = row[key];
-                    
+
                     // Handle Excel date serial numbers
                     if (typeof value === 'number' && value > 30000 && value < 80000) {
                         // Convert Excel serial number to DD-MM-YYYY string
@@ -200,13 +200,13 @@ const parseExcelFile = (filePath) => {
                         value = `${day}-${month}-${year}`;
                         console.log(`   Converted Excel date serial ${row[key]} -> ${value}`);
                     }
-                    
+
                     processedRow[key] = value;
                 }
-                
+
                 return processedRow;
             });
-            
+
             log.success(`Excel parsed: ${data.length} rows`);
             resolve(data);
         } catch (error) {
@@ -221,9 +221,9 @@ const parseCSVFile = (filePath) => {
     return new Promise((resolve, reject) => {
         const results = [];
         let rowCount = 0;
-        
+
         log.info('Reading CSV file:', { filePath });
-        
+
         fs.createReadStream(filePath)
             .pipe(csv({
                 mapHeaders: ({ header }) => header.trim(),
@@ -233,7 +233,7 @@ const parseCSVFile = (filePath) => {
             .on('data', (data) => {
                 rowCount++;
                 results.push(data);
-                
+
                 if (rowCount % 100 === 0) {
                     log.info(`Processed ${rowCount} rows from CSV...`);
                 }
@@ -261,7 +261,7 @@ const normalizeColumnName = (key) => {
         'bill no': 'bill_id',
         'billnumber': 'bill_id',
         'bill number': 'bill_id',
-        
+
         // billDate variations
         'billdate': 'billDate',
         'bill date': 'billDate',
@@ -271,7 +271,7 @@ const normalizeColumnName = (key) => {
         'billing_date': 'billDate',
         'invoice date': 'billDate',
         'invoice_date': 'billDate',
-        
+
         // customerName variations
         'customername': 'customerName',
         'customer name': 'customerName',
@@ -280,7 +280,7 @@ const normalizeColumnName = (key) => {
         'clientname': 'customerName',
         'client name': 'customerName',
         'client_name': 'customerName',
-        
+
         // phone variations
         'phone': 'phone',
         'mobile': 'phone',
@@ -292,7 +292,7 @@ const normalizeColumnName = (key) => {
         'contactno': 'phone',
         'contact no': 'phone',
         'telephone': 'phone',
-        
+
         // serviceName variations
         'servicename': 'serviceName',
         'service name': 'serviceName',
@@ -300,7 +300,7 @@ const normalizeColumnName = (key) => {
         'service': 'serviceName',
         'product': 'serviceName',
         'item': 'serviceName',
-        
+
         // Other fields
         'status': 'status',
         'remarks': 'remarks',
@@ -313,142 +313,195 @@ const normalizeColumnName = (key) => {
         'follow up count': 'followUpCount',
         'follow_up_count': 'followUpCount',
     };
-    
+
     const normalized = key.toLowerCase().trim().replace(/[\s-]+/g, '');
     return columnMap[normalized] || key;
 };
 
-export const getFilteredUsers = async (req, res) => {
-    log.startProcess('Filter Billed Users');
-    
+
+/**
+ * Controller: Get all bills with reminder status
+ */
+export const getAllBillsWithReminderStatus = async (req, res) => {
     try {
-        const {
-            service_name,
-            serviceName,
-            fromDate,
-            toDate,
-            offer,
-        } = req.body;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
 
-        log.info('Filter parameters received:', {
-            serviceName: serviceName || service_name,
-            fromDate,
-            toDate,
-            offer
-        });
+        const oneYearAgo = new Date(today);
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-        const serviceFilter = serviceName || service_name;
-        const startDate = fromDate ? new Date(fromDate + 'T00:00:00.000Z') : new Date('1970-01-01');
-        const endDate = toDate ? new Date(toDate + 'T23:59:59.999Z') : new Date();
+        // Get all bills
+        const allBills = await Bill.find({
+            status: { $ne: 'cancelled' }
+        })
+            .select('billDate bill_id customerName phone serviceName baseServiceName staffName status followUpCount followUpMax reminderStatus lastReminderSentAt nextReminderDate serviceIntervalDays createdAt')
+            .sort({ billDate: -1 })
+            .lean();
 
-        if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-            log.error('Invalid date parameters');
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid fromDate or toDate value',
+        if (!allBills || allBills.length === 0) {
+            return res.status(200).json({
+                success: true,
+                message: 'No bills found',
+                totalBills: 0,
+                summary: { due: 0, valid: 0, expired: 0, maxReached: 0, totalGroups: 0 },
+                data: []
             });
         }
 
-        log.info('Executing aggregation pipeline...');
-        
-        const users = await Bill.aggregate([
-            {
-                $sort: {
-                    billDate: 1,
-                },
-            },
-            {
-                $group: {
-                    _id: '$phone',
-                    name: {
-                        $last: '$customerName',
-                    },
-                    phone: {
-                        $last: '$phone',
-                    },
-                    visits: {
-                        $push: {
-                            serviceName: '$serviceName',
-                            billDate: '$billDate',
-                        },
-                    },
-                },
-            },
-        ]);
+        // Group by phone + baseServiceName
+        const groupedBills = {};
 
-        log.info(`Aggregation returned ${users.length} unique users`);
+        for (const bill of allBills) {
+            const baseName = bill.baseServiceName || extractServiceInfo(bill.serviceName).baseName;
+            const key = `${bill.phone}_${baseName}`;
 
-        const finalUsers = [];
-        let skippedServiceFilter = 0;
-        let skippedDateRange = 0;
-        let skippedRepeatService = 0;
+            if (!groupedBills[key]) {
+                groupedBills[key] = {
+                    baseServiceName: baseName,
+                    phone: bill.phone,
+                    bills: []
+                };
+            }
+            groupedBills[key].bills.push(bill);
+        }
 
-        for (const user of users) {
-            const visits = user.visits || [];
+        // Process groups
+        const processedBills = [];
+        const summary = {
+            due: 0,
+            valid: 0,
+            expired: 0,
+            maxReached: 0,
+            totalGroups: Object.keys(groupedBills).length
+        };
 
-            for (const currentVisit of visits) {
-                if (serviceFilter && currentVisit.serviceName !== serviceFilter) {
-                    skippedServiceFilter++;
-                    continue;
+        for (const [key, group] of Object.entries(groupedBills)) {
+            const bills = group.bills;
+            const serviceInterval = getDefaultServiceDays(group.baseServiceName);
+
+            let hasRecentService = false;
+            let oldestDueBill = null;
+            let maxDaysDiff = 0;
+
+            // Check all bills in group
+            for (const bill of bills) {
+                const billDate = new Date(bill.billDate);
+                const diffDays = Math.floor((today - billDate) / (1000 * 60 * 60 * 24));
+
+                // If any bill within service interval → skip group
+                if (diffDays < serviceInterval) {
+                    hasRecentService = true;
+                    break;
                 }
 
-                const currentBillDate = new Date(currentVisit.billDate);
-                if (currentBillDate < startDate || currentBillDate > endDate) {
-                    skippedDateRange++;
-                    continue;
+                // Track oldest bill in valid range
+                if (diffDays >= serviceInterval && diffDays <= 365) {
+                    if (diffDays > maxDaysDiff) {
+                        maxDaysDiff = diffDays;
+                        oldestDueBill = bill;
+                    }
+                }
+            }
+
+            // Assign status
+            for (const bill of bills) {
+                const billDate = new Date(bill.billDate);
+                const diffDays = Math.floor((today - billDate) / (1000 * 60 * 60 * 24));
+
+                const enriched = {
+                    ...bill,
+                    baseServiceName: group.baseServiceName,
+                    serviceDays: serviceInterval,
+                    daysSinceService: diffDays,
+                    groupKey: key,
+                    groupSize: bills.length
+                };
+
+                // Determine status
+                if (bill.followUpCount >= bill.followUpMax) {
+                    enriched.reminderStatus = 'max_reached';
+                    summary.maxReached++;
+                } else if (hasRecentService) {
+                    enriched.reminderStatus = 'valid';
+                    summary.valid++;
+                } else if (diffDays > 365) {
+                    enriched.reminderStatus = 'expired';
+                    summary.expired++;
+                } else if (oldestDueBill && bill._id.toString() === oldestDueBill._id.toString()) {
+                    enriched.reminderStatus = 'due';
+                    enriched.daysSinceService = maxDaysDiff;
+                    summary.due++;
+                } else if (diffDays >= serviceInterval && diffDays <= 365) {
+                    enriched.reminderStatus = 'due_duplicate';
+                    summary.due++;
+                } else {
+                    enriched.reminderStatus = 'valid';
+                    summary.valid++;
                 }
 
-                const sameServiceAgain = visits.some(
-                    (nextVisit) =>
-                        nextVisit.serviceName === currentVisit.serviceName &&
-                        new Date(nextVisit.billDate) > currentBillDate
-                );
-
-                if (sameServiceAgain) {
-                    skippedRepeatService++;
-                    continue;
-                }
-
-                finalUsers.push({
-                    name: user.name,
-                    phone: user.phone,
-                    service_name: currentVisit.serviceName,
-                    bill_date: currentVisit.billDate,
-                    offer,
-                });
+                processedBills.push(enriched);
             }
         }
 
-        log.success('Filtering completed', {
-            totalUsers: users.length,
-            finalResults: finalUsers.length,
-            skipped: {
-                serviceFilter: skippedServiceFilter,
-                dateRange: skippedDateRange,
-                repeatService: skippedRepeatService
-            }
+        // Sort
+        processedBills.sort((a, b) => {
+            const order = { 'due': 1, 'due_duplicate': 2, 'valid': 3, 'expired': 4, 'max_reached': 5 };
+            return (order[a.reminderStatus] || 99) - (order[b.reminderStatus] || 99);
         });
 
-        log.endProcess('Filter Billed Users');
+        // Filters & Pagination
+        const { filterStatus, search, page = 1, limit = 10 } = req.query;
+        let filteredBills = processedBills;
+
+        if (filterStatus) {
+            filteredBills = filteredBills.filter(b => b.reminderStatus === filterStatus);
+        }
+
+        if (search) {
+            const s = search.toLowerCase();
+            filteredBills = filteredBills.filter(b =>
+                b.customerName?.toLowerCase().includes(s) ||
+                b.phone?.includes(s) ||
+                b.serviceName?.toLowerCase().includes(s) ||
+                b.baseServiceName?.toLowerCase().includes(s)
+            );
+        }
+
+        const startIndex = (parseInt(page) - 1) * parseInt(limit);
+        const paginatedBills = filteredBills.slice(startIndex, startIndex + parseInt(limit));
 
         return res.status(200).json({
             success: true,
-            total: finalUsers.length,
-            data: finalUsers,
+            totalBills: processedBills.length,
+            filteredCount: filteredBills.length,
+            summary,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(filteredBills.length / parseInt(limit)),
+                limit: parseInt(limit),
+                hasNext: (startIndex + parseInt(limit)) < filteredBills.length,
+                hasPrevious: startIndex > 0
+            },
+            data: paginatedBills
         });
+
     } catch (error) {
-        log.error('Error in getFilteredUsers', error);
-        log.endProcess('Filter Billed Users (with error)');
+        console.error('Error:', error);
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: 'Failed to fetch bills',
+            error: error.message
         });
     }
 };
 
+
+
+
+
 export const uploadCSVFile = async (req, res) => {
     log.startProcess('File Upload Process - Date Format: DD-MM-YYYY');
-    
+
     try {
         // Check if file exists
         if (!req.file) {
@@ -514,21 +567,21 @@ export const uploadCSVFile = async (req, res) => {
             failed: 0,
             excelSerialConverted: 0
         };
-        
+
         // Process each row
         log.info(`Processing ${rowCount} rows...`);
         console.log(`\n📋 Expected date format: DD-MM-YYYY (e.g., 31-12-2025)\n`);
-        
+
         for (let i = 0; i < rawData.length; i++) {
             const originalData = rawData[i];
-            
+
             // Normalize column names
             const data = {};
             Object.keys(originalData).forEach(key => {
                 const normalizedKey = normalizeColumnName(key);
                 data[normalizedKey] = originalData[key];
             });
-            
+
             // Log first 5 rows for debugging
             if (i < 5) {
                 log.info(`Sample row ${i + 1}:`, {
@@ -536,7 +589,7 @@ export const uploadCSVFile = async (req, res) => {
                     normalized: data
                 });
             }
-            
+
             // Extract fields with normalized names
             const bill_id = data.bill_id;
             const billDateRaw = data.billDate;
@@ -554,7 +607,7 @@ export const uploadCSVFile = async (req, res) => {
                 if (!bill_id) missing.push('bill_id');
 
                 console.log(`\n❌ Row ${i + 1} - Missing fields:`, missing.join(', '));
-                
+
                 errors.push({
                     row: i + 1,
                     data: originalData,
@@ -566,14 +619,14 @@ export const uploadCSVFile = async (req, res) => {
 
             // Parse date using DD-MM-YYYY format (PRIMARY FORMAT)
             const parsedDate = parseDate_DDMMYYYY(billDateRaw);
-            
+
             if (!parsedDate || isNaN(parsedDate.getTime())) {
                 console.log(`\n❌ Row ${i + 1} - Invalid date: "${billDateRaw}"`);
                 console.log(`   Expected format: DD-MM-YYYY (e.g., 31-12-2025)`);
                 console.log(`   Also accepts: DD/MM/YYYY, DD.MM.YYYY, DD MM YYYY`);
-                
+
                 dateFormatStats.failed++;
-                
+
                 errors.push({
                     row: i + 1,
                     data: originalData,
@@ -589,10 +642,10 @@ export const uploadCSVFile = async (req, res) => {
             hundredYearsAgo.setFullYear(now.getFullYear() - 100);
             const oneYearFromNow = new Date();
             oneYearFromNow.setFullYear(now.getFullYear() + 1);
-            
+
             if (parsedDate < hundredYearsAgo || parsedDate > oneYearFromNow) {
                 console.log(`\n⚠️ Row ${i + 1} - Date out of range: ${formatDate(parsedDate)}`);
-                
+
                 errors.push({
                     row: i + 1,
                     data: originalData,
@@ -605,7 +658,7 @@ export const uploadCSVFile = async (req, res) => {
 
             // Clean phone number
             const cleanPhone = phone.toString().replace(/[\s\-\(\)\.\+\_]/g, '');
-            
+
             // Validate phone number (basic check - 7 to 15 digits)
             if (!/^\d{7,15}$/.test(cleanPhone)) {
                 console.log(`\n❌ Row ${i + 1} - Invalid phone: "${phone}" (cleaned: "${cleanPhone}")`);
@@ -640,7 +693,7 @@ export const uploadCSVFile = async (req, res) => {
             };
 
             results.push(billData);
-            
+
             // Progress update every 100 rows
             if ((i + 1) % 100 === 0) {
                 log.info(`Progress: ${i + 1}/${rowCount} rows processed. Valid: ${results.length}, Errors: ${errors.length}`);
@@ -667,7 +720,7 @@ export const uploadCSVFile = async (req, res) => {
         // If no valid data
         if (results.length === 0) {
             log.error('No valid data to insert');
-            
+
             // Show sample of errors
             console.log('\n📝 Sample of errors found:');
             errors.slice(0, 5).forEach(err => {
@@ -676,7 +729,7 @@ export const uploadCSVFile = async (req, res) => {
             if (errors.length > 5) {
                 console.log(`   ... and ${errors.length - 5} more errors`);
             }
-            
+
             return res.status(400).json({
                 success: false,
                 message: 'No valid data found in the uploaded file. All rows failed validation.',
@@ -713,9 +766,9 @@ export const uploadCSVFile = async (req, res) => {
         // Check for existing bill_ids in database
         log.info('Checking existing records in database...');
         const billIds = results.map(r => r.bill_id);
-        
+
         const existingBills = await Bill.find(
-            { bill_id: { $in: billIds } }, 
+            { bill_id: { $in: billIds } },
             { bill_id: 1, customerName: 1 }
         );
 
@@ -731,12 +784,12 @@ export const uploadCSVFile = async (req, res) => {
             if (existingBills.length > 5) {
                 console.log(`   ... and ${existingBills.length - 5} more`);
             }
-            
+
             finalResults = results.filter(r => !existingIds.has(r.bill_id));
             skippedCount = results.length - finalResults.length;
-            
+
             console.log(`\n📊 After filtering: ${finalResults.length} new records to insert, ${skippedCount} skipped (already exist)\n`);
-            
+
             if (finalResults.length === 0) {
                 log.warn('All records already exist in database');
                 return res.status(409).json({
@@ -750,7 +803,7 @@ export const uploadCSVFile = async (req, res) => {
 
         // Insert into database
         log.info(`Inserting ${finalResults.length} records into database...`);
-        
+
         let insertedCount = 0;
         let insertErrors = [];
 
@@ -758,26 +811,26 @@ export const uploadCSVFile = async (req, res) => {
             // Insert in batches for better performance with large files
             const batchSize = 500;
             const totalBatches = Math.ceil(finalResults.length / batchSize);
-            
+
             for (let i = 0; i < finalResults.length; i += batchSize) {
                 const batch = finalResults.slice(i, i + batchSize);
                 const batchNumber = Math.floor(i / batchSize) + 1;
-                
+
                 console.log(`   Inserting batch ${batchNumber}/${totalBatches} (${batch.length} records)...`);
-                
+
                 const inserted = await Bill.insertMany(batch, {
                     ordered: false, // Continue inserting even if some fail
                     timeout: 30000,
                 });
-                
+
                 insertedCount += inserted.length;
                 console.log(`   ✅ Batch ${batchNumber} complete: ${inserted.length} inserted. Total: ${insertedCount}`);
             }
-            
+
             console.log(`\n✅ All records inserted successfully! Total: ${insertedCount}`);
         } catch (error) {
             log.error('Error during insertion', error);
-            
+
             if (error.writeErrors) {
                 insertedCount = error.result?.result?.nInserted || 0;
                 insertErrors = error.writeErrors.map(err => ({
@@ -785,7 +838,7 @@ export const uploadCSVFile = async (req, res) => {
                     message: err.errmsg,
                 }));
                 console.log(`\n⚠️ Partial insertion: ${insertedCount} inserted, ${insertErrors.length} failed`);
-                
+
                 // Log first few insertion errors
                 insertErrors.slice(0, 5).forEach(err => {
                     console.log(`   - Index ${err.index}: ${err.message}`);
@@ -860,7 +913,7 @@ export const uploadCSVFile = async (req, res) => {
             error: error.message,
             stack: error.stack
         });
-        
+
         log.endProcess('File Upload Process (with error)');
 
         // Handle specific errors

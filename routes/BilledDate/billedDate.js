@@ -1,6 +1,6 @@
 // routes/billedDateRoutes.js
 import express from 'express';
-import { getFilteredUsers, uploadCSVFile } from '../../controllers/BilledData/billedDateController.js';
+import { getAllBillsWithReminderStatus, uploadCSVFile } from '../../controllers/BilledData/billedDateController.js';
 import multer from 'multer';
 const router = express.Router();
 
@@ -14,9 +14,9 @@ const upload = multer({
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         ];
         const allowedExtensions = ['.csv', '.xls', '.xlsx'];
-        
+
         const fileExtension = '.' + file.originalname.split('.').pop().toLowerCase();
-        
+
         console.log('📁 File upload attempt:', {
             originalname: file.originalname,
             mimetype: file.mimetype,
@@ -34,7 +34,7 @@ const upload = multer({
     }
 });
 
-router.post('/filter', getFilteredUsers);
+router.get('/bills', getAllBillsWithReminderStatus);
 
 // Updated route to handle both CSV and Excel
 router.post('/upload', upload.single('file'), uploadCSVFile);
