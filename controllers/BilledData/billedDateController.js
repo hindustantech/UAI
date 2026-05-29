@@ -4,6 +4,8 @@ import fs from 'fs';
 import csv from 'csv-parser';
 import XLSX from 'xlsx';
 import path from 'path';
+import axios from "axios";
+import _ from "lodash";
 
 // Helper function for logging
 const log = {
@@ -1237,8 +1239,6 @@ export const uploadCSVFile = async (req, res) => {
 
 
 
-import axios from "axios";
-import _ from "lodash";
 
 const WHATSAPP_API_URL =
     "https://whatsapp.quickhub.ai/public/whatsapp/send-template";
@@ -1252,7 +1252,7 @@ const sendWhatsAppReminder = (customer) =>
         WHATSAPP_API_URL,
         {
             to: `+91${customer.phone}`,
-            templateName: "haircut_reminder",
+            templateName: "hair_cute",
             variables: {
                 body: { "Customer Name": customer.name },
             },
@@ -1266,9 +1266,13 @@ const sendWhatsAppReminder = (customer) =>
     );
 
 export const sendBulkReminder = async (req, res) => {
-    const { customers } = req.body;
-    const results = [];
+    const { customers } = req.body; // [{ phone, name }]
 
+    if (!customers?.length) {
+        return res.status(400).json({ success: false, message: "No customers provided" });
+    }
+
+    const results = [];
     const batches = _.chunk(customers, BATCH_SIZE);
 
     for (const [index, batch] of batches.entries()) {
