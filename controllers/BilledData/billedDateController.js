@@ -45,23 +45,169 @@ const log = {
     }
 };
 
+/**
+ * Parse date in DD-MM-YYYY format (primary format)
+ * Also handles variations like DD/MM/YYYY, DD.MM.YYYY, DD MM YYYY
+ * Supports 2-digit years: DD-MM-YY (assumes 20YY)
+ */
+const parseDate_DDMMYYYY = (dateValue) => {
+    if (!dateValue) return null;
+
+    // If it's already a Date object
+    if (dateValue instanceof Date) {
+        return isNaN(dateValue.getTime()) ? null : dateValue;
+    }
+
+    // Convert to string and trim
+    let dateStr = String(dateValue).trim();
+    
+    console.log(`\n📅 Parsing date: "${dateStr}"`);
+
+    // Handle Excel serial numbers (if date appears as a number like 45678)
+    if (/^\d{4,5}$/.test(dateStr)) {
+        const excelDate = parseInt(dateStr);
+        if (excelDate > 30000 && excelDate < 80000) {
+            // Excel serial number (days since 1900-01-01)
+            const date = new Date((excelDate - 25569) * 86400 * 1000);
+            console.log(`   ✅ Excel serial number detected: ${dateStr} -> ${formatDate(date)}`);
+            return date;
+        }
+    }
+
+    // Remove any time portion if present (e.g., "31-12-2025 10:30:00")
+    dateStr = dateStr.split(' ')[0];
+    dateStr = dateStr.split('T')[0];
+    
+    // Normalize all separators to "-"
+    // Replace /, ., and spaces with -
+    let normalized = dateStr.replace(/[\/.\s]+/g, '-');
+    
+    // Remove any non-digit, non-dash characters
+    normalized = normalized.replace(/[^\d-]/g, '');
+    
+    console.log(`   Normalized: "${normalized}"`);
+
+    // Match DD-MM-YYYY or DD-MM-YY pattern
+    const pattern = /^(\d{1,2})-(\d{1,2})-(\d{2,4})$/;
+    const match = normalized.match(pattern);
+
+    if (!match) {
+        console.log(`   ❌ Does not match DD-MM-YYYY pattern`);
+        return null;
+    }
+
+    let [_, day, month, year] = match;
+    
+    day = parseInt(day, 10);
+    month = parseInt(month, 10);
+    year = parseInt(year, 10);
+    
+    console.log(`   Extracted: Day=${day}, Month=${month}, Year=${year}`);
+
+    // Handle 2-digit years (assume 20xx for years 00-99)
+    if (year < 100) {
+        year += 2000;
+        console.log(`   Converted 2-digit year to: ${year}`);
+    }
+
+    // Validate ranges
+    if (day < 1 || day > 31) {
+        console.log(`   ❌ Invalid day: ${day} (must be 1-31)`);
+        return null;
+    }
+
+    if (month < 1 || month > 12) {
+        console.log(`   ❌ Invalid month: ${month} (must be 1-12)`);
+        return null;
+    }
+
+    if (year < 1900 || year > 2100) {
+        console.log(`   ❌ Invalid year: ${year} (must be 1900-2100)`);
+        return null;
+    }
+
+    // Create date object (Month is 0-indexed in JavaScript)
+    const date = new Date(year, month - 1, day);
+
+    // Verify the date is valid (catches cases like 31-02-2025)
+    if (
+        date.getDate() !== day ||
+        date.getMonth() !== month - 1 ||
+        date.getFullYear() !== year
+    ) {
+        console.log(`   ❌ Invalid date combination: ${day}-${month}-${year}`);
+        return null;
+    }
+
+    // Additional check: Warn if day > 12 (might indicate wrong format)
+    if (day > 12) {
+        console.log(`   💡 Note: Day is ${day} (>12), confirming DD-MM-YYYY format`);
+    }
+
+    console.log(`   ✅ Successfully parsed: ${formatDate(date)}`);
+    return date;
+};
+
+/**
+ * Format date as DD-MM-YYYY for display
+ */
+const formatDate = (date) => {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+};
+
 // Helper function to parse Excel files
 const parseExcelFile = (filePath) => {
     return new Promise((resolve, reject) => {
         try {
             log.info('Reading Excel file:', { filePath });
-
-            const workbook = XLSX.readFile(filePath);
+            
+            const workbook = XLSX.readFile(filePath, {
+                cellDates: false, // Don't auto-convert dates
+                raw: true, // Get raw values
+            });
+            
             const sheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[sheetName];
-
+            
             log.info('Excel file details:', {
                 sheetName,
                 sheets: workbook.SheetNames,
-                rows: XLSX.utils.sheet_to_json(worksheet).length
             });
-
-            const data = XLSX.utils.sheet_to_json(worksheet);
+            
+            // Get raw data first
+            const rawData = XLSX.utils.sheet_to_json(worksheet, { 
+                raw: true,
+                defval: '',
+            });
+            
+            // Process each row to handle dates properly
+            const data = rawData.map(row => {
+                const processedRow = {};
+                
+                for (const key in row) {
+                    let value = row[key];
+                    
+                    // Handle Excel date serial numbers
+                    if (typeof value === 'number' && value > 30000 && value < 80000) {
+                        // Convert Excel serial number to DD-MM-YYYY string
+                        const date = new Date((value - 25569) * 86400 * 1000);
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const year = date.getFullYear();
+                        value = `${day}-${month}-${year}`;
+                        console.log(`   Converted Excel date serial ${row[key]} -> ${value}`);
+                    }
+                    
+                    processedRow[key] = value;
+                }
+                
+                return processedRow;
+            });
+            
+            log.success(`Excel parsed: ${data.length} rows`);
             resolve(data);
         } catch (error) {
             log.error('Failed to parse Excel file', error);
@@ -75,15 +221,19 @@ const parseCSVFile = (filePath) => {
     return new Promise((resolve, reject) => {
         const results = [];
         let rowCount = 0;
-
+        
         log.info('Reading CSV file:', { filePath });
-
+        
         fs.createReadStream(filePath)
-            .pipe(csv())
+            .pipe(csv({
+                mapHeaders: ({ header }) => header.trim(),
+                skipLines: 0,
+                strict: false
+            }))
             .on('data', (data) => {
                 rowCount++;
                 results.push(data);
-
+                
                 if (rowCount % 100 === 0) {
                     log.info(`Processed ${rowCount} rows from CSV...`);
                 }
@@ -111,7 +261,7 @@ const normalizeColumnName = (key) => {
         'bill no': 'bill_id',
         'billnumber': 'bill_id',
         'bill number': 'bill_id',
-
+        
         // billDate variations
         'billdate': 'billDate',
         'bill date': 'billDate',
@@ -119,7 +269,9 @@ const normalizeColumnName = (key) => {
         'date': 'billDate',
         'billing date': 'billDate',
         'billing_date': 'billDate',
-
+        'invoice date': 'billDate',
+        'invoice_date': 'billDate',
+        
         // customerName variations
         'customername': 'customerName',
         'customer name': 'customerName',
@@ -127,7 +279,8 @@ const normalizeColumnName = (key) => {
         'name': 'customerName',
         'clientname': 'customerName',
         'client name': 'customerName',
-
+        'client_name': 'customerName',
+        
         // phone variations
         'phone': 'phone',
         'mobile': 'phone',
@@ -138,7 +291,8 @@ const normalizeColumnName = (key) => {
         'mobile no': 'phone',
         'contactno': 'phone',
         'contact no': 'phone',
-
+        'telephone': 'phone',
+        
         // serviceName variations
         'servicename': 'serviceName',
         'service name': 'serviceName',
@@ -146,7 +300,7 @@ const normalizeColumnName = (key) => {
         'service': 'serviceName',
         'product': 'serviceName',
         'item': 'serviceName',
-
+        
         // Other fields
         'status': 'status',
         'remarks': 'remarks',
@@ -159,14 +313,14 @@ const normalizeColumnName = (key) => {
         'follow up count': 'followUpCount',
         'follow_up_count': 'followUpCount',
     };
-
+    
     const normalized = key.toLowerCase().trim().replace(/[\s-]+/g, '');
     return columnMap[normalized] || key;
 };
 
 export const getFilteredUsers = async (req, res) => {
     log.startProcess('Filter Billed Users');
-
+    
     try {
         const {
             service_name,
@@ -196,7 +350,7 @@ export const getFilteredUsers = async (req, res) => {
         }
 
         log.info('Executing aggregation pipeline...');
-
+        
         const users = await Bill.aggregate([
             {
                 $sort: {
@@ -225,7 +379,6 @@ export const getFilteredUsers = async (req, res) => {
         log.info(`Aggregation returned ${users.length} unique users`);
 
         const finalUsers = [];
-        let filteredCount = 0;
         let skippedServiceFilter = 0;
         let skippedDateRange = 0;
         let skippedRepeatService = 0;
@@ -263,8 +416,6 @@ export const getFilteredUsers = async (req, res) => {
                     bill_date: currentVisit.billDate,
                     offer,
                 });
-
-                filteredCount++;
             }
         }
 
@@ -296,8 +447,8 @@ export const getFilteredUsers = async (req, res) => {
 };
 
 export const uploadCSVFile = async (req, res) => {
-    log.startProcess('File Upload Process');
-
+    log.startProcess('File Upload Process - Date Format: DD-MM-YYYY');
+    
     try {
         // Check if file exists
         if (!req.file) {
@@ -345,53 +496,65 @@ export const uploadCSVFile = async (req, res) => {
             log.error('Unsupported file format');
             return res.status(400).json({
                 success: false,
-                message: 'Unsupported file format. Please upload CSV or Excel files.',
+                message: 'Unsupported file format. Please upload CSV or Excel files (.csv, .xls, .xlsx)',
+            });
+        }
+
+        if (rowCount === 0) {
+            log.error('File is empty');
+            return res.status(400).json({
+                success: false,
+                message: 'The uploaded file is empty. Please check the file and try again.',
             });
         }
 
         const results = [];
-
+        const dateFormatStats = {
+            successful: 0,
+            failed: 0,
+            excelSerialConverted: 0
+        };
+        
         // Process each row
         log.info(`Processing ${rowCount} rows...`);
-
+        console.log(`\n📋 Expected date format: DD-MM-YYYY (e.g., 31-12-2025)\n`);
+        
         for (let i = 0; i < rawData.length; i++) {
             const originalData = rawData[i];
-
+            
             // Normalize column names
             const data = {};
             Object.keys(originalData).forEach(key => {
                 const normalizedKey = normalizeColumnName(key);
                 data[normalizedKey] = originalData[key];
             });
-
-            if (i < 3) {
+            
+            // Log first 5 rows for debugging
+            if (i < 5) {
                 log.info(`Sample row ${i + 1}:`, {
                     original: originalData,
                     normalized: data
                 });
             }
-
+            
             // Extract fields with normalized names
             const bill_id = data.bill_id;
-            const billDate = data.billDate;
+            const billDateRaw = data.billDate;
             const customerName = data.customerName;
             const phone = data.phone;
             const serviceName = data.serviceName;
 
             // Check required fields
-            if (!billDate || !customerName || !phone || !serviceName || !bill_id) {
+            if (!billDateRaw || !customerName || !phone || !serviceName || !bill_id) {
                 const missing = [];
-                if (!billDate) missing.push('billDate');
+                if (!billDateRaw) missing.push('billDate');
                 if (!customerName) missing.push('customerName');
                 if (!phone) missing.push('phone');
                 if (!serviceName) missing.push('serviceName');
                 if (!bill_id) missing.push('bill_id');
 
-                log.warn(`Row ${i + 1} - Missing fields:`, {
-                    missing,
-                    rawData: originalData
-                });
-
+                console.log(`\n❌ Row ${i + 1} - Missing fields:`, missing.join(', '));
+                
                 errors.push({
                     row: i + 1,
                     data: originalData,
@@ -401,20 +564,58 @@ export const uploadCSVFile = async (req, res) => {
                 continue;
             }
 
-            // Validate date
-            const parsedDate = new Date(billDate);
-            if (isNaN(parsedDate.getTime())) {
-                log.warn(`Row ${i + 1} - Invalid date:`, { billDate });
+            // Parse date using DD-MM-YYYY format (PRIMARY FORMAT)
+            const parsedDate = parseDate_DDMMYYYY(billDateRaw);
+            
+            if (!parsedDate || isNaN(parsedDate.getTime())) {
+                console.log(`\n❌ Row ${i + 1} - Invalid date: "${billDateRaw}"`);
+                console.log(`   Expected format: DD-MM-YYYY (e.g., 31-12-2025)`);
+                console.log(`   Also accepts: DD/MM/YYYY, DD.MM.YYYY, DD MM YYYY`);
+                
+                dateFormatStats.failed++;
+                
                 errors.push({
                     row: i + 1,
                     data: originalData,
-                    message: `Invalid date format: ${billDate}`,
+                    message: `Invalid date format: "${billDateRaw}". Required format: DD-MM-YYYY (e.g., 31-12-2025). Also accepts DD/MM/YYYY, DD.MM.YYYY`,
+                    rawDate: billDateRaw
                 });
                 continue;
             }
 
+            // Validate date is within reasonable range
+            const now = new Date();
+            const hundredYearsAgo = new Date();
+            hundredYearsAgo.setFullYear(now.getFullYear() - 100);
+            const oneYearFromNow = new Date();
+            oneYearFromNow.setFullYear(now.getFullYear() + 1);
+            
+            if (parsedDate < hundredYearsAgo || parsedDate > oneYearFromNow) {
+                console.log(`\n⚠️ Row ${i + 1} - Date out of range: ${formatDate(parsedDate)}`);
+                
+                errors.push({
+                    row: i + 1,
+                    data: originalData,
+                    message: `Date out of reasonable range: ${billDateRaw} -> ${formatDate(parsedDate)}`,
+                });
+                continue;
+            }
+
+            dateFormatStats.successful++;
+
             // Clean phone number
-            const cleanPhone = phone.toString().replace(/[\s\-\(\)\.]/g, '');
+            const cleanPhone = phone.toString().replace(/[\s\-\(\)\.\+\_]/g, '');
+            
+            // Validate phone number (basic check - 7 to 15 digits)
+            if (!/^\d{7,15}$/.test(cleanPhone)) {
+                console.log(`\n❌ Row ${i + 1} - Invalid phone: "${phone}" (cleaned: "${cleanPhone}")`);
+                errors.push({
+                    row: i + 1,
+                    data: originalData,
+                    message: `Invalid phone number: "${phone}". Must be 7-15 digits after cleaning.`,
+                });
+                continue;
+            }
 
             // Prepare bill object
             const billData = {
@@ -431,43 +632,63 @@ export const uploadCSVFile = async (req, res) => {
                     source: 'file_upload',
                     originalFile: req.file.originalname,
                     fileType: fileExtension,
+                    originalDate: billDateRaw.toString(),
+                    parsedDate: formatDate(parsedDate),
                     createdBy: req.user?.username || 'system',
                     uploadedAt: new Date()
                 },
             };
 
             results.push(billData);
-
+            
+            // Progress update every 100 rows
             if ((i + 1) % 100 === 0) {
-                log.info(`Processed ${i + 1}/${rowCount} rows. Valid: ${results.length}, Errors: ${errors.length}`);
+                log.info(`Progress: ${i + 1}/${rowCount} rows processed. Valid: ${results.length}, Errors: ${errors.length}`);
             }
         }
 
-        log.success('Data processing completed', {
-            totalRows: rowCount,
-            validRows: results.length,
-            errorRows: errors.length
-        });
+        // Final processing summary
+        console.log('\n' + '='.repeat(60));
+        console.log('📊 DATA PROCESSING SUMMARY');
+        console.log('='.repeat(60));
+        console.log(`Total rows in file:     ${rowCount}`);
+        console.log(`Valid records:          ${results.length}`);
+        console.log(`Invalid records:        ${errors.length}`);
+        console.log(`Date parsing - Success: ${dateFormatStats.successful}`);
+        console.log(`Date parsing - Failed:  ${dateFormatStats.failed}`);
+        console.log('='.repeat(60) + '\n');
 
         // Delete uploaded file after parsing
         if (fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
-            log.info('Temporary file deleted:', { path: req.file.path });
+            log.info('Temporary file deleted');
         }
 
         // If no valid data
         if (results.length === 0) {
             log.error('No valid data to insert');
+            
+            // Show sample of errors
+            console.log('\n📝 Sample of errors found:');
+            errors.slice(0, 5).forEach(err => {
+                console.log(`   Row ${err.row}: ${err.message}`);
+            });
+            if (errors.length > 5) {
+                console.log(`   ... and ${errors.length - 5} more errors`);
+            }
+            
             return res.status(400).json({
                 success: false,
-                message: 'No valid data found in the uploaded file',
+                message: 'No valid data found in the uploaded file. All rows failed validation.',
                 totalRows: rowCount,
-                errors: errors.slice(0, 50), // Return first 50 errors
+                errors: errors.slice(0, 50),
+                dateFormatStats,
+                hint: 'Required date format: DD-MM-YYYY (Example: 31-12-2025)'
             });
         }
 
         // Check for duplicates in uploaded data
-        log.info('Checking for duplicates...');
+        log.info('Checking for duplicates within file...');
         const seenBillIds = new Set();
         const duplicates = [];
 
@@ -479,21 +700,22 @@ export const uploadCSVFile = async (req, res) => {
                     customerName: row.customerName,
                     phone: row.phone,
                 });
+                console.log(`   ⚠️ Duplicate bill_id found at row ${index + 1}: ${row.bill_id}`);
             } else {
                 seenBillIds.add(row.bill_id);
             }
         });
 
         if (duplicates.length > 0) {
-            log.warn(`Found ${duplicates.length} duplicate bill_ids in file`, duplicates.slice(0, 5));
+            log.warn(`Found ${duplicates.length} duplicate bill_ids in file`);
         }
 
         // Check for existing bill_ids in database
         log.info('Checking existing records in database...');
         const billIds = results.map(r => r.bill_id);
-
+        
         const existingBills = await Bill.find(
-            { bill_id: { $in: billIds } },
+            { bill_id: { $in: billIds } }, 
             { bill_id: 1, customerName: 1 }
         );
 
@@ -502,57 +724,72 @@ export const uploadCSVFile = async (req, res) => {
 
         if (existingBills.length > 0) {
             const existingIds = new Set(existingBills.map(b => b.bill_id));
-            log.warn(`Found ${existingBills.length} existing records in database`,
-                existingBills.slice(0, 5).map(b => ({ bill_id: b.bill_id, name: b.customerName }))
-            );
-
+            console.log(`\n⚠️ Found ${existingBills.length} records already in database:`);
+            existingBills.slice(0, 5).forEach(b => {
+                console.log(`   - Bill ID: ${b.bill_id}, Customer: ${b.customerName}`);
+            });
+            if (existingBills.length > 5) {
+                console.log(`   ... and ${existingBills.length - 5} more`);
+            }
+            
             finalResults = results.filter(r => !existingIds.has(r.bill_id));
             skippedCount = results.length - finalResults.length;
-
-            log.info(`Filtered results: ${finalResults.length} new records to insert, ${skippedCount} skipped`);
-
+            
+            console.log(`\n📊 After filtering: ${finalResults.length} new records to insert, ${skippedCount} skipped (already exist)\n`);
+            
             if (finalResults.length === 0) {
                 log.warn('All records already exist in database');
                 return res.status(409).json({
                     success: false,
-                    message: 'All bill_ids already exist in database',
+                    message: 'All bill_ids already exist in database. No new records to insert.',
                     existingCount: existingBills.length,
-                    duplicatesFound: existingBills.slice(0, 10).map(b => b.bill_id),
+                    duplicatesFound: existingBills.slice(0, 10).map(b => ({ bill_id: b.bill_id, customer: b.customerName })),
                 });
             }
         }
 
         // Insert into database
         log.info(`Inserting ${finalResults.length} records into database...`);
-
+        
         let insertedCount = 0;
         let insertErrors = [];
 
         try {
-            // Insert in batches for large files
+            // Insert in batches for better performance with large files
             const batchSize = 500;
+            const totalBatches = Math.ceil(finalResults.length / batchSize);
+            
             for (let i = 0; i < finalResults.length; i += batchSize) {
                 const batch = finalResults.slice(i, i + batchSize);
+                const batchNumber = Math.floor(i / batchSize) + 1;
+                
+                console.log(`   Inserting batch ${batchNumber}/${totalBatches} (${batch.length} records)...`);
+                
                 const inserted = await Bill.insertMany(batch, {
-                    ordered: false,
+                    ordered: false, // Continue inserting even if some fail
                     timeout: 30000,
                 });
+                
                 insertedCount += inserted.length;
-
-                log.info(`Batch ${Math.floor(i / batchSize) + 1} inserted: ${inserted.length} records. Total: ${insertedCount}/${finalResults.length}`);
+                console.log(`   ✅ Batch ${batchNumber} complete: ${inserted.length} inserted. Total: ${insertedCount}`);
             }
-
-            log.success(`All records inserted successfully: ${insertedCount}`);
+            
+            console.log(`\n✅ All records inserted successfully! Total: ${insertedCount}`);
         } catch (error) {
-            log.error('Error during batch insertion', error);
-
+            log.error('Error during insertion', error);
+            
             if (error.writeErrors) {
                 insertedCount = error.result?.result?.nInserted || 0;
                 insertErrors = error.writeErrors.map(err => ({
                     index: err.index,
                     message: err.errmsg,
                 }));
-                log.warn(`Partial insertion: ${insertedCount} inserted, ${insertErrors.length} failed`);
+                console.log(`\n⚠️ Partial insertion: ${insertedCount} inserted, ${insertErrors.length} failed`);
+                
+                // Log first few insertion errors
+                insertErrors.slice(0, 5).forEach(err => {
+                    console.log(`   - Index ${err.index}: ${err.message}`);
+                });
             } else {
                 throw error;
             }
@@ -570,23 +807,34 @@ export const uploadCSVFile = async (req, res) => {
             existingInDB: skippedCount,
             successfullyInserted: insertedCount,
             failedInserts: insertErrors.length,
-            processingTime: new Date() - new Date(req.file.startTime || Date.now()),
+            dateFormatStats,
         };
 
-        log.success('Upload completed successfully', summary);
+        console.log('\n' + '='.repeat(60));
+        console.log('🎉 UPLOAD COMPLETED SUCCESSFULLY');
+        console.log('='.repeat(60));
+        console.log(`File:            ${summary.fileName}`);
+        console.log(`Total rows:      ${summary.totalRowsInFile}`);
+        console.log(`Valid:           ${summary.validRows}`);
+        console.log(`Inserted:        ${summary.successfullyInserted}`);
+        console.log(`Skipped (exist): ${summary.existingInDB}`);
+        console.log(`Failed:          ${summary.invalidRows + summary.failedInserts}`);
+        console.log('='.repeat(60) + '\n');
+
         log.endProcess('File Upload Process');
 
         return res.status(201).json({
             success: true,
-            message: `File processed: ${insertedCount} records uploaded successfully`,
+            message: `File processed successfully! ${insertedCount} records uploaded.`,
             summary: summary,
             data: {
                 inserted: insertedCount,
                 failed: insertErrors.length,
                 skipped: skippedCount,
                 totalErrors: errors.length,
-                errors: errors.slice(0, 50), // First 50 errors
-                duplicateWarnings: duplicates.slice(0, 50), // First 50 duplicates
+                errors: errors.slice(0, 50),
+                duplicateWarnings: duplicates.slice(0, 50),
+                dateFormatStats,
                 logs: {
                     fileReceived: req.file.originalname,
                     fileType: fileExtension,
@@ -596,6 +844,7 @@ export const uploadCSVFile = async (req, res) => {
                     recordsSkipped: skippedCount,
                     recordsFailed: insertErrors.length,
                     duplicateInFile: duplicates.length,
+                    dateParsingStats: dateFormatStats,
                 }
             },
         });
@@ -609,39 +858,35 @@ export const uploadCSVFile = async (req, res) => {
 
         log.error('File upload failed', {
             error: error.message,
-            stack: error.stack,
-            fileInfo: req.file ? {
-                name: req.file.originalname,
-                size: req.file.size
-            } : 'No file'
+            stack: error.stack
         });
-
+        
         log.endProcess('File Upload Process (with error)');
 
         // Handle specific errors
         if (error.code === 11000) {
+            console.log('\n❌ Duplicate key error - Records already exist');
             return res.status(409).json({
                 success: false,
-                message: 'Some records already exist in the database',
+                message: 'Some records already exist in the database (duplicate bill_id).',
                 error: 'Duplicate entries found',
-                log: 'Duplicate key violation detected'
             });
         }
 
         if (error.name === 'ValidationError') {
+            console.log('\n❌ Schema validation error');
+            console.log(Object.values(error.errors).map(err => err.message));
             return res.status(400).json({
                 success: false,
-                message: 'Validation error',
+                message: 'Data validation error. Please check your data format.',
                 errors: Object.values(error.errors).map(err => err.message),
-                log: 'Schema validation failed'
             });
         }
 
         return res.status(500).json({
             success: false,
-            message: 'Failed to process uploaded file',
+            message: 'Failed to process uploaded file. Server error.',
             error: error.message,
-            log: `Fatal error: ${error.message}`
         });
     }
 };
