@@ -344,7 +344,8 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
                 message: 'No bills found',
                 totalBills: 0,
                 summary: { due: 0, valid: 0, expired: 0, maxReached: 0, totalGroups: 0 },
-                data: []
+                data: [],
+                availableServices: []
             });
         }
 
@@ -449,14 +450,27 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
             return (order[a.reminderStatus] || 99) - (order[b.reminderStatus] || 99);
         });
 
+        // Extract unique services for the filter dropdown
+        const uniqueServices = [...new Set(processedBills.map(bill => bill.baseServiceName))].sort();
+
         // Filters & Pagination
-        const { filterStatus, search, page = 1, limit = 10 } = req.query;
+        const { filterStatus, search, service, page = 1, limit = 10 } = req.query;
         let filteredBills = processedBills;
 
+        // Apply service filter
+        if (service) {
+            filteredBills = filteredBills.filter(b =>
+                b.baseServiceName === service ||
+                b.serviceName === service
+            );
+        }
+
+        // Apply status filter
         if (filterStatus) {
             filteredBills = filteredBills.filter(b => b.reminderStatus === filterStatus);
         }
 
+        // Apply search filter
         if (search) {
             const s = search.toLowerCase();
             filteredBills = filteredBills.filter(b =>
@@ -475,6 +489,7 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
             totalBills: processedBills.length,
             filteredCount: filteredBills.length,
             summary,
+            availableServices: uniqueServices,
             pagination: {
                 currentPage: parseInt(page),
                 totalPages: Math.ceil(filteredBills.length / parseInt(limit)),
@@ -494,7 +509,6 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
         });
     }
 };
-
 
 
 
