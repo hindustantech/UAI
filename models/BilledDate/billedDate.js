@@ -187,13 +187,10 @@ function extractServiceInfo(fullServiceName) {
 function getDefaultServiceDays(baseServiceName) {
     const serviceDaysMap = {
         'Hair Cut- Men': 30,
-        'Hair Cut- Ladies': 45,
-        'Special hair Cut': 45,
-        'Happy Child Cut - Boy': 30,
+        'Hair Cut- Ladies': 90,
+        'Special hair Cut': 90,
+        'Happy Child Cut - Boy': 90,
         'Happy Child Cut - Girl': 30,
-        'Beard/ Moustache Trim & Design': 15,
-        'Beard Colour': 15,
-        'Shavings': 7,
         'Hair Colour M': 30,
         'Hair Colour F': 30,
         'Root Touch Up- Ammonia Free': 21,
