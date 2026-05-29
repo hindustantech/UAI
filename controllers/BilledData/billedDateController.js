@@ -1238,66 +1238,179 @@ export const uploadCSVFile = async (req, res) => {
 };
 
 
+    // ______current implementation without rate limiting and retry logic___________
 
 
-const WHATSAPP_API_URL =
-    "https://whatsapp.quickhub.ai/public/whatsapp/send-template";
-const BATCH_SIZE = 50;
-const BATCH_DELAY_MS = 1000;
+
+
+
+// _____________NEW IMPLEMENTATION WITH RATE LIMITING AND RETRY LOGIC_____________
+
+
+const WHATSAPP_API_URL = "https://whatsapp.quickhub.ai/public/whatsapp/send-template";
+const RATE_LIMIT = 20; // messages per minute
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute in milliseconds
+const BATCH_SIZE = 10; // Reduced batch size for better control
+const BATCH_DELAY_MS = 1500; // 1.5 seconds between batches (40 msgs/min = 1.5 sec per msg)
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const sendWhatsAppReminder = (customer) =>
-    axios.post(
-        WHATSAPP_API_URL,
-        {
-            to: `+91${customer.phone}`,
-            templateName: "hair_cute",
-            variables: {
-                body: { "Customer Name": customer.name },
-            },
-        },
-        {
-            headers: {
-                Authorization: `Bearer ${process.env.QUICKHUB_API_KEY}`,
-                "Content-Type": "application/json",
-            },
+// Rate limiter class using token bucket algorithm
+class RateLimiter {
+    constructor(maxRequests, windowMs) {
+        this.maxRequests = maxRequests;
+        this.windowMs = windowMs;
+        this.tokens = maxRequests;
+        this.lastRefill = Date.now();
+    }
+
+    async waitForToken() {
+        while (this.tokens <= 0) {
+            const now = Date.now();
+            const timePassed = now - this.lastRefill;
+            
+            if (timePassed >= this.windowMs) {
+                // Refill tokens
+                this.tokens = this.maxRequests;
+                this.lastRefill = now;
+            } else {
+                // Wait for next refill
+                const waitTime = this.windowMs - timePassed;
+                await delay(waitTime + 100); // Add small buffer
+                this.tokens = this.maxRequests;
+                this.lastRefill = Date.now();
+            }
         }
-    );
+        
+        this.tokens--;
+        return true;
+    }
+}
+
+const rateLimiter = new RateLimiter(RATE_LIMIT, RATE_LIMIT_WINDOW_MS);
+
+// Send message with retry logic
+const sendWhatsAppReminder = async (customer, retryCount = 0) => {
+    const MAX_RETRIES = 3;
+    
+    try {
+        // Wait for rate limit token
+        await rateLimiter.waitForToken();
+        
+        const response = await axios.post(
+            WHATSAPP_API_URL,
+            {
+                to: `+91${customer.phone}`,
+                templateName: "hair_cute",
+                variables: {
+                    body: { "Customer Name": customer.name },
+                },
+            },
+            {
+                headers: {
+                    Authorization: `Bearer ${process.env.QUICKHUB_API_KEY}`,
+                    "Content-Type": "application/json",
+                },
+                timeout: 10000, // 10 second timeout
+            }
+        );
+        
+        return { success: true, data: response.data };
+    } catch (error) {
+        // Handle rate limiting errors from API
+        if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
+            const retryAfter = parseInt(error.response.headers['retry-after']) || 60;
+            console.log(`Rate limited. Retrying after ${retryAfter} seconds...`);
+            await delay(retryAfter * 1000);
+            return sendWhatsAppReminder(customer, retryCount + 1);
+        }
+        
+        throw error;
+    }
+};
 
 export const sendBulkReminder = async (req, res) => {
     const { customers } = req.body; // [{ phone, name }]
 
     if (!customers?.length) {
-        return res.status(400).json({ success: false, message: "No customers provided" });
+        return res.status(400).json({ 
+            success: false, 
+            message: "No customers provided" 
+        });
+    }
+
+    // Validate input
+    const invalidCustomers = customers.filter(c => !c.phone || !c.name);
+    if (invalidCustomers.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid customer data",
+            invalidCount: invalidCustomers.length
+        });
     }
 
     const results = [];
-    const batches = _.chunk(customers, BATCH_SIZE);
+    const startTime = Date.now();
+    
+    console.log(`Starting bulk send for ${customers.length} customers. Rate limit: ${RATE_LIMIT}/min`);
 
-    for (const [index, batch] of batches.entries()) {
-        const batchResults = await Promise.allSettled(
-            batch.map(sendWhatsAppReminder)
-        );
+    try {
+        // Process customers sequentially to maintain rate limit
+        for (let i = 0; i < customers.length; i++) {
+            const customer = customers[i];
+            
+            try {
+                const result = await sendWhatsAppReminder(customer);
+                results.push({
+                    phone: customer.phone,
+                    name: customer.name,
+                    success: true,
+                    index: i + 1
+                });
+            } catch (error) {
+                results.push({
+                    phone: customer.phone,
+                    name: customer.name,
+                    success: false,
+                    error: error.response?.data?.message || error.message,
+                    status: error.response?.status,
+                    index: i + 1
+                });
+            }
 
-        batchResults.forEach((result, i) => {
-            results.push({
-                phone: batch[i].phone,
-                success: result.status === "fulfilled",
-                error: result.status === "rejected" ? result.reason?.message : null,
-            });
-        });
-
-        if (index < batches.length - 1) await delay(BATCH_DELAY_MS);
+            // Progress logging
+            if ((i + 1) % 10 === 0 || i === customers.length - 1) {
+                const elapsedMinutes = (Date.now() - startTime) / 60000;
+                const progress = ((i + 1) / customers.length * 100).toFixed(1);
+                console.log(`Progress: ${i + 1}/${customers.length} (${progress}%) - ${elapsedMinutes.toFixed(1)} min elapsed`);
+            }
+        }
+    } catch (error) {
+        console.error('Bulk send interrupted:', error);
     }
 
-    const sent = results.filter((r) => r.success).length;
+    const sent = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+    const totalTime = ((Date.now() - startTime) / 60000).toFixed(1);
 
     return res.status(200).json({
         success: true,
         total: customers.length,
         sent,
-        failed: customers.length - sent,
-        results,
+        failed,
+        timeMinutes: totalTime,
+        estimatedTimeMinutes: Math.ceil(customers.length / RATE_LIMIT),
+        results: results.slice(0, 100), // Return first 100 results to avoid huge response
+        hasMoreResults: results.length > 100
+    });
+};
+
+// Optional: Get rate limit status endpoint
+export const getRateLimitStatus = async (req, res) => {
+    return res.status(200).json({
+        success: true,
+        rateLimit: RATE_LIMIT,
+        windowMs: RATE_LIMIT_WINDOW_MS,
+        messagesPerMinute: RATE_LIMIT
     });
 };
