@@ -1,9 +1,9 @@
 // routes/billedDateRoutes.js
 import express from 'express';
-import { getAllBillsWithReminderStatus, uploadCSVFile } from '../../controllers/BilledData/billedDateController.js';
+import { getAllBillsWithReminderStatus, uploadCSVFile, sendBulkReminder } from '../../controllers/BilledData/billedDateController.js';
 import multer from 'multer';
+import authMiddleware from '../../middlewares/authMiddleware.js';
 const router = express.Router();
-
 const upload = multer({
     dest: 'uploads/',
     limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
@@ -34,9 +34,13 @@ const upload = multer({
     }
 });
 
+router.use(authMiddleware); // Apply authentication middleware to all routes in this router
+
 router.get('/bills', getAllBillsWithReminderStatus);
 
 // Updated route to handle both CSV and Excel
 router.post('/upload', upload.single('file'), uploadCSVFile);
+
+router.post('/reminders', sendBulkReminder);
 
 export default router;

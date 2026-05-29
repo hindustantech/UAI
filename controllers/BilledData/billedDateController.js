@@ -1234,3 +1234,66 @@ export const uploadCSVFile = async (req, res) => {
         });
     }
 };
+
+
+
+import axios from "axios";
+import _ from "lodash";
+
+const WHATSAPP_API_URL =
+    "https://whatsapp.quickhub.ai/public/whatsapp/send-template";
+const BATCH_SIZE = 50;
+const BATCH_DELAY_MS = 1000;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const sendWhatsAppReminder = (customer) =>
+    axios.post(
+        WHATSAPP_API_URL,
+        {
+            to: `+91${customer.phone}`,
+            templateName: "haircut_reminder",
+            variables: {
+                body: { "Customer Name": customer.name },
+            },
+        },
+        {
+            headers: {
+                Authorization: `Bearer ${process.env.QUICKHUB_API_KEY}`,
+                "Content-Type": "application/json",
+            },
+        }
+    );
+
+export const sendBulkReminder = async (req, res) => {
+    const { customers } = req.body;
+    const results = [];
+
+    const batches = _.chunk(customers, BATCH_SIZE);
+
+    for (const [index, batch] of batches.entries()) {
+        const batchResults = await Promise.allSettled(
+            batch.map(sendWhatsAppReminder)
+        );
+
+        batchResults.forEach((result, i) => {
+            results.push({
+                phone: batch[i].phone,
+                success: result.status === "fulfilled",
+                error: result.status === "rejected" ? result.reason?.message : null,
+            });
+        });
+
+        if (index < batches.length - 1) await delay(BATCH_DELAY_MS);
+    }
+
+    const sent = results.filter((r) => r.success).length;
+
+    return res.status(200).json({
+        success: true,
+        total: customers.length,
+        sent,
+        failed: customers.length - sent,
+        results,
+    });
+};
