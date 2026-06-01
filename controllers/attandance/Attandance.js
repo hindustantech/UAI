@@ -780,7 +780,7 @@ export const markAttendance = async (req, res) => {
                         earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
                     },
                     lateByMinutes: lateMinutes,
-                    totalWorkingHours: Math.max(0, totalMinutes / 60),
+                    totalWorkingHours: Math.max(0, totalMinutes / 60) || 0,
                     remarks: finalRemarks,
                     isSuspicious: outTimeUTC ? isSuspicious : false, // ✅ false for punch-in only
                     punchHistory: outTimeUTC ? [{

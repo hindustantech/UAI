@@ -546,250 +546,7 @@ export const getAllBillsWithReminderStatus = async (req, res) => {
     }
 };
 
-// // Send WhatsApp notifications for filtered bills
-// export const sendWhatsAppNotifications = async (req, res) => {
-//     try {
-//         const {
-//             filters,
-//             messageTemplate,
-//             includeTestMessage = false,
-//             testPhoneNumber
-//         } = req.body;
 
-//         // Fetch filtered bills based on provided filters
-//         const filteredBills = await getFilteredBills(filters);
-
-//         if (!filteredBills || filteredBills.length === 0) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: 'No bills found matching the filters'
-//             });
-//         }
-
-//         // Group by phone number to avoid duplicate messages
-//         const uniqueCustomers = new Map();
-
-//         for (const bill of filteredBills) {
-//             if (!uniqueCustomers.has(bill.phone)) {
-//                 uniqueCustomers.set(bill.phone, {
-//                     phone: bill.phone,
-//                     customerName: bill.customerName,
-//                     bills: []
-//                 });
-//             }
-//             uniqueCustomers.get(bill.phone).bills.push(bill);
-//         }
-
-//         const results = {
-//             total: uniqueCustomers.size,
-//             successful: 0,
-//             failed: 0,
-//             details: []
-//         };
-
-//         // Send test message if requested
-//         if (includeTestMessage && testPhoneNumber) {
-//             const testResult = await sendWhatsAppMessage(
-//                 testPhoneNumber,
-//                 '🧪 TEST MESSAGE\n\n' + messageTemplate,
-//                 { isTest: true }
-//             );
-//             results.details.push({
-//                 phone: testPhoneNumber,
-//                 type: 'test',
-//                 success: testResult.success,
-//                 error: testResult.error
-//             });
-//         }
-
-//         // Send messages to all customers
-//         for (const [phone, customer] of uniqueCustomers) {
-//             try {
-//                 // Personalize message with customer's bills
-//                 const personalizedMessage = personalizeMessage(messageTemplate, customer);
-
-//                 const result = await sendWhatsAppMessage(phone, personalizedMessage);
-
-//                 if (result.success) {
-//                     results.successful++;
-//                     // Update reminder sent status in database
-//                     await updateReminderStatus(customer.bills, result.messageSid);
-//                 } else {
-//                     results.failed++;
-//                 }
-
-//                 results.details.push({
-//                     phone,
-//                     customerName: customer.customerName,
-//                     success: result.success,
-//                     error: result.error,
-//                     billCount: customer.bills.length
-//                 });
-
-//                 // Add delay between messages to avoid rate limiting
-//                 await new Promise(resolve => setTimeout(resolve, 1000));
-
-//             } catch (error) {
-//                 results.failed++;
-//                 results.details.push({
-//                     phone,
-//                     customerName: customer.customerName,
-//                     success: false,
-//                     error: error.message
-//                 });
-//             }
-//         }
-
-//         return res.status(200).json({
-//             success: true,
-//             message: `WhatsApp notifications sent: ${results.successful} successful, ${results.failed} failed`,
-//             results
-//         });
-
-//     } catch (error) {
-//         console.error('WhatsApp notification error:', error);
-//         return res.status(500).json({
-//             success: false,
-//             message: 'Failed to send WhatsApp notifications',
-//             error: error.message
-//         });
-//     }
-// };
-
-// // Helper function to get filtered bills
-// async function getFilteredBills(filters) {
-//     const today = new Date();
-//     today.setHours(0, 0, 0, 0);
-
-//     let query = Bill.find({ status: { $ne: 'cancelled' } });
-
-//     // Apply filters
-//     if (filters.server && filters.server !== 'all') {
-//         query = query.where('serverLocation').equals(filters.server);
-//     }
-
-//     if (filters.status) {
-//         query = query.where('status').equals(filters.status);
-//     }
-
-//     if (filters.service) {
-//         query = query.where('baseServiceName').equals(filters.service);
-//     }
-
-//     if (filters.dateRange && filters.dateRange.start && filters.dateRange.end) {
-//         query = query.where('billDate').gte(new Date(filters.dateRange.start)).lte(new Date(filters.dateRange.end));
-//     }
-
-//     if (filters.reminderStatus) {
-//         // You'll need to compute this based on your logic
-//         const bills = await query.lean();
-//         return filterByReminderStatus(bills, filters.reminderStatus);
-//     }
-
-//     const bills = await query.lean();
-
-//     // Apply reminder status filter if needed
-//     if (filters.reminderStatus) {
-//         return filterByReminderStatus(bills, filters.reminderStatus);
-//     }
-
-//     return bills;
-// }
-
-// // Helper function to send WhatsApp message
-// async function sendWhatsAppMessage(to, message, options = {}) {
-//     try {
-//         // Format phone number (ensure it has country code)
-//         let formattedNumber = to;
-//         if (!to.startsWith('+')) {
-//             formattedNumber = `+91${to}`; // Default to India country code
-//         }
-
-//         const messageResponse = await twilioClient.messages.create({
-//             body: message,
-//             from: WHATSAPP_FROM,
-//             to: `whatsapp:${formattedNumber}`
-//         });
-
-//         return {
-//             success: true,
-//             messageSid: messageResponse.sid,
-//             status: messageResponse.status
-//         };
-//     } catch (error) {
-//         console.error('Twilio error:', error);
-//         return {
-//             success: false,
-//             error: error.message
-//         };
-//     }
-// }
-
-// // Helper function to personalize message
-// function personalizeMessage(template, customer) {
-//     let message = template;
-
-//     // Replace placeholders
-//     message = message.replace(/{{customerName}}/g, customer.customerName);
-//     message = message.replace(/{{billCount}}/g, customer.bills.length);
-
-//     // Add service details
-//     const serviceList = customer.bills.map(bill =>
-//         `- ${bill.serviceName} (${formatDate(bill.billDate)})`
-//     ).join('\n');
-
-//     message = message.replace(/{{serviceList}}/g, serviceList);
-
-//     // Add days since service for oldest bill
-//     const oldestBill = customer.bills.reduce((oldest, bill) => {
-//         return new Date(bill.billDate) < new Date(oldest.billDate) ? bill : oldest;
-//     });
-//     const daysSince = Math.floor((new Date() - new Date(oldestBill.billDate)) / (1000 * 60 * 60 * 24));
-//     message = message.replace(/{{daysSince}}/g, daysSince);
-
-//     return message;
-// }
-
-// // Helper function to update reminder status in database
-// async function updateReminderStatus(bills, messageSid) {
-//     for (const bill of bills) {
-//         await Bill.findByIdAndUpdate(bill._id, {
-//             $inc: { followUpCount: 1 },
-//             lastReminderSentAt: new Date(),
-//             lastReminderMessageSid: messageSid
-//         });
-//     }
-// }
-
-// // Helper function to filter by reminder status
-// function filterByReminderStatus(bills, status) {
-//     const today = new Date();
-//     today.setHours(0, 0, 0, 0);
-
-//     return bills.filter(bill => {
-//         const billDate = new Date(bill.billDate);
-//         const diffDays = Math.floor((today - billDate) / (1000 * 60 * 60 * 24));
-//         const serviceInterval = getDefaultServiceDays(bill.baseServiceName);
-
-//         switch (status) {
-//             case 'due':
-//                 return diffDays >= serviceInterval && diffDays <= 365 && bill.followUpCount < bill.followUpMax;
-//             case 'valid':
-//                 return diffDays < serviceInterval;
-//             case 'expired':
-//                 return diffDays > 365;
-//             case 'max_reached':
-//                 return bill.followUpCount >= bill.followUpMax;
-//             default:
-//                 return true;
-//         }
-//     });
-// }
-
-// function formatDate(dateString) {
-//     const date = new Date(dateString);
-//     return date.toLocaleDateString('en-IN');
-// }
 
 
 export const uploadCSVFile = async (req, res) => {
@@ -1265,7 +1022,7 @@ class RateLimiter {
         while (this.tokens <= 0) {
             const now = Date.now();
             const timePassed = now - this.lastRefill;
-            
+
             if (timePassed >= this.windowMs) {
                 // Refill tokens
                 this.tokens = this.maxRequests;
@@ -1278,7 +1035,7 @@ class RateLimiter {
                 this.lastRefill = Date.now();
             }
         }
-        
+
         this.tokens--;
         return true;
     }
@@ -1287,20 +1044,31 @@ class RateLimiter {
 const rateLimiter = new RateLimiter(RATE_LIMIT, RATE_LIMIT_WINDOW_MS);
 
 // Send message with retry logic
-const sendWhatsAppReminder = async (customer, retryCount = 0) => {
+// Enhanced send function that accepts remark
+const sendWhatsAppReminder = async (bill, retryCount = 0) => {
     const MAX_RETRIES = 3;
-    
+
     try {
         // Wait for rate limit token
         await rateLimiter.waitForToken();
-        
+
+        // Format customer data
+        const customer = {
+            phone: bill.phone,
+            name: bill.customerName,
+            billId: bill.bill_id,
+            serviceName: bill.baseServiceName
+        };
+
         const response = await axios.post(
             WHATSAPP_API_URL,
             {
                 to: `+91${customer.phone}`,
                 templateName: "hair_cute",
                 variables: {
-                    body: { "Customer Name": customer.name },
+                    body: {
+                        "Customer Name": customer.name,
+                    },
                 },
             },
             {
@@ -1310,76 +1078,120 @@ const sendWhatsAppReminder = async (customer, retryCount = 0) => {
                 },
                 timeout: 10000, // 10 second timeout
             }
-        );
-        
-        return { success: true, data: response.data };
+        ); 
+
+        // Create remark message for successful send
+        const remark = `WhatsApp reminder sent successfully at ${new Date().toISOString()} - Template: hair_cute, Service: ${customer.serviceName}`;
+
+        // Mark the reminder as sent in database
+        await bill.markReminderSent('sent', remark);
+
+        return {
+            success: true,
+            data: response.data,
+            remark: remark,
+            billId: bill.bill_id
+        };
+
     } catch (error) {
+        // Create error remark
+        const errorRemark = `WhatsApp reminder failed at ${new Date().toISOString()} - Error: ${error.response?.data?.message || error.message}, Status: ${error.response?.status || 'unknown'}`;
+
         // Handle rate limiting errors from API
         if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
             const retryAfter = parseInt(error.response.headers['retry-after']) || 60;
-            console.log(`Rate limited. Retrying after ${retryAfter} seconds...`);
+            console.log(`Rate limited for bill ${bill.bill_id}. Retrying after ${retryAfter} seconds...`);
+
+            // Add retry remark
+            const retryRemark = `Rate limited. Retry attempt ${retryCount + 1}/${MAX_RETRIES} after ${retryAfter}s - ${errorRemark}`;
+            await bill.markReminderSent('failed', retryRemark);
+
             await delay(retryAfter * 1000);
-            return sendWhatsAppReminder(customer, retryCount + 1);
+            return sendWhatsAppReminder(bill, retryCount + 1);
         }
-        
+
+        // Mark as failed with error remark
+        if (retryCount >= MAX_RETRIES) {
+            const finalRemark = `Final failure after ${MAX_RETRIES} retries - ${errorRemark}`;
+            await bill.markReminderSent('failed', finalRemark);
+        } else {
+            await bill.markReminderSent('failed', errorRemark);
+        }
+
         throw error;
     }
 };
 
 export const sendBulkReminder = async (req, res) => {
-    const { customers } = req.body; // [{ phone, name }]
+    const { bills } = req.body; // Array of bill IDs or bill documents
 
-    if (!customers?.length) {
-        return res.status(400).json({ 
-            success: false, 
-            message: "No customers provided" 
+    if (!bills?.length) {
+        return res.status(400).json({
+            success: false,
+            message: "No bills provided"
         });
     }
 
-    // Validate input
-    const invalidCustomers = customers.filter(c => !c.phone || !c.name);
-    if (invalidCustomers.length > 0) {
-        return res.status(400).json({
-            success: false,
-            message: "Invalid customer data",
-            invalidCount: invalidCustomers.length
+    // Fetch bills from database if IDs are provided
+    let billDocuments = bills;
+    if (typeof bills[0] === 'string') {
+        billDocuments = await Bill.find({
+            _id: { $in: bills },
+            reminderStatus: 'pending',
+            status: { $ne: 'cancelled' }
         });
+
+        if (billDocuments.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "No pending reminders found for the provided bill IDs"
+            });
+        }
     }
 
     const results = [];
     const startTime = Date.now();
-    
-    console.log(`Starting bulk send for ${customers.length} customers. Rate limit: ${RATE_LIMIT}/min`);
+
+    console.log(`Starting bulk send for ${billDocuments.length} customers. Rate limit: ${RATE_LIMIT}/min`);
 
     try {
-        // Process customers sequentially to maintain rate limit
-        for (let i = 0; i < customers.length; i++) {
-            const customer = customers[i];
-            
+        // Process bills sequentially to maintain rate limit
+        for (let i = 0; i < billDocuments.length; i++) {
+            const bill = billDocuments[i];
+
             try {
-                const result = await sendWhatsAppReminder(customer);
+                const result = await sendWhatsAppReminder(bill);
                 results.push({
-                    phone: customer.phone,
-                    name: customer.name,
+                    billId: bill.bill_id,
+                    phone: bill.phone,
+                    name: bill.customerName,
                     success: true,
+                    remark: result.remark,
                     index: i + 1
                 });
+
+                console.log(`✅ Sent reminder to ${bill.customerName} (${bill.phone}) - Remark: ${result.remark}`);
+
             } catch (error) {
+                // Bill already marked as failed inside sendWhatsAppReminder
                 results.push({
-                    phone: customer.phone,
-                    name: customer.name,
+                    billId: bill.bill_id,
+                    phone: bill.phone,
+                    name: bill.customerName,
                     success: false,
                     error: error.response?.data?.message || error.message,
                     status: error.response?.status,
                     index: i + 1
                 });
+
+                console.log(`❌ Failed reminder for ${bill.customerName} (${bill.phone}) - Error: ${error.message}`);
             }
 
             // Progress logging
-            if ((i + 1) % 10 === 0 || i === customers.length - 1) {
+            if ((i + 1) % 10 === 0 || i === billDocuments.length - 1) {
                 const elapsedMinutes = (Date.now() - startTime) / 60000;
-                const progress = ((i + 1) / customers.length * 100).toFixed(1);
-                console.log(`Progress: ${i + 1}/${customers.length} (${progress}%) - ${elapsedMinutes.toFixed(1)} min elapsed`);
+                const progress = ((i + 1) / billDocuments.length * 100).toFixed(1);
+                console.log(`Progress: ${i + 1}/${billDocuments.length} (${progress}%) - ${elapsedMinutes.toFixed(1)} min elapsed`);
             }
         }
     } catch (error) {
@@ -1392,16 +1204,113 @@ export const sendBulkReminder = async (req, res) => {
 
     return res.status(200).json({
         success: true,
-        total: customers.length,
+        total: billDocuments.length,
         sent,
         failed,
         timeMinutes: totalTime,
-        estimatedTimeMinutes: Math.ceil(customers.length / RATE_LIMIT),
+        estimatedTimeMinutes: Math.ceil(billDocuments.length / RATE_LIMIT),
         results: results.slice(0, 100), // Return first 100 results to avoid huge response
-        hasMoreResults: results.length > 100
+        hasMoreResults: results.length > 100,
+        summaryRemark: `Bulk reminder completed: ${sent} sent, ${failed} failed in ${totalTime} minutes`
     });
 };
 
+
+// Function to send reminder for a single bill with custom remark
+export const sendSingleReminder = async (req, res) => {
+    const { billId, customRemark } = req.body;
+
+    try {
+        const bill = await Bill.findOne({
+            bill_id: billId,
+            reminderStatus: 'pending',
+            status: { $ne: 'cancelled' }
+        });
+
+        if (!bill) {
+            return res.status(404).json({
+                success: false,
+                message: "Bill not found or reminder not pending"
+            });
+        }
+
+        const result = await sendWhatsAppReminder(bill);
+
+        // Add custom remark if provided
+        if (customRemark) {
+            await Bill.findOneAndUpdate(
+                { bill_id: billId },
+                {
+                    $push: {
+                        followUps: {
+                            date: new Date(),
+                            status: 'sent',
+                            note: `Custom remark: ${customRemark} - ${result.remark}`,
+                            reminderType: 'whatsapp'
+                        }
+                    }
+                }
+            );
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Reminder sent successfully",
+            data: result
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to send reminder",
+            error: error.message
+        });
+    }
+};
+
+// Function to get reminder history with remarks
+export const getReminderHistory = async (req, res) => {
+    const { billId } = req.params;
+
+    try {
+        const bill = await Bill.findOne({ bill_id: billId });
+
+        if (!bill) {
+            return res.status(404).json({
+                success: false,
+                message: "Bill not found"
+            });
+        }
+
+        // Format follow-ups with remarks
+        const reminders = bill.followUps.map(followUp => ({
+            date: followUp.date,
+            status: followUp.status,
+            remark: followUp.note,
+            type: followUp.reminderType,
+            reminderCount: bill.followUps.indexOf(followUp) + 1
+        }));
+
+        return res.status(200).json({
+            success: true,
+            billId: bill.bill_id,
+            customerName: bill.customerName,
+            phone: bill.phone,
+            totalReminders: bill.followUpCount,
+            reminderStatus: bill.reminderStatus,
+            lastReminderSent: bill.lastReminderSentAt,
+            nextReminderDate: bill.nextReminderDate,
+            reminders: reminders
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch reminder history",
+            error: error.message
+        });
+    }
+};
 // Optional: Get rate limit status endpoint
 export const getRateLimitStatus = async (req, res) => {
     return res.status(200).json({
