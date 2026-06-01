@@ -1043,16 +1043,12 @@ class RateLimiter {
 
 const rateLimiter = new RateLimiter(RATE_LIMIT, RATE_LIMIT_WINDOW_MS);
 
-// Send message with retry logic
-// Enhanced send function that accepts remark
 const sendWhatsAppReminder = async (bill, retryCount = 0) => {
     const MAX_RETRIES = 3;
 
     try {
-        // Wait for rate limit token
         await rateLimiter.waitForToken();
 
-        // Format customer data
         const customer = {
             phone: bill.phone,
             name: bill.customerName,
@@ -1067,7 +1063,7 @@ const sendWhatsAppReminder = async (bill, retryCount = 0) => {
                 templateName: "hair_cute",
                 variables: {
                     body: {
-                      "Customer Name": customer.name,
+                        "Customer Name": customer.name,
                     },
                 },
             },
@@ -1076,15 +1072,33 @@ const sendWhatsAppReminder = async (bill, retryCount = 0) => {
                     Authorization: `Bearer ${process.env.QUICKHUB_API_KEY}`,
                     "Content-Type": "application/json",
                 },
-                timeout: 10000, // 10 second timeout
+                timeout: 10000,
             }
         );
 
-        // Create remark message for successful send
         const remark = `WhatsApp reminder sent successfully at ${new Date().toISOString()} - Template: hair_cute, Service: ${customer.serviceName}`;
 
-        // Mark the reminder as sent in database
-        await Bill.markReminderSent('sent', remark);
+        // Direct database update instead of using instance method
+        const updatedBill = await Bill.findOneAndUpdate(
+            { bill_id: bill.bill_id },
+            {
+                $push: {
+                    followUps: {
+                        date: new Date(),
+                        status: 'sent',
+                        note: remark,
+                        reminderType: 'whatsapp'
+                    }
+                },
+                $inc: { followUpCount: 1 },
+                $set: {
+                    lastReminderSentAt: new Date(),
+                    reminderStatus: 'sent',
+                    nextReminderDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+                }
+            },
+            { new: true }
+        );
 
         return {
             success: true,
@@ -1094,29 +1108,23 @@ const sendWhatsAppReminder = async (bill, retryCount = 0) => {
         };
 
     } catch (error) {
-        // Create error remark
-        const errorRemark = `WhatsApp reminder failed at ${new Date().toISOString()} - Error: ${error.response?.data?.message || error.message}, Status: ${error.response?.status || 'unknown'}`;
+        const errorRemark = `WhatsApp reminder failed at ${new Date().toISOString()} - Error: ${error.response?.data?.message || error.message}`;
 
-        // Handle rate limiting errors from API
-        if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
-            const retryAfter = parseInt(error.response.headers['retry-after']) || 60;
-            console.log(`Rate limited for bill ${bill.bill_id}. Retrying after ${retryAfter} seconds...`);
-
-            // Add retry remark
-            const retryRemark = `Rate limited. Retry attempt ${retryCount + 1}/${MAX_RETRIES} after ${retryAfter}s - ${errorRemark}`;
-            await Bill.markReminderSent('failed', retryRemark);
-
-            await delay(retryAfter * 1000);
-            return sendWhatsAppReminder(bill, retryCount + 1);
-        }
-
-        // Mark as failed with error remark
-        if (retryCount >= MAX_RETRIES) {
-            const finalRemark = `Final failure after ${MAX_RETRIES} retries - ${errorRemark}`;
-            await Bill.markReminderSent('failed', finalRemark);
-        } else {
-            await Bill.markReminderSent('failed', errorRemark);
-        }
+        // Log the failure in database
+        await Bill.findOneAndUpdate(
+            { bill_id: bill.bill_id },
+            {
+                $push: {
+                    followUps: {
+                        date: new Date(),
+                        status: 'failed',
+                        note: errorRemark,
+                        reminderType: 'whatsapp'
+                    }
+                },
+                $inc: { followUpCount: 1 }
+            }
+        );
 
         throw error;
     }
