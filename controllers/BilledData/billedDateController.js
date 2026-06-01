@@ -1067,7 +1067,7 @@ const sendWhatsAppReminder = async (bill, retryCount = 0) => {
                 templateName: "hair_cute",
                 variables: {
                     body: {
-                        "Customer Name": customer.name,
+                      "Customer Name": customer.name,
                     },
                 },
             },
@@ -1078,13 +1078,13 @@ const sendWhatsAppReminder = async (bill, retryCount = 0) => {
                 },
                 timeout: 10000, // 10 second timeout
             }
-        ); 
+        );
 
         // Create remark message for successful send
         const remark = `WhatsApp reminder sent successfully at ${new Date().toISOString()} - Template: hair_cute, Service: ${customer.serviceName}`;
 
         // Mark the reminder as sent in database
-        await bill.markReminderSent('sent', remark);
+        await Bill.markReminderSent('sent', remark);
 
         return {
             success: true,
@@ -1104,7 +1104,7 @@ const sendWhatsAppReminder = async (bill, retryCount = 0) => {
 
             // Add retry remark
             const retryRemark = `Rate limited. Retry attempt ${retryCount + 1}/${MAX_RETRIES} after ${retryAfter}s - ${errorRemark}`;
-            await bill.markReminderSent('failed', retryRemark);
+            await Bill.markReminderSent('failed', retryRemark);
 
             await delay(retryAfter * 1000);
             return sendWhatsAppReminder(bill, retryCount + 1);
@@ -1113,9 +1113,9 @@ const sendWhatsAppReminder = async (bill, retryCount = 0) => {
         // Mark as failed with error remark
         if (retryCount >= MAX_RETRIES) {
             const finalRemark = `Final failure after ${MAX_RETRIES} retries - ${errorRemark}`;
-            await bill.markReminderSent('failed', finalRemark);
+            await Bill.markReminderSent('failed', finalRemark);
         } else {
-            await bill.markReminderSent('failed', errorRemark);
+            await Bill.markReminderSent('failed', errorRemark);
         }
 
         throw error;
