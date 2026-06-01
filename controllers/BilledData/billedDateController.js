@@ -1000,7 +1000,6 @@ export const uploadCSVFile = async (req, res) => {
 
 // _____________NEW IMPLEMENTATION WITH RATE LIMITING AND RETRY LOGIC_____________
 
-
 const WHATSAPP_API_URL = "https://whatsapp.quickhub.ai/public/whatsapp/send-template";
 const RATE_LIMIT = 20; // messages per minute
 const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute in milliseconds
@@ -1043,9 +1042,7 @@ class RateLimiter {
 
 const rateLimiter = new RateLimiter(RATE_LIMIT, RATE_LIMIT_WINDOW_MS);
 
-const sendWhatsAppReminder = async (bill, retryCount = 0) => {
-    const MAX_RETRIES = 3;
-
+const sendWhatsAppReminder = async (bill) => {
     try {
         await rateLimiter.waitForToken();
 
@@ -1224,57 +1221,7 @@ export const sendBulkReminder = async (req, res) => {
 };
 
 
-// Function to send reminder for a single bill with custom remark
-export const sendSingleReminder = async (req, res) => {
-    const { billId, customRemark } = req.body;
 
-    try {
-        const bill = await Bill.findOne({
-            bill_id: billId,
-            reminderStatus: 'pending',
-            status: { $ne: 'cancelled' }
-        });
-
-        if (!bill) {
-            return res.status(404).json({
-                success: false,
-                message: "Bill not found or reminder not pending"
-            });
-        }
-
-        const result = await sendWhatsAppReminder(bill);
-
-        // Add custom remark if provided
-        if (customRemark) {
-            await Bill.findOneAndUpdate(
-                { bill_id: billId },
-                {
-                    $push: {
-                        followUps: {
-                            date: new Date(),
-                            status: 'sent',
-                            note: `Custom remark: ${customRemark} - ${result.remark}`,
-                            reminderType: 'whatsapp'
-                        }
-                    }
-                }
-            );
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: "Reminder sent successfully",
-            data: result
-        });
-
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: "Failed to send reminder",
-            error: error.message
-        });
-    }
-};
 
 // Function to get reminder history with remarks
 export const getReminderHistory = async (req, res) => {
