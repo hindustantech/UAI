@@ -63,16 +63,37 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
                 }
 
                 // ─── 2. Skip if today is a weekly off ───────────────────────
-                const weeklyOffs = emp.weeklyOff?.length
-                    ? emp.weeklyOff
-                    : shift.weeklyOff || [];
+                // ─── 2. Skip if today is a weekly off ───────────────────────
 
-                if (weeklyOffs.includes(dayName)) {
+                // Priority:
+                // 1. Employee weeklyOff
+                // 2. Shift weeklyOff
+                // 3. No weekly off
+
+                let weeklyOffs = [];
+
+                if (Array.isArray(emp.weeklyOff) && emp.weeklyOff.length > 0) {
+                    weeklyOffs = emp.weeklyOff;
+                } else if (
+                    shift &&
+                    Array.isArray(shift.weeklyOff) &&
+                    shift.weeklyOff.length > 0
+                ) {
+                    weeklyOffs = shift.weeklyOff;
+                }
+
+                if (
+                    weeklyOffs.length > 0 &&
+                    weeklyOffs.includes(dayName)
+                ) {
                     await Attendance.findOneAndUpdate(
                         {
                             companyId: emp.companyId,
                             employeeId: emp._id,
-                            date: { $gte: startOfDay, $lte: endOfDay }
+                            date: {
+                                $gte: startOfDay,
+                                $lte: endOfDay
+                            }
                         },
                         {
                             $setOnInsert: {
@@ -86,8 +107,16 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
                                 remarks: "Auto-marked weekly off"
                             }
                         },
-                        { upsert: true, new: true }
+                        {
+                            upsert: true,
+                            new: true
+                        }
                     );
+
+                    console.log(
+                        `📅 Weekly off marked for employee ${emp._id}`
+                    );
+
                     continue;
                 }
 
