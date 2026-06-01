@@ -881,7 +881,54 @@ export const updateEmployee = async (req, res) => {
         const updatePayload = {};
 
         /* ---------------------------------------------
-           4. Basic Fields
+           4. EMPLOYEE TYPE CHANGE VALIDATION
+        ---------------------------------------------- */
+        let oldEmployeeType = existingEmployee.employeeType;
+        let newEmployeeType = employeeType;
+
+        // If employee type is changing
+        if (newEmployeeType && newEmployeeType !== oldEmployeeType) {
+            // Validate new type
+            if (!["non_sales", "sales", "pro_sales"].includes(newEmployeeType)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid employeeType value",
+                });
+            }
+
+            // Get active subscription
+            const subscription = await Subscription.findOne({
+                company: companyId,
+                status: "ACTIVE",
+                isActive: true,
+                endDate: { $gte: new Date() }
+            }).session(session);
+
+            if (!subscription) {
+                return res.status(403).json({
+                    success: false,
+                    message: "No active subscription found. Cannot change employee type.",
+                });
+            }
+
+            // Check if there's capacity for the new type
+            const canCreateResult = canCreateEmployee(subscription, newEmployeeType);
+
+            if (!canCreateResult.canCreate) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Cannot change employee type to ${newEmployeeType}: ${canCreateResult.message}`,
+                });
+            }
+
+            // Store subscription for later update
+            updatePayload._subscription = subscription;
+            updatePayload._oldType = oldEmployeeType;
+            updatePayload._newType = newEmployeeType;
+        }
+
+        /* ---------------------------------------------
+           5. Basic Fields
         ---------------------------------------------- */
         if (user_name !== undefined) {
             updatePayload.user_name = user_name;
@@ -892,10 +939,9 @@ export const updateEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           5. REFERAL CODE (🔥 FIXED)
+           6. REFERAL CODE VALIDATION
         ---------------------------------------------- */
         if (referalCode !== undefined) {
-
             if (typeof referalCode !== "string" || !referalCode.trim()) {
                 return res.status(400).json({
                     success: false,
@@ -905,7 +951,6 @@ export const updateEmployee = async (req, res) => {
 
             const normalizedCode = referalCode.trim().toUpperCase();
 
-            // 🔥 duplicate check (company scoped)
             const duplicate = await Employee.findOne({
                 companyId,
                 referalCode: normalizedCode,
@@ -923,7 +968,7 @@ export const updateEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           6. SHIFT VALIDATION
+           7. SHIFT VALIDATION
         ---------------------------------------------- */
         if (shift !== undefined) {
             if (!mongoose.Types.ObjectId.isValid(shift)) {
@@ -949,7 +994,7 @@ export const updateEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           7. WEEKLY OFF VALIDATION
+           8. WEEKLY OFF VALIDATION
         ---------------------------------------------- */
         if (weeklyOff !== undefined) {
             if (!Array.isArray(weeklyOff)) {
@@ -978,7 +1023,7 @@ export const updateEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           8. Nested Objects Merge
+           9. Nested Objects Merge
         ---------------------------------------------- */
         if (jobInfo) {
             updatePayload.jobInfo = {
@@ -1002,7 +1047,7 @@ export const updateEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           9. GEO LOCATION
+           10. GEO LOCATION
         ---------------------------------------------- */
         if (officeLocation?.coordinates) {
             if (!Array.isArray(officeLocation.coordinates) || officeLocation.coordinates.length !== 2) {
@@ -1022,25 +1067,19 @@ export const updateEmployee = async (req, res) => {
         }
 
         /* ---------------------------------------------
-           10. Employment Status
+           11. Employment Status
         ---------------------------------------------- */
         if (employmentStatus) {
             updatePayload.employmentStatus = employmentStatus;
         }
 
-        if (employeeType) {
-            if (!["non_sales", "sales", 'pro_sales'].includes(employeeType)) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid employeeType value",
-                });
-            }
-            updatePayload.employeeType = employeeType;
+        // Set employee type in payload if provided
+        if (newEmployeeType) {
+            updatePayload.employeeType = newEmployeeType;
         }
 
-
         /* ---------------------------------------------
-           11. Atomic Update
+           12. Atomic Update Employee
         ---------------------------------------------- */
         const updatedEmployee = await Employee.findOneAndUpdate(
             { _id: employeeId, companyId },
@@ -1053,10 +1092,50 @@ export const updateEmployee = async (req, res) => {
         );
 
         /* ---------------------------------------------
-           12. Commit Transaction
+           13. UPDATE SUBSCRIPTION USAGE (if type changed)
+        ---------------------------------------------- */
+        if (updatePayload._subscription && updatePayload._oldType !== updatePayload._newType) {
+            const subscription = updatePayload._subscription;
+            const oldType = updatePayload._oldType;
+            const newType = updatePayload._newType;
+
+            let incQuery = {};
+
+            // Handle decrement for old type
+            if (oldType === "sales") {
+                incQuery["usage.no_of_sales_person_employeesUsed"] = -1;
+            } else if (oldType === "pro_sales") {
+                incQuery["usage.no_of_pro_sales_person_employeesUsed"] = -1;
+            }
+
+            // Handle increment for new type
+            if (newType === "sales") {
+                incQuery["usage.no_of_sales_person_employeesUsed"] = (incQuery["usage.no_of_sales_person_employeesUsed"] || 0) + 1;
+            } else if (newType === "pro_sales") {
+                incQuery["usage.no_of_pro_sales_person_employeesUsed"] = (incQuery["usage.no_of_pro_sales_person_employeesUsed"] || 0) + 1;
+            }
+
+            // Total employees count stays the same (just changing type)
+            // Only update if we have changes to apply
+            if (Object.keys(incQuery).length > 0) {
+                await Subscription.updateOne(
+                    { _id: subscription._id },
+                    { $inc: incQuery },
+                    { session }
+                );
+            }
+        }
+
+        /* ---------------------------------------------
+           14. Commit Transaction
         ---------------------------------------------- */
         await session.commitTransaction();
         session.endSession();
+
+        // Remove temporary fields before sending response
+        delete updatedEmployee._subscription;
+        delete updatedEmployee._oldType;
+        delete updatedEmployee._newType;
 
         return res.status(200).json({
             success: true,
@@ -1085,7 +1164,6 @@ export const updateEmployee = async (req, res) => {
         });
     }
 };
-
 
 
 export const findbyPhone = async (req, res) => {
