@@ -669,12 +669,12 @@ export const completeSalesForm = async (req, res) => {
       });
     }
 
-    if (!visitFiles.length) {
-      return res.status(400).json({
-        success: false,
-        error: "At least 1 visit image is required"
-      });
-    }
+    // if (!visitFiles.length) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     error: "At least 1 visit image is required"
+    //   });
+    // }
 
     if (shopFiles.length > 4 || visitFiles.length > 4) {
       return res.status(400).json({
