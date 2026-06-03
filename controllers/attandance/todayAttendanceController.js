@@ -275,8 +275,8 @@ class TodayAttendanceController {
 
             // Get attendance
             const attendance = await Attendance.findOne({
-                companyId: mongoose.Types.ObjectId(companyId),
-                employeeId: mongoose.Types.ObjectId(employeeId),
+                companyId: new mongoose.Types.ObjectId(companyId),
+                employeeId: new mongoose.Types.ObjectId(employeeId),
                 date: { $gte: targetDate, $lt: nextDate }
             });
 
@@ -370,7 +370,7 @@ class TodayAttendanceController {
 
             // Build employee filter
             const employeeFilter = {
-                companyId: mongoose.Types.ObjectId(companyId),
+                companyId: new mongoose.Types.ObjectId(companyId),
                 employmentStatus: "active"
             };
 
@@ -552,7 +552,7 @@ class TodayAttendanceController {
             const employeesByDepartment = await Employee.aggregate([
                 {
                     $match: {
-                        companyId: mongoose.Types.ObjectId(companyId),
+                        companyId: new mongoose.Types.ObjectId(companyId),
                         employmentStatus: "active"
                     }
                 },
@@ -571,7 +571,7 @@ class TodayAttendanceController {
             );
 
             const attendanceRecords = await Attendance.find({
-                companyId: mongoose.Types.ObjectId(companyId),
+                companyId: new mongoose.Types.ObjectId(companyId),
                 employeeId: { $in: allEmployeeIds },
                 date: { $gte: targetDate, $lt: nextDate }
             }).lean();

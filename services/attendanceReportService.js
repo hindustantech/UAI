@@ -247,9 +247,9 @@ class AttendanceReportService {
         const monthlyData = await Attendance.aggregate([
             {
                 $match: {
-                    companyId: mongoose.Types.ObjectId(companyId),
+                    companyId:new mongoose.Types.ObjectId(companyId),
                     date: { $gte: startDate, $lte: endDate },
-                    ...(employeeId && { employeeId: mongoose.Types.ObjectId(employeeId) })
+                    ...(employeeId && { employeeId: new mongoose.Types.ObjectId(employeeId) })
                 }
             },
             {
@@ -340,7 +340,7 @@ class AttendanceReportService {
         const attendanceStats = await Attendance.aggregate([
             {
                 $match: {
-                    companyId: mongoose.Types.ObjectId(companyId),
+                    companyId: new mongoose.Types.ObjectId(companyId),
                     date: { $gte: startDate, $lte: endDate },
                     ...(department && {
                         employeeId: { $in: employees.map(e => e._id) }
@@ -366,7 +366,7 @@ class AttendanceReportService {
         ]);
 
         const lateCount = await Attendance.countDocuments({
-            companyId: mongoose.Types.ObjectId(companyId),
+            companyId: new mongoose.Types.ObjectId(companyId),
             date: { $gte: startDate, $lte: endDate },
             lateByMinutes: { $gt: 0 },
             ...(department && {
@@ -580,7 +580,7 @@ class AttendanceReportService {
             const monthKey = `${year}-${String(month).padStart(2, '0')}`;
 
             const count = await Employee.countDocuments({
-                companyId: mongoose.Types.ObjectId(companyId),
+                companyId: new mongoose.Types.ObjectId(companyId),
                 createdAt: { $lte: new Date(year, month, 0) },
                 employmentStatus: 'active'
             });
