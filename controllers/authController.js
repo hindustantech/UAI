@@ -1946,12 +1946,11 @@ export const startAdminAuth = async (
 
     const {
       phone,
-      type,
     } = req.body;
 
     /* ---------------- VALIDATION ---------------- */
 
-    if (!phone || !type) {
+    if (!phone) {
       return res.status(400).json({
         success: false,
         message:
@@ -1959,14 +1958,7 @@ export const startAdminAuth = async (
       });
     }
 
-    /* ONLY SUPER ADMIN */
 
-    if (type !== "super_admin" && type !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Only admin and super admin access allowed",
-      });
-    }
 
     const cleanPhone = phone.trim();
 
@@ -1991,7 +1983,6 @@ export const startAdminAuth = async (
 
     const user = await User.findOne({
       phone: cleanPhone,
-      type: type,
     });
 
     /* USER MUST EXIST */
@@ -2001,6 +1992,13 @@ export const startAdminAuth = async (
         success: false,
         message:
           "Super admin account not found",
+      });
+    }
+
+    if (user.type !== "super_admin" && user.type !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
       });
     }
 
