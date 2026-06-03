@@ -30,6 +30,8 @@ import lunchRoute from './routes/Attandance/BreakRoute.js';
 import comapnayAdmin from './routes/Admin/compay.admin.js';
 import Bulkcreation from './routes/Admin/bulkCreation.js';
 import billedDateRoutes from './routes/BilledDate/billedDate.js';
+import attendanceReportRoute from './routes/Attandance/attendanceReportRoutes.js';
+import TodayAttendanceRoute from './routes/Attandance/todayAttendanceRoutes.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
@@ -85,9 +87,9 @@ app.use('/api/subscriptionsdata', subscriptionsdata);
 app.use('/api/billedDate', billedDateRoutes);
 app.use('/api/admin/company', comapnayAdmin); 
 app.use('/api/admin/bulk', Bulkcreation);
+app.use('/api/attendance/report', attendanceReportRoute);
 
-
-
+app.use('/api/today/pi',TodayAttendanceRoute)
 
 // Add this after your existing middleware setup
 app.use('/uploads', express.static('uploads'));
