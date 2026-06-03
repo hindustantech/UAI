@@ -2,6 +2,7 @@
 import express from 'express';
 import { getAllBillsWithReminderStatus, uploadCSVFile, sendBulkReminder } from '../../controllers/BilledData/billedDateController.js';
 import multer from 'multer';
+import { generateBill, downloadBill } from '../../controllers/BilledData/bill_generate.js';
 import authMiddleware from '../../middlewares/authMiddleware.js';
 const router = express.Router();
 const upload = multer({
@@ -42,5 +43,8 @@ router.get('/bills', getAllBillsWithReminderStatus);
 router.post('/upload', upload.single('file'), uploadCSVFile);
 
 router.post('/reminders', sendBulkReminder);
+
+router.post('/generate-bill', generateBill);
+router.get('/download/:billId', downloadBill);
 
 export default router;

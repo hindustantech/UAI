@@ -30,6 +30,16 @@ const subscriptionSchema = new mongoose.Schema({
         default: Date.now,
         index: true,
     },
+    bill_id: {
+
+        type: String,
+        default: null
+    },
+    bill_generation_date: {
+        type: Date,
+        default: null
+    },
+    
     endDate: {
         type: Date,
         required: true,
