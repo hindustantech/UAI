@@ -2,7 +2,7 @@
 import express from "express";
 import multer from "multer";
 import { createEmployeesFromCSV } from "../../controllers/Admin/BulkCreationEmp.js";
-
+import { checkPermission } from "../../middlewares/checkPermission.js";
 const router = express.Router();
 
 // Configure multer for memory storage (better for CSV processing)
@@ -41,6 +41,7 @@ const upload = multer({
  */
 router.post(
     "/bulk-create",
+    checkPermission('employees.bulk_create'), // Ensure user has permission to create employees
     upload.single("csv"), // Expecting field name 'csv'
     createEmployeesFromCSV
 );
