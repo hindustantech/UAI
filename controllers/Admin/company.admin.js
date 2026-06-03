@@ -1015,17 +1015,17 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
         ========================================================= */
 
         const pipeline = [
-            
+
             /* =====================================================
                STEP 1: FILTER COMPANIES
             ===================================================== */
-            
+
             { $match: companyMatch },
 
             /* =====================================================
                STEP 2: COUNT ACTIVE EMPLOYEES
             ===================================================== */
-            
+
             {
                 $lookup: {
                     from: "employees",
@@ -1048,7 +1048,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
             /* =====================================================
                STEP 3: GET ATTENDANCE STATISTICS
             ===================================================== */
-            
+
             {
                 $lookup: {
                     from: "attendances",
@@ -1066,79 +1066,79 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                         {
                             $group: {
                                 _id: null,
-                                
+
                                 // Total attendance records
                                 totalAttendanceMarked: { $sum: 1 },
-                                
+
                                 // Status wise counts
                                 presentCount: {
                                     $sum: {
                                         $cond: [{ $eq: ["$status", "present"] }, 1, 0]
                                     }
                                 },
-                                
+
                                 absentCount: {
                                     $sum: {
                                         $cond: [{ $eq: ["$status", "absent"] }, 1, 0]
                                     }
                                 },
-                                
+
                                 leaveCount: {
                                     $sum: {
                                         $cond: [{ $eq: ["$status", "leave"] }, 1, 0]
                                     }
                                 },
-                                
+
                                 holidayCount: {
                                     $sum: {
                                         $cond: [{ $eq: ["$status", "holiday"] }, 1, 0]
                                     }
                                 },
-                                
+
                                 halfDayCount: {
                                     $sum: {
                                         $cond: [{ $eq: ["$status", "half_day"] }, 1, 0]
                                     }
                                 },
-                                
+
                                 weekOffCount: {
                                     $sum: {
                                         $cond: [{ $eq: ["$status", "week_off"] }, 1, 0]
                                     }
                                 },
-                                
+
                                 pendingApprovalCount: {
                                     $sum: {
                                         $cond: [{ $eq: ["$status", "pending_approval"] }, 1, 0]
                                     }
                                 },
-                                
+
                                 rejectedCount: {
                                     $sum: {
                                         $cond: [{ $eq: ["$status", "rejected"] }, 1, 0]
                                     }
                                 },
-                                
+
                                 // Punch in count (employees who actually punched in)
                                 punchInCount: {
                                     $sum: {
                                         $cond: [{ $ne: ["$punchIn", null] }, 1, 0]
                                     }
                                 },
-                                
+
                                 // Late arrivals
                                 lateCount: {
                                     $sum: {
                                         $cond: [{ $gt: ["$lateByMinutes", 0] }, 1, 0]
                                     }
                                 },
-                                
+
                                 // Overtime
                                 overtimeCount: {
                                     $sum: {
                                         $cond: [
-                                            { $gt: ["$workSummary.overtimeMinutes", 0] }, 
-                                            1, 
+                                            { $gt: ["$workSummary.overtimeMinutes", 0] },
+                                            1,
                                             0
                                         ]
                                     }
@@ -1153,7 +1153,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
             /* =====================================================
                STEP 4: SET DEFAULT VALUES
             ===================================================== */
-            
+
             {
                 $addFields: {
                     // Employee count
@@ -1163,7 +1163,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                             0
                         ]
                     },
-                    
+
                     // Attendance data with defaults
                     attendanceData: {
                         $ifNull: [
@@ -1190,57 +1190,57 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
             /* =====================================================
                STEP 5: EXTRACT ALL COUNTS
             ===================================================== */
-            
+
             {
                 $addFields: {
-                    attendanceMarked: { 
-                        $ifNull: ["$attendanceData.totalAttendanceMarked", 0] 
+                    attendanceMarked: {
+                        $ifNull: ["$attendanceData.totalAttendanceMarked", 0]
                     },
-                    
-                    presentCount: { 
-                        $ifNull: ["$attendanceData.presentCount", 0] 
+
+                    presentCount: {
+                        $ifNull: ["$attendanceData.presentCount", 0]
                     },
-                    
-                    absentCount: { 
-                        $ifNull: ["$attendanceData.absentCount", 0] 
+
+                    absentCount: {
+                        $ifNull: ["$attendanceData.absentCount", 0]
                     },
-                    
-                    leaveCount: { 
-                        $ifNull: ["$attendanceData.leaveCount", 0] 
+
+                    leaveCount: {
+                        $ifNull: ["$attendanceData.leaveCount", 0]
                     },
-                    
-                    holidayCount: { 
-                        $ifNull: ["$attendanceData.holidayCount", 0] 
+
+                    holidayCount: {
+                        $ifNull: ["$attendanceData.holidayCount", 0]
                     },
-                    
-                    halfDayCount: { 
-                        $ifNull: ["$attendanceData.halfDayCount", 0] 
+
+                    halfDayCount: {
+                        $ifNull: ["$attendanceData.halfDayCount", 0]
                     },
-                    
-                    weekOffCount: { 
-                        $ifNull: ["$attendanceData.weekOffCount", 0] 
+
+                    weekOffCount: {
+                        $ifNull: ["$attendanceData.weekOffCount", 0]
                     },
-                    
-                    pendingApprovalCount: { 
-                        $ifNull: ["$attendanceData.pendingApprovalCount", 0] 
+
+                    pendingApprovalCount: {
+                        $ifNull: ["$attendanceData.pendingApprovalCount", 0]
                     },
-                    
-                    rejectedCount: { 
-                        $ifNull: ["$attendanceData.rejectedCount", 0] 
+
+                    rejectedCount: {
+                        $ifNull: ["$attendanceData.rejectedCount", 0]
                     },
-                    
-                    punchInCount: { 
-                        $ifNull: ["$attendanceData.punchInCount", 0] 
+
+                    punchInCount: {
+                        $ifNull: ["$attendanceData.punchInCount", 0]
                     },
-                    
-                    lateCount: { 
-                        $ifNull: ["$attendanceData.lateCount", 0] 
+
+                    lateCount: {
+                        $ifNull: ["$attendanceData.lateCount", 0]
                     },
-                    
-                    overtimeCount: { 
-                        $ifNull: ["$attendanceData.overtimeCount", 0] 
+
+                    overtimeCount: {
+                        $ifNull: ["$attendanceData.overtimeCount", 0]
                     },
-                    
+
                     // Calculate NOT MARKED = Total Employees - Total Attendance Records
                     notMarkedAttendance: {
                         $subtract: [
@@ -1254,7 +1254,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
             /* =====================================================
                STEP 6: CALCULATE PERCENTAGES
             ===================================================== */
-            
+
             {
                 $addFields: {
                     // Attendance marked percentage
@@ -1275,7 +1275,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                             0
                         ]
                     },
-                    
+
                     // Present percentage
                     presentPercentage: {
                         $cond: [
@@ -1294,7 +1294,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                             0
                         ]
                     },
-                    
+
                     // Absent percentage
                     absentPercentage: {
                         $cond: [
@@ -1313,7 +1313,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                             0
                         ]
                     },
-                    
+
                     // Not marked percentage
                     notMarkedPercentage: {
                         $cond: [
@@ -1338,25 +1338,25 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
             /* =====================================================
                STEP 7: PROJECT FINAL RESPONSE FIELDS
             ===================================================== */
-            
+
             {
                 $project: {
                     _id: 1,
-                    
+
                     // Company Info
                     companyName: "$name",
                     companyEmail: "$email",
                     companyPhone: "$phone",
                     profileImage: 1,
                     companyType: "$type",
-                    
+
                     // Employee Stats
                     totalEmployees: 1,
-                    
+
                     // Attendance Summary
                     attendanceMarked: 1,
                     notMarkedAttendance: 1,
-                    
+
                     // Status Wise Breakdown
                     presentCount: 1,
                     absentCount: 1,
@@ -1366,18 +1366,18 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                     weekOffCount: 1,
                     pendingApprovalCount: 1,
                     rejectedCount: 1,
-                    
+
                     // Other Counts
                     punchInCount: 1,
                     lateCount: 1,
                     overtimeCount: 1,
-                    
+
                     // Percentages
                     attendancePercentage: 1,
                     presentPercentage: 1,
                     absentPercentage: 1,
                     notMarkedPercentage: 1,
-                    
+
                     // Verification
                     statusBreakdownTotal: {
                         $add: [
@@ -1391,7 +1391,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                             "$rejectedCount"
                         ]
                     },
-                    
+
                     // Timestamp
                     createdAt: 1,
                     updatedAt: 1
@@ -1401,21 +1401,21 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
             /* =====================================================
                STEP 8: FACET FOR PAGINATION
             ===================================================== */
-            
+
             {
                 $facet: {
                     // Get total count
                     metadata: [
                         { $count: "totalDocuments" }
                     ],
-                    
+
                     // Get paginated data
                     data: [
                         { $sort: { [finalSortField]: finalSortOrder } },
                         { $skip: skip },
                         { $limit: limit }
                     ],
-                    
+
                     // Get summary statistics (optional)
                     summary: [
                         {
@@ -1436,7 +1436,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
             /* =====================================================
                STEP 9: FORMAT FINAL OUTPUT
             ===================================================== */
-            
+
             {
                 $project: {
                     data: 1,
@@ -1472,13 +1472,13 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "All companies attendance fetched successfully",
-            
+
             dateFilter: {
                 startDate,
                 endDate,
                 dateRange: `${startDate.toISOString()} to ${endDate.toISOString()}`
             },
-            
+
             // Overall summary across all companies
             overallSummary: {
                 totalCompanies: summary?.totalCompanies || 0,
@@ -1488,7 +1488,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                 totalPresent: summary?.totalPresentAcrossAll || 0,
                 totalAbsent: summary?.totalAbsentAcrossAll || 0
             },
-            
+
             pagination: {
                 currentPage: page,
                 limit,
@@ -1497,7 +1497,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
                 hasNextPage: page < totalPages,
                 hasPrevPage: page > 1
             },
-            
+
             data: companies
         });
 
@@ -1516,122 +1516,58 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
 
 export const getCompanyAttendanceDashboard = async (req, res) => {
     try {
+        const companyId = req.query.companyId || req.user?._id;
 
-        /* =========================================================
-           COMPANY ID
-        ========================================================= */
-
-        const companyId =
-            req.query.companyId || req.user?._id;
-
-        if (
-            !companyId ||
-            !mongoose.Types.ObjectId.isValid(companyId)
-        ) {
+        if (!companyId || !mongoose.Types.ObjectId.isValid(companyId)) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid company id"
             });
         }
 
-        /* =========================================================
-           QUERY PARAMS
-        ========================================================= */
-
         let {
             date,
             fromDate,
             toDate,
-
             page = 1,
             limit = 10,
-
             status, // present | absent
-
             search = ""
         } = req.query;
 
-        /* =========================================================
-           PAGINATION
-        ========================================================= */
-
+        // Pagination
         page = Math.max(parseInt(page) || 1, 1);
-
-        limit = Math.min(
-            Math.max(parseInt(limit) || 10, 1),
-            100
-        );
-
+        limit = Math.min(Math.max(parseInt(limit) || 10, 1), 100);
         const skip = (page - 1) * limit;
 
-        /* =========================================================
-           DATE RANGE
-        ========================================================= */
+        // Date Range
+        let startDate, endDate;
 
-        let startDate;
-        let endDate;
-
-        // Single Date
         if (date) {
-
             startDate = new Date(date);
             endDate = new Date(date);
-
-            startDate.setHours(0, 0, 0, 0);
-            endDate.setHours(23, 59, 59, 999);
-
-        }
-
-        // Date Range
-        else if (fromDate || toDate) {
-
-            startDate = fromDate
-                ? new Date(fromDate)
-                : new Date();
-
-            endDate = toDate
-                ? new Date(toDate)
-                : new Date();
-
-            startDate.setHours(0, 0, 0, 0);
-            endDate.setHours(23, 59, 59, 999);
-        }
-
-        // Default Today
-        else {
-
+        } else if (fromDate || toDate) {
+            startDate = fromDate ? new Date(fromDate) : new Date();
+            endDate = toDate ? new Date(toDate) : new Date();
+        } else {
             startDate = new Date();
             endDate = new Date();
-
-            startDate.setHours(0, 0, 0, 0);
-            endDate.setHours(23, 59, 59, 999);
         }
 
-        /* =========================================================
-           VALIDATE DATES
-        ========================================================= */
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
 
-        if (
-            isNaN(startDate.getTime()) ||
-            isNaN(endDate.getTime())
-        ) {
+        // Validate dates
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid date format"
             });
         }
 
-        /* =========================================================
-           COMPANY OBJECT ID
-        ========================================================= */
+        const companyObjectId = new mongoose.Types.ObjectId(companyId);
 
-        const companyObjectId =
-            new mongoose.Types.ObjectId(companyId);
-
-        /* =========================================================
-           COMPANY DETAILS
-        ========================================================= */
-
+        // Get Company Details
         const company = await User.findById(companyId)
             .select("name email")
             .lean();
@@ -1643,141 +1579,34 @@ export const getCompanyAttendanceDashboard = async (req, res) => {
             });
         }
 
-        /* =========================================================
-           EMPLOYEE FILTER
-        ========================================================= */
-
+        // Employee Filter
         const employeeMatch = {
             companyId: companyObjectId,
             employmentStatus: "active"
         };
 
         if (search) {
-
             employeeMatch.$or = [
-
-                {
-                    user_name: {
-                        $regex: search,
-                        $options: "i"
-                    }
-                },
-
-                {
-                    empCode: {
-                        $regex: search,
-                        $options: "i"
-                    }
-                },
-
-                {
-                    referalCode: {
-                        $regex: search,
-                        $options: "i"
-                    }
-                }
+                { user_name: { $regex: search, $options: "i" } },
+                { empCode: { $regex: search, $options: "i" } },
+                { referalCode: { $regex: search, $options: "i" } }
             ];
         }
 
-        /* =========================================================
-           GET TOTAL EMPLOYEE COUNT
-        ========================================================= */
+        // Get total count first (for pagination metadata)
+        const totalEmployees = await Employee.countDocuments(employeeMatch);
 
-        const totalEmployees =
-            await Employee.countDocuments(
-                employeeMatch
-            );
+        // Get filtered count if status filter is applied
+        let filteredCount = totalEmployees;
+        if (status) {
+            // This is complex to calculate upfront, we'll do it after
+        }
 
-        /* =========================================================
-           ATTENDANCE SUMMARY
-        ========================================================= */
-
-        const attendanceSummary =
-            await Attendance.aggregate([
-
-                {
-                    $match: {
-                        companyId: companyObjectId,
-
-                        date: {
-                            $gte: startDate,
-                            $lte: endDate
-                        }
-                    }
-                },
-
-                {
-                    $group: {
-
-                        _id: null,
-
-                        totalAttendanceMarked: {
-                            $sum: 1
-                        },
-
-                        presentCount: {
-                            $sum: {
-                                $cond: [
-                                    {
-                                        $eq: [
-                                            "$status",
-                                            "present"
-                                        ]
-                                    },
-                                    1,
-                                    0
-                                ]
-                            }
-                        },
-
-                        absentCount: {
-                            $sum: {
-                                $cond: [
-                                    {
-                                        $eq: [
-                                            "$status",
-                                            "absent"
-                                        ]
-                                    },
-                                    1,
-                                    0
-                                ]
-                            }
-                        }
-                    }
-                }
-            ]);
-
-        const summary =
-            attendanceSummary[0] || {};
-
-        const presentCount =
-            summary.presentCount || 0;
-
-        const absentCount =
-            summary.absentCount || 0;
-
-        const attendanceMarked =
-            summary.totalAttendanceMarked || 0;
-
-        const notMarkedAttendance =
-            totalEmployees -
-            attendanceMarked;
-
-        /* =========================================================
-           EMPLOYEE ATTENDANCE LIST
-        ========================================================= */
-
+        // Enhanced Employee Attendance Pipeline
         const attendancePipeline = [
+            { $match: employeeMatch },
 
-            {
-                $match: employeeMatch
-            },
-
-            /* =====================================================
-               USER DETAILS
-            ===================================================== */
-
+            // Lookup user details
             {
                 $lookup: {
                     from: "users",
@@ -1796,7 +1625,6 @@ export const getCompanyAttendanceDashboard = async (req, res) => {
                     ]
                 }
             },
-
             {
                 $unwind: {
                     path: "$user",
@@ -1804,215 +1632,222 @@ export const getCompanyAttendanceDashboard = async (req, res) => {
                 }
             },
 
-            /* =====================================================
-               TODAY ATTENDANCE
-            ===================================================== */
-
+            // Lookup attendance for date range
             {
                 $lookup: {
                     from: "attendances",
-
-                    let: {
-                        employeeId: "$_id"
-                    },
-
+                    let: { employeeId: "$_id" },
                     pipeline: [
-
                         {
                             $match: {
-
                                 $expr: {
-                                    $eq: [
-                                        "$employeeId",
-                                        "$$employeeId"
+                                    $and: [
+                                        { $eq: ["$employeeId", "$$employeeId"] },
+                                        { $gte: ["$date", startDate] },
+                                        { $lte: ["$date", endDate] }
                                     ]
-                                },
-
-                                date: {
-                                    $gte: startDate,
-                                    $lte: endDate
                                 }
                             }
                         },
-
                         {
                             $project: {
-
+                                _id: 1,
                                 status: 1,
-
                                 punchIn: 1,
-
                                 punchOut: 1,
-
                                 totalWorkingHours: 1,
-
-                                createdAt: 1
+                                lateByMinutes: 1,
+                                workSummary: 1,
+                                shift: 1,
+                                createdAt: 1,
+                                breaks: 1
                             }
                         }
                     ],
-
-                    as: "attendance"
+                    as: "attendanceRecords"
                 }
             },
 
-            {
-                $unwind: {
-                    path: "$attendance",
-                    preserveNullAndEmptyArrays: true
-                }
-            },
-
-            /* =====================================================
-               ATTENDANCE STATUS
-            ===================================================== */
-
+            // Add attendance fields
             {
                 $addFields: {
-
-                    attendanceStatus: {
-                        $ifNull: [
-                            "$attendance.status",
-                            "not_marked"
-                        ]
-                    }
-                }
-            },
-
-            /* =====================================================
-               STATUS FILTER
-            ===================================================== */
-
-            ...(status
-                ? [
-                    {
-                        $match: {
-                            attendanceStatus: status
+                    // Get first attendance record if multiple exist (shouldn't but just in case)
+                    attendance: {
+                        $cond: {
+                            if: { $gt: [{ $size: "$attendanceRecords" }, 0] },
+                            then: { $arrayElemAt: ["$attendanceRecords", 0] },
+                            else: null
                         }
                     }
-                ]
-                : []),
+                }
+            },
 
-            /* =====================================================
-               RESPONSE
-            ===================================================== */
-
+            // Set attendance status
             {
-                $project: {
-
-                    _id: 1,
-
-                    user_name: 1,
-
-                    empCode: 1,
-
-                    referalCode: 1,
-
-                    employeeType: 1,
-
-                    role: 1,
-
-                    employmentStatus: 1,
-
-                    department:
-                        "$jobInfo.department",
-
-                    designation:
-                        "$jobInfo.designation",
-
-                    user: 1,
-
-                    attendance: {
-
-                        status:
-                            "$attendanceStatus",
-
-                        punchIn:
-                            "$attendance.punchIn",
-
-                        punchOut:
-                            "$attendance.punchOut",
-
-                        totalWorkingHours:
-                            "$attendance.totalWorkingHours"
+                $addFields: {
+                    attendanceStatus: {
+                        $cond: {
+                            if: { $eq: ["$attendance", null] },
+                            then: "not_marked",
+                            else: "$attendance.status"
+                        }
                     }
                 }
             },
 
-            {
-                $sort: {
-                    user_name: 1
+            // Apply status filter if provided
+            ...(status ? [
+                {
+                    $match: {
+                        attendanceStatus: status
+                    }
                 }
-            },
+            ] : []),
 
+            // Get filtered count for pagination
             {
-                $skip: skip
-            },
-
-            {
-                $limit: limit
+                $facet: {
+                    metadata: [
+                        { $count: "totalFiltered" }
+                    ],
+                    data: [
+                        { $sort: { user_name: 1 } },
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 1,
+                                user_name: 1,
+                                empCode: 1,
+                                referalCode: 1,
+                                employeeType: 1,
+                                role: 1,
+                                employmentStatus: 1,
+                                department: "$jobInfo.department",
+                                designation: "$jobInfo.designation",
+                                user: 1,
+                                attendance: {
+                                    attendanceId: "$attendance._id",
+                                    status: "$attendanceStatus",
+                                    punchIn: "$attendance.punchIn",
+                                    punchOut: "$attendance.punchOut",
+                                    totalWorkingHours: "$attendance.totalWorkingHours",
+                                    lateByMinutes: "$attendance.lateByMinutes",
+                                    workSummary: "$attendance.workSummary",
+                                    shift: "$attendance.shift",
+                                    breaks: "$attendance.breaks",
+                                    createdAt: "$attendance.createdAt"
+                                }
+                            }
+                        }
+                    ]
+                }
             }
         ];
 
-        const employeeAttendance =
-            await Employee.aggregate(
-                attendancePipeline
-            );
+        const [aggregateResult] = await Employee.aggregate(attendancePipeline);
 
-        /* =========================================================
-           RESPONSE
-        ========================================================= */
+        const employeeAttendance = aggregateResult.data;
+        const totalFilteredCount = aggregateResult.metadata[0]?.totalFiltered || 0;
+
+        // Attendance Summary
+        const attendanceSummary = await Attendance.aggregate([
+            {
+                $match: {
+                    companyId: companyObjectId,
+                    date: {
+                        $gte: startDate,
+                        $lte: endDate
+                    }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalAttendanceMarked: { $sum: 1 },
+                    presentCount: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "present"] }, 1, 0]
+                        }
+                    },
+                    absentCount: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "absent"] }, 1, 0]
+                        }
+                    },
+                    leaveCount: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "leave"] }, 1, 0]
+                        }
+                    },
+                    halfDayCount: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "half_day"] }, 1, 0]
+                        }
+                    },
+                    weekOffCount: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "week_off"] }, 1, 0]
+                        }
+                    }
+                }
+            }
+        ]);
+
+        const summary = attendanceSummary[0] || {};
+        const presentCount = summary.presentCount || 0;
+        const absentCount = summary.absentCount || 0;
+        const attendanceMarked = summary.totalAttendanceMarked || 0;
+        const notMarkedAttendance = totalEmployees - attendanceMarked;
+        const leaveCount = summary.leaveCount || 0;
+        const halfDayCount = summary.halfDayCount || 0;
+        const weekOffCount = summary.weekOffCount || 0;
 
         return res.status(200).json({
-
             success: true,
-
-            message:
-                "Company attendance dashboard fetched successfully",
+            message: "Company attendance dashboard fetched successfully",
 
             company: {
-
                 companyId: company._id,
-
                 companyName: company.name
             },
 
             dateFilter: {
-
                 startDate,
-
                 endDate
             },
 
             summary: {
-
                 totalEmployees,
-
                 attendanceMarked,
-
                 notMarkedAttendance,
-
                 presentCount,
+                absentCount,
+                leaveCount,
+                halfDayCount,
+                weekOffCount,
+                attendancePercentage: totalEmployees ?
+                    ((presentCount / totalEmployees) * 100).toFixed(2) : 0
+            },
 
-                absentCount
+            pagination: {
+                currentPage: page,
+                pageSize: limit,
+                totalRecords: status ? totalFilteredCount : totalEmployees,
+                totalPages: Math.ceil((status ? totalFilteredCount : totalEmployees) / limit),
+                hasNextPage: skip + limit < (status ? totalFilteredCount : totalEmployees),
+                hasPrevPage: page > 1
             },
 
             employees: employeeAttendance
         });
 
     } catch (error) {
-
-        console.error(
-            "GET COMPANY ATTENDANCE DASHBOARD ERROR:",
-            error
-        );
-
+        console.error("GET COMPANY ATTENDANCE DASHBOARD ERROR:", error);
         return res.status(500).json({
             success: false,
             message: "Internal server error",
-            error:
-                process.env.NODE_ENV === "development"
-                    ? error.message
-                    : undefined
+            error: process.env.NODE_ENV === "development" ? error.message : undefined
         });
     }
 };
