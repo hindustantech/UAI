@@ -32,6 +32,7 @@ import Bulkcreation from './routes/Admin/bulkCreation.js';
 import billedDateRoutes from './routes/BilledDate/billedDate.js';
 import attendanceReportRoute from './routes/Attandance/attendanceReportRoutes.js';
 import TodayAttendanceRoute from './routes/Attandance/todayAttendanceRoutes.js';
+import salesR from './routes/Attandance/Sales/salses.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
@@ -85,11 +86,12 @@ app.use("/api/attendance/requests", attendanceRequestRoutes);
 app.use('/api/patnerProfile', patnerProfile);
 app.use('/api/subscriptionsdata', subscriptionsdata);
 app.use('/api/billedDate', billedDateRoutes);
-app.use('/api/admin/company', comapnayAdmin); 
+app.use('/api/admin/company', comapnayAdmin);
 app.use('/api/admin/bulk', Bulkcreation);
 app.use('/api/attendance/report', attendanceReportRoute);
+app.use('/api/salesR', salesR);
 
-app.use('/api/today/pi',TodayAttendanceRoute)
+app.use('/api/today/pi', TodayAttendanceRoute);
 
 // Add this after your existing middleware setup
 app.use('/uploads', express.static('uploads'));

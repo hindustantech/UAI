@@ -1,0 +1,508 @@
+// controllers/salesController.js
+
+import mongoose from "mongoose";
+import { SalesSession } from '../../../models/Attandance/Salses/Salses.js';
+
+/**
+ * Get all sales records for a particular company with advanced filtering
+ * @route GET /api/sales/company/:companyId
+ * Query params:
+ * - startDate: ISO date string (from date)
+ * - endDate: ISO date string (to date)
+ * - customerId: filter by specific customer
+ * - salesPersonId: filter by assigned sales person
+ * - assignedToMe: boolean - filter sessions assigned to specific person
+ * - status: filter by session status (in_progress/completed)
+ * - salesStatus: filter by sales status (open/closed/follow_up)
+ * - dealStatus: filter by deal status (Negotiation/Closed Won/Closed Lost/Follow Up)
+ * - minAmount: minimum deal amount
+ * - maxAmount: maximum deal amount
+ * - paymentCollected: boolean
+ * - search: search in customer name, phone, company name
+ */
+export const getCompanySalesRecords = async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const {
+            startDate,
+            endDate,
+            customerId,
+            salesPersonId,
+            assignedToMe,
+            status,
+            salesStatus,
+            dealStatus,
+            minAmount,
+            maxAmount,
+            paymentCollected,
+            search,
+            page = 1,
+            limit = 50
+        } = req.query;
+
+        // Validate companyId
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid company ID"
+            });
+        }
+
+        // Build match conditions
+        const matchConditions = {
+            companyId: new mongoose.Types.ObjectId(companyId)
+        };
+
+        // Date range filter (using createdAt or punchInTime)
+        if (startDate || endDate) {
+            matchConditions.$or = [
+                { createdAt: {} },
+                { punchInTime: {} }
+            ];
+
+            if (startDate && endDate) {
+                matchConditions.$or[0].createdAt = {
+                    $gte: new Date(startDate),
+                    $lte: new Date(endDate)
+                };
+                matchConditions.$or[1].punchInTime = {
+                    $gte: new Date(startDate),
+                    $lte: new Date(endDate)
+                };
+            } else if (startDate) {
+                matchConditions.$or[0].createdAt = { $gte: new Date(startDate) };
+                matchConditions.$or[1].punchInTime = { $gte: new Date(startDate) };
+            } else if (endDate) {
+                matchConditions.$or[0].createdAt = { $lte: new Date(endDate) };
+                matchConditions.$or[1].punchInTime = { $lte: new Date(endDate) };
+            }
+        }
+
+        // Filter by specific customer
+        if (customerId) {
+            matchConditions['customer.customerId'] = customerId;
+        }
+
+        // Filter by sales person (assignedTo)
+        if (assignedToMe === 'true' && req.user?._id) {
+            matchConditions.assignedTo = new mongoose.Types.ObjectId(req.user._id);
+        } else if (salesPersonId && mongoose.Types.ObjectId.isValid(salesPersonId)) {
+            matchConditions.assignedTo = new mongoose.Types.ObjectId(salesPersonId);
+        }
+
+        // Filter by status
+        if (status) {
+            matchConditions.status = status;
+        }
+
+        // Filter by sales status
+        if (salesStatus) {
+            matchConditions.SalesStatus = salesStatus;
+        }
+
+        // Filter by deal status (looking into salesLogs)
+        if (dealStatus) {
+            matchConditions['salesLogs.dealStatus'] = dealStatus;
+        }
+
+        // Filter by amount range
+        if (minAmount || maxAmount) {
+            matchConditions['salesLogs.amount'] = {};
+            if (minAmount) matchConditions['salesLogs.amount'].$gte = parseFloat(minAmount);
+            if (maxAmount) matchConditions['salesLogs.amount'].$lte = parseFloat(maxAmount);
+        }
+
+        // Filter by payment collected
+        if (paymentCollected !== undefined) {
+            matchConditions['salesLogs.paymentCollected'] = paymentCollected === 'true';
+        }
+
+        // Search in customer fields
+        if (search) {
+            matchConditions.$or = [
+                { 'customer.companyName': { $regex: search, $options: 'i' } },
+                { 'customer.contactName': { $regex: search, $options: 'i' } },
+                { 'customer.phoneNumber': { $regex: search, $options: 'i' } },
+                { 'customer.address': { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        // Pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const limitNum = parseInt(limit);
+
+        // Aggregation pipeline
+        const aggregationPipeline = [
+            { $match: matchConditions },
+
+            // Lookup assigned users (sales persons)
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "assignedTo",
+                    foreignField: "_id",
+                    as: "assignedUsers"
+                }
+            },
+
+            // Lookup created by user
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "createdBy",
+                    foreignField: "_id",
+                    as: "createdByUser"
+                }
+            },
+
+            // Lookup employee
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "employeeId",
+                    foreignField: "_id",
+                    as: "employeeUser"
+                }
+            },
+
+            // Unwind salesLogs to filter them individually
+            { $unwind: { path: "$salesLogs", preserveNullAndEmptyArrays: true } },
+
+            // Apply filters on salesLogs
+            {
+                $match: {
+                    $or: [
+                        { salesLogs: { $exists: false } },
+                        {
+                            $and: [
+                                dealStatus ? { "salesLogs.dealStatus": dealStatus } : {},
+                                minAmount || maxAmount ? {
+                                    "salesLogs.amount": {
+                                        ...(minAmount && { $gte: parseFloat(minAmount) }),
+                                        ...(maxAmount && { $lte: parseFloat(maxAmount) })
+                                    }
+                                } : {},
+                                paymentCollected !== undefined ? { "salesLogs.paymentCollected": paymentCollected === 'true' } : {}
+                            ]
+                        }
+                    ]
+                }
+            },
+
+            // Group back the salesLogs
+            {
+                $group: {
+                    _id: "$_id",
+                    sessionId: { $first: "$sessionId" },
+                    customer: { $first: "$customer" },
+                    companyId: { $first: "$companyId" },
+                    createdBy: { $first: "$createdBy" },
+                    createdByUser: { $first: "$createdByUser" },
+                    assignedTo: { $first: "$assignedTo" },
+                    assignedUsers: { $first: "$assignedUsers" },
+                    employeeUser: { $first: "$employeeUser" },
+                    visitLogs: { $first: "$visitLogs" },
+                    salesLogs: { $push: "$salesLogs" },
+                    meetingLogs: { $first: "$meetingLogs" },
+                    visitNotes: { $first: "$visitNotes" },
+                    routePath: { $first: "$routePath" },
+                    totalDistance: { $first: "$totalDistance" },
+                    duration: { $first: "$duration" },
+                    status: { $first: "$status" },
+                    SalesStatus: { $first: "$SalesStatus" },
+                    formCompleted: { $first: "$formCompleted" },
+                    nextMeeting: { $first: "$nextMeeting" },
+                    evidence: { $first: "$evidence" },
+                    punchInTime: { $first: "$punchInTime" },
+                    punchInLocation: { $first: "$punchInLocation" },
+                    punchOutTime: { $first: "$punchOutTime" },
+                    punchOutLocation: { $first: "$punchOutLocation" },
+                    punchOutAddress: { $first: "$punchOutAddress" },
+                    lastPunchAt: { $first: "$lastPunchAt" },
+                    employeeId: { $first: "$employeeId" },
+                    createdAt: { $first: "$createdAt" },
+                    updatedAt: { $first: "$updatedAt" }
+                }
+            },
+
+            // Filter out sessions with no salesLogs if needed
+            {
+                $match: {
+                    "salesLogs": { $ne: [] }
+                }
+            },
+
+            // Add computed fields for response
+            {
+                $addFields: {
+                    customerInfo: {
+                        customerId: "$customer.customerId",
+                        companyName: "$customer.companyName",
+                        contactName: "$customer.contactName",
+                        phoneNumber: "$customer.phoneNumber",
+                        address: "$customer.address",
+                        landmark: "$customer.landmark",
+                        location: "$customer.location"
+                    },
+                    salesPersons: {
+                        $map: {
+                            input: "$assignedUsers",
+                            as: "user",
+                            in: {
+                                userId: "$$user._id",
+                                name: "$$user.name",
+                                email: "$$user.email",
+                                phone: "$$user.phone"
+                            }
+                        }
+                    },
+                    totalSalesAmount: {
+                        $sum: "$salesLogs.amount"
+                    },
+                    totalPaymentCollected: {
+                        $sum: {
+                            $cond: ["$salesLogs.paymentCollected", "$salesLogs.amount", 0]
+                        }
+                    },
+                    salesCount: {
+                        $size: "$salesLogs"
+                    }
+                }
+            },
+
+            // Sort by createdAt descending
+            { $sort: { createdAt: -1 } },
+
+            // Pagination
+            { $skip: skip },
+            { $limit: limitNum }
+        ];
+
+        // Count total records for pagination
+        const countPipeline = [
+            { $match: matchConditions },
+            { $unwind: { path: "$salesLogs", preserveNullAndEmptyArrays: true } },
+            {
+                $match: {
+                    $or: [
+                        { salesLogs: { $exists: false } },
+                        {
+                            $and: [
+                                dealStatus ? { "salesLogs.dealStatus": dealStatus } : {},
+                                minAmount || maxAmount ? {
+                                    "salesLogs.amount": {
+                                        ...(minAmount && { $gte: parseFloat(minAmount) }),
+                                        ...(maxAmount && { $lte: parseFloat(maxAmount) })
+                                    }
+                                } : {},
+                                paymentCollected !== undefined ? { "salesLogs.paymentCollected": paymentCollected === 'true' } : {}
+                            ]
+                        }
+                    ]
+                }
+            },
+            {
+                $group: {
+                    _id: "$_id",
+                    hasSalesLogs: { $sum: { $cond: [{ $gt: [{ $size: "$salesLogs" }, 0] }, 1, 0] } }
+                }
+            },
+            {
+                $match: {
+                    hasSalesLogs: { $gt: 0 }
+                }
+            },
+            { $count: "total" }
+        ];
+
+        const [salesRecords, totalCountResult] = await Promise.all([
+            SalesSession.aggregate(aggregationPipeline),
+            SalesSession.aggregate(countPipeline)
+        ]);
+
+        const total = totalCountResult[0]?.total || 0;
+
+        res.status(200).json({
+            success: true,
+            data: salesRecords,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(total / limitNum),
+                totalRecords: total,
+                recordsPerPage: limitNum
+            },
+            summary: {
+                totalSalesAmount: salesRecords.reduce((sum, record) => sum + (record.totalSalesAmount || 0), 0),
+                totalPaymentCollected: salesRecords.reduce((sum, record) => sum + (record.totalPaymentCollected || 0), 0),
+                totalSalesCount: salesRecords.reduce((sum, record) => sum + (record.salesCount || 0), 0)
+            }
+        });
+
+    } catch (error) {
+        console.error("Error in getCompanySalesRecords:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching sales records",
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Simplified version - Get sales records with basic filtering
+ * @route GET /api/sales/company/:companyId/summary
+ */
+export const getCompanySalesSummary = async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const { startDate, endDate, salesPersonId, customerId } = req.query;
+
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid company ID"
+            });
+        }
+
+        const matchConditions = {
+            companyId: new mongoose.Types.ObjectId(companyId),
+            'salesLogs.0': { $exists: true } // Has at least one sales log
+        };
+
+        // Date filter
+        if (startDate || endDate) {
+            matchConditions.createdAt = {};
+            if (startDate) matchConditions.createdAt.$gte = new Date(startDate);
+            if (endDate) matchConditions.createdAt.$lte = new Date(endDate);
+        }
+
+        // Sales person filter
+        if (salesPersonId && mongoose.Types.ObjectId.isValid(salesPersonId)) {
+            matchConditions.assignedTo = new mongoose.Types.ObjectId(salesPersonId);
+        }
+
+        // Customer filter
+        if (customerId) {
+            matchConditions['customer.customerId'] = customerId;
+        }
+
+        const records = await SalesSession.find(matchConditions)
+            .select({
+                sessionId: 1,
+                customer: 1,
+                salesLogs: 1,
+                assignedTo: 1,
+                createdAt: 1,
+                status: 1,
+                SalesStatus: 1
+            })
+            .populate('assignedTo', 'name email phone')
+            .sort({ createdAt: -1 });
+
+        // Format response
+        const formattedRecords = records.map(record => ({
+            sessionId: record.sessionId,
+            customer: {
+                customerId: record.customer?.customerId,
+                companyName: record.customer?.companyName,
+                contactName: record.customer?.contactName,
+                phoneNumber: record.customer?.phoneNumber,
+                address: record.customer?.address,
+                landmark: record.customer?.landmark
+            },
+            salesPerson: record.assignedTo?.map(user => ({
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone
+            })),
+            salesRecords: record.salesLogs,
+            totalAmount: record.salesLogs?.reduce((sum, log) => sum + (log.amount || 0), 0) || 0,
+            createdAt: record.createdAt,
+            status: record.status,
+            salesStatus: record.SalesStatus
+        }));
+
+        res.status(200).json({
+            success: true,
+            count: formattedRecords.length,
+            data: formattedRecords
+        });
+
+    } catch (error) {
+        console.error("Error in getCompanySalesSummary:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching sales summary",
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get sales records assigned to a specific sales person
+ * @route GET /api/sales/assigned-to/:userId
+ */
+export const getSalesBySalesPerson = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { startDate, endDate, companyId, status } = req.query;
+
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid user ID"
+            });
+        }
+
+        const matchConditions = {
+            assignedTo: new mongoose.Types.ObjectId(userId),
+            'salesLogs.0': { $exists: true }
+        };
+
+        if (companyId && mongoose.Types.ObjectId.isValid(companyId)) {
+            matchConditions.companyId = new mongoose.Types.ObjectId(companyId);
+        }
+
+        if (status) {
+            matchConditions.status = status;
+        }
+
+        if (startDate || endDate) {
+            matchConditions.createdAt = {};
+            if (startDate) matchConditions.createdAt.$gte = new Date(startDate);
+            if (endDate) matchConditions.createdAt.$lte = new Date(endDate);
+        }
+
+        const salesRecords = await SalesSession.find(matchConditions)
+            .populate('companyId', 'name email')
+            .populate('createdBy', 'name email')
+            .sort({ createdAt: -1 });
+
+        const formattedResponse = salesRecords.map(record => ({
+            sessionId: record.sessionId,
+            company: record.companyId,
+            customer: record.customer,
+            salesLogs: record.salesLogs,
+            totalAmount: record.salesLogs.reduce((sum, log) => sum + (log.amount || 0), 0),
+            createdAt: record.createdAt,
+            meetingLogs: record.meetingLogs,
+            nextMeeting: record.nextMeeting
+        }));
+
+        res.status(200).json({
+            success: true,
+            count: formattedResponse.length,
+            data: formattedResponse
+        });
+
+    } catch (error) {
+        console.error("Error in getSalesBySalesPerson:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching sales by sales person",
+            error: error.message
+        });
+    }
+};
+
