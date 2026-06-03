@@ -247,7 +247,7 @@ class AttendanceReportService {
         const monthlyData = await Attendance.aggregate([
             {
                 $match: {
-                    companyId:new mongoose.Types.ObjectId(companyId),
+                    companyId: new mongoose.Types.ObjectId(companyId),
                     date: { $gte: startDate, $lte: endDate },
                     ...(employeeId && { employeeId: new mongoose.Types.ObjectId(employeeId) })
                 }
@@ -328,6 +328,8 @@ class AttendanceReportService {
         const startDate = new Date(year, month - 1, 1);
         const endDate = new Date(year, month, 0);
         endDate.setHours(23, 59, 59, 999);
+        // Define monthName - Option 1: Create a month name mapping
+        const monthName = new Date(year, month - 1, 1).toLocaleString('default', { month: 'long' });
 
         const employeeFilter = { companyId: new mongoose.Types.ObjectId(companyId) };
         if (department) {
@@ -415,7 +417,7 @@ class AttendanceReportService {
         endDate.setHours(23, 59, 59, 999);
 
         const matchStage = {
-            companyId:new mongoose.Types.ObjectId(companyId),
+            companyId: new mongoose.Types.ObjectId(companyId),
             date: { $gte: startDate, $lte: endDate }
         };
 
