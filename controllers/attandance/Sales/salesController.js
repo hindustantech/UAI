@@ -3,6 +3,7 @@
 import mongoose from "mongoose";
 import { SalesSession } from '../../../models/Attandance/Salses/Salses.js';
 
+
 /**
  * Get all sales records for a particular company with advanced filtering
  * @route GET /api/sales/company/:companyId
@@ -79,8 +80,8 @@ export const getCompanySalesRecords = async (req, res) => {
         }
 
         // Filter by specific customer
-        if (customerId) {
-            matchConditions['customer.customerId'] = customerId;
+        if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+            matchConditions['customer.customerId'] = new mongoose.Types.ObjectId(customerId);
         }
 
         // Filter by sales person (assignedTo)
@@ -100,23 +101,6 @@ export const getCompanySalesRecords = async (req, res) => {
             matchConditions.SalesStatus = salesStatus;
         }
 
-        // Filter by deal status (looking into salesLogs)
-        if (dealStatus) {
-            matchConditions['salesLogs.dealStatus'] = dealStatus;
-        }
-
-        // Filter by amount range
-        if (minAmount || maxAmount) {
-            matchConditions['salesLogs.amount'] = {};
-            if (minAmount) matchConditions['salesLogs.amount'].$gte = parseFloat(minAmount);
-            if (maxAmount) matchConditions['salesLogs.amount'].$lte = parseFloat(maxAmount);
-        }
-
-        // Filter by payment collected
-        if (paymentCollected !== undefined) {
-            matchConditions['salesLogs.paymentCollected'] = paymentCollected === 'true';
-        }
-
         // Search in customer fields
         if (search) {
             matchConditions.$or = [
@@ -131,10 +115,40 @@ export const getCompanySalesRecords = async (req, res) => {
         const skip = (parseInt(page) - 1) * parseInt(limit);
         const limitNum = parseInt(limit);
 
-        // Aggregation pipeline
-        const aggregationPipeline = [
+        // Build salesLogs filter conditions for $elemMatch
+        const salesLogsFilter = {};
+        if (dealStatus) salesLogsFilter.dealStatus = dealStatus;
+        if (minAmount || maxAmount) {
+            salesLogsFilter.amount = {};
+            if (minAmount) salesLogsFilter.amount.$gte = parseFloat(minAmount);
+            if (maxAmount) salesLogsFilter.amount.$lte = parseFloat(maxAmount);
+        }
+        if (paymentCollected !== undefined) {
+            salesLogsFilter.paymentCollected = paymentCollected === 'true';
+        }
+
+        // Main aggregation pipeline
+        const pipeline = [
+            // Initial match
             { $match: matchConditions },
 
+            // Only include documents that have at least one salesLog
+            { $match: { "salesLogs.0": { $exists: true } } },
+        ];
+
+        // Add salesLogs filtering if any filters are present
+        if (Object.keys(salesLogsFilter).length > 0) {
+            pipeline.push({
+                $match: {
+                    "salesLogs": {
+                        $elemMatch: salesLogsFilter
+                    }
+                }
+            });
+        }
+
+        // Add remaining stages
+        pipeline.push(
             // Lookup assigned users (sales persons)
             {
                 $lookup: {
@@ -144,7 +158,6 @@ export const getCompanySalesRecords = async (req, res) => {
                     as: "assignedUsers"
                 }
             },
-
             // Lookup created by user
             {
                 $lookup: {
@@ -154,7 +167,6 @@ export const getCompanySalesRecords = async (req, res) => {
                     as: "createdByUser"
                 }
             },
-
             // Lookup employee
             {
                 $lookup: {
@@ -164,75 +176,7 @@ export const getCompanySalesRecords = async (req, res) => {
                     as: "employeeUser"
                 }
             },
-
-            // Unwind salesLogs to filter them individually
-            { $unwind: { path: "$salesLogs", preserveNullAndEmptyArrays: true } },
-
-            // Apply filters on salesLogs
-            {
-                $match: {
-                    $or: [
-                        { salesLogs: { $exists: false } },
-                        {
-                            $and: [
-                                dealStatus ? { "salesLogs.dealStatus": dealStatus } : {},
-                                minAmount || maxAmount ? {
-                                    "salesLogs.amount": {
-                                        ...(minAmount && { $gte: parseFloat(minAmount) }),
-                                        ...(maxAmount && { $lte: parseFloat(maxAmount) })
-                                    }
-                                } : {},
-                                paymentCollected !== undefined ? { "salesLogs.paymentCollected": paymentCollected === 'true' } : {}
-                            ]
-                        }
-                    ]
-                }
-            },
-
-            // Group back the salesLogs
-            {
-                $group: {
-                    _id: "$_id",
-                    sessionId: { $first: "$sessionId" },
-                    customer: { $first: "$customer" },
-                    companyId: { $first: "$companyId" },
-                    createdBy: { $first: "$createdBy" },
-                    createdByUser: { $first: "$createdByUser" },
-                    assignedTo: { $first: "$assignedTo" },
-                    assignedUsers: { $first: "$assignedUsers" },
-                    employeeUser: { $first: "$employeeUser" },
-                    visitLogs: { $first: "$visitLogs" },
-                    salesLogs: { $push: "$salesLogs" },
-                    meetingLogs: { $first: "$meetingLogs" },
-                    visitNotes: { $first: "$visitNotes" },
-                    routePath: { $first: "$routePath" },
-                    totalDistance: { $first: "$totalDistance" },
-                    duration: { $first: "$duration" },
-                    status: { $first: "$status" },
-                    SalesStatus: { $first: "$SalesStatus" },
-                    formCompleted: { $first: "$formCompleted" },
-                    nextMeeting: { $first: "$nextMeeting" },
-                    evidence: { $first: "$evidence" },
-                    punchInTime: { $first: "$punchInTime" },
-                    punchInLocation: { $first: "$punchInLocation" },
-                    punchOutTime: { $first: "$punchOutTime" },
-                    punchOutLocation: { $first: "$punchOutLocation" },
-                    punchOutAddress: { $first: "$punchOutAddress" },
-                    lastPunchAt: { $first: "$lastPunchAt" },
-                    employeeId: { $first: "$employeeId" },
-                    createdAt: { $first: "$createdAt" },
-                    updatedAt: { $first: "$updatedAt" }
-                }
-            },
-
-            // Filter out sessions with no salesLogs if needed
-            {
-                $match: {
-                    "salesLogs": { $ne: [] }
-                }
-            },
-
-            // Add computed fields for response
+            // Add computed fields
             {
                 $addFields: {
                     customerInfo: {
@@ -256,6 +200,17 @@ export const getCompanySalesRecords = async (req, res) => {
                             }
                         }
                     },
+                    createdByInfo: {
+                        $map: {
+                            input: "$createdByUser",
+                            as: "user",
+                            in: {
+                                userId: "$$user._id",
+                                name: "$$user.name",
+                                email: "$$user.email"
+                            }
+                        }
+                    },
                     totalSalesAmount: {
                         $sum: "$salesLogs.amount"
                     },
@@ -269,58 +224,50 @@ export const getCompanySalesRecords = async (req, res) => {
                     }
                 }
             },
-
             // Sort by createdAt descending
             { $sort: { createdAt: -1 } },
-
             // Pagination
             { $skip: skip },
             { $limit: limitNum }
-        ];
+        );
 
-        // Count total records for pagination
+        // Count pipeline for pagination
         const countPipeline = [
             { $match: matchConditions },
-            { $unwind: { path: "$salesLogs", preserveNullAndEmptyArrays: true } },
-            {
-                $match: {
-                    $or: [
-                        { salesLogs: { $exists: false } },
-                        {
-                            $and: [
-                                dealStatus ? { "salesLogs.dealStatus": dealStatus } : {},
-                                minAmount || maxAmount ? {
-                                    "salesLogs.amount": {
-                                        ...(minAmount && { $gte: parseFloat(minAmount) }),
-                                        ...(maxAmount && { $lte: parseFloat(maxAmount) })
-                                    }
-                                } : {},
-                                paymentCollected !== undefined ? { "salesLogs.paymentCollected": paymentCollected === 'true' } : {}
-                            ]
-                        }
-                    ]
-                }
-            },
-            {
-                $group: {
-                    _id: "$_id",
-                    hasSalesLogs: { $sum: { $cond: [{ $gt: [{ $size: "$salesLogs" }, 0] }, 1, 0] } }
-                }
-            },
-            {
-                $match: {
-                    hasSalesLogs: { $gt: 0 }
-                }
-            },
-            { $count: "total" }
+            { $match: { "salesLogs.0": { $exists: true } } }
         ];
 
+        if (Object.keys(salesLogsFilter).length > 0) {
+            countPipeline.push({
+                $match: {
+                    "salesLogs": {
+                        $elemMatch: salesLogsFilter
+                    }
+                }
+            });
+        }
+
+        countPipeline.push({ $count: "total" });
+
+        // Execute both aggregations
         const [salesRecords, totalCountResult] = await Promise.all([
-            SalesSession.aggregate(aggregationPipeline),
+            SalesSession.aggregate(pipeline),
             SalesSession.aggregate(countPipeline)
         ]);
 
         const total = totalCountResult[0]?.total || 0;
+
+        // Calculate summary statistics
+        const summary = salesRecords.reduce((acc, record) => {
+            acc.totalSalesAmount += record.totalSalesAmount || 0;
+            acc.totalPaymentCollected += record.totalPaymentCollected || 0;
+            acc.totalSalesCount += record.salesCount || 0;
+            return acc;
+        }, {
+            totalSalesAmount: 0,
+            totalPaymentCollected: 0,
+            totalSalesCount: 0
+        });
 
         res.status(200).json({
             success: true,
@@ -331,11 +278,7 @@ export const getCompanySalesRecords = async (req, res) => {
                 totalRecords: total,
                 recordsPerPage: limitNum
             },
-            summary: {
-                totalSalesAmount: salesRecords.reduce((sum, record) => sum + (record.totalSalesAmount || 0), 0),
-                totalPaymentCollected: salesRecords.reduce((sum, record) => sum + (record.totalPaymentCollected || 0), 0),
-                totalSalesCount: salesRecords.reduce((sum, record) => sum + (record.salesCount || 0), 0)
-            }
+            summary
         });
 
     } catch (error) {
@@ -347,7 +290,6 @@ export const getCompanySalesRecords = async (req, res) => {
         });
     }
 };
-
 /**
  * Simplified version - Get sales records with basic filtering
  * @route GET /api/sales/company/:companyId/summary

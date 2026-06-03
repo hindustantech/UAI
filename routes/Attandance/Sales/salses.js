@@ -7,8 +7,8 @@ const router = express.Router();
 // All routes require authentication
 router.use(authMiddleware);
 
-router.get("/company/:companyId/records", checkPermission('sales.view'), getCompanySalesRecords);
-router.get("/company/:companyId/summary", checkPermission('sales.view'), getCompanySalesSummary);
-router.get("/company/:companyId/salesperson/:salesPersonId", checkPermission('sales.view'), getSalesBySalesPerson);
+router.get("/company/:companyId/records", getCompanySalesRecords);
+router.get("/company/:companyId/summary", getCompanySalesSummary);
+router.get("/company/:companyId/salesperson/:salesPersonId", getSalesBySalesPerson);
 
 export default router;
