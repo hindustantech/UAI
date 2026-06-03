@@ -4,19 +4,13 @@
  * POST /api/bills/generate
  * Body: { phone: "9876543210" }
  *
- * Flow:
- *  1. Find user by phone
- *  2. Find latest ACTIVE subscription (with plan populated)
- *  3. Generate a unique 6-digit bill_id  →  PBPL-YYYY-XXXXXX
- *  4. Build bill data object
- *  5. Generate scannable QR code  (qrcode library)
- *  6. Build PDF  (PDFKit)
- *  7. Upload PDF to cloud / save locally (path stored in subscription)
- *  8. Persist bill_id + bill_generation_date on the subscription doc
- *  9. Send the PDF as download response + email via Nodemailer
- *
- * Dependencies:
- *   npm install pdfkit qrcode nodemailer
+ * Fixes applied:
+ *  1. Replaced ₹ with Rs. — PDFKit built-in fonts (Helvetica) don't include
+ *     the Rupee Unicode glyph (U+20B9), causing blank/missing characters.
+ *  2. Fixed extra blank page — footer was pushing the cursor past the page
+ *     boundary triggering PDFKit's auto page-add. Footer now uses fixed
+ *     absolute Y coordinates and doc.end() is called only after all drawing.
+ *  3. Removed IGST block completely (as requested).
  */
 
 import PDFDocument from "pdfkit";
@@ -27,7 +21,7 @@ import fs from "fs";
 import { Readable } from "stream";
 import User from '../../models/userModel.js';
 import { Subscription } from '../../models/Attandance/subscration/Subscription.js';
-
+import { sendEmail } from '../../utils/sendEmail.js';
 
 
 // ─── Config (move to env) ────────────────────────────────────────────────────
@@ -51,8 +45,6 @@ const MAIL_CONFIG = {
     },
 };
 
-const IGST_RATE = 18; // percent
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Generate 6-digit numeric ID: PBPL-YYYY-000001 */
@@ -60,7 +52,6 @@ async function generateBillId() {
     const year = new Date().getFullYear();
     const prefix = `PBPL-${year}-`;
 
-    // Count existing bills this year to get next sequence
     const latestSub = await Subscription.findOne(
         { bill_id: { $regex: `^${prefix}` } },
         { bill_id: 1 },
@@ -119,10 +110,6 @@ function validityLabel(days) {
 }
 
 // ─── QR Code Generator ───────────────────────────────────────────────────────
-/**
- * Returns a Buffer containing a PNG QR code.
- * Uses high error-correction so it stays scannable when printed small.
- */
 async function buildQRBuffer(billId, customer, amount, planName) {
     const payload = JSON.stringify({
         billId,
@@ -133,7 +120,7 @@ async function buildQRBuffer(billId, customer, amount, planName) {
     });
 
     return QRCode.toBuffer(payload, {
-        errorCorrectionLevel: "H",   // highest = most scannable
+        errorCorrectionLevel: "H",
         type: "png",
         width: 200,
         margin: 2,
@@ -143,24 +130,29 @@ async function buildQRBuffer(billId, customer, amount, planName) {
 
 // ─── PDF Builder ─────────────────────────────────────────────────────────────
 async function buildBillPDF(billData) {
-    const { billId, customer, plan, subscription, igst, total, qrBuffer } = billData;
+    const { billId, customer, plan, subscription, total, qrBuffer } = billData;
 
     return new Promise((resolve, reject) => {
-        const doc = new PDFDocument({ size: "A4", margin: 40 });
+        // FIX: Use autoFirstPage:false so PDFKit never auto-appends a second page.
+        // We add the single page manually with a fixed A4 size.
+        const PAGE_HEIGHT = 841.89; // A4 pt
+        const doc = new PDFDocument({ size: "A4", margin: 40, autoFirstPage: false });
+        doc.addPage({ size: "A4", margin: 40 });
+
         const chunks = [];
         doc.on("data", c => chunks.push(c));
         doc.on("end", () => resolve(Buffer.concat(chunks)));
         doc.on("error", reject);
 
-        const W = doc.page.width;
-        const M = 40; // margin
+        const W = doc.page.width;   // 595.28
+        const M = 40;
 
         // ── Colour palette ────────────────────────────────────────────────────
         const DARK_BLUE = "#0d2b4e";
-        const MID_BLUE = "#1a4a8a";
-        const LIGHT_BG = "#e8f0fb";
-        const GREEN = "#2ca02c";
-        const GRAY = "#555555";
+        const MID_BLUE  = "#1a4a8a";
+        const LIGHT_BG  = "#e8f0fb";
+        const GREEN     = "#2ca02c";
+        const GRAY      = "#555555";
 
         // ── Top bar ───────────────────────────────────────────────────────────
         doc.rect(0, 0, W, 22).fill(DARK_BLUE);
@@ -193,9 +185,9 @@ async function buildBillPDF(billData) {
         doc.text(billId, bx + 50, by + 5);
 
         const infoRows = [
-            ["Bill Date", fmtDate(subscription.bill_generation_date || new Date())],
-            ["Payment Date", fmtDate(subscription.payment?.paidAt || new Date())],
-            ["Payment Status", subscription.payment?.paymentStatus === "SUCCESS" ? "Paid" : subscription.payment?.paymentStatus],
+            ["Bill Date",       fmtDate(subscription.bill_generation_date || new Date())],
+            ["Payment Date",    fmtDate(subscription.payment?.paidAt || new Date())],
+            ["Payment Status",  subscription.payment?.paymentStatus === "SUCCESS" ? "Paid" : subscription.payment?.paymentStatus],
         ];
         let iy = by + 24;
         for (const [label, val] of infoRows) {
@@ -220,16 +212,15 @@ async function buildBillPDF(billData) {
         cy = 135;
         const qx = M, qy = cy + 10, qbw = 200, qbh = 95;
         doc.roundedRect(qx, qy, qbw, qbh, 5).fill(LIGHT_BG).stroke(DARK_BLUE);
-        // Draw QR image
         doc.image(qrBuffer, qx + 5, qy + 5, { width: 75, height: 75 });
-        // Text
         doc.fillColor(MID_BLUE).font("Helvetica-Bold").fontSize(8)
             .text("Scan to Verify", qx + 85, qy + 8);
         doc.fillColor(DARK_BLUE).font("Helvetica").fontSize(7);
+        // FIX: Use Rs. instead of ₹ — Helvetica does not include Rupee glyph
         const qLines = [
             `Customer: ${customer.name}`,
             `Bill ID: ${billId}`,
-            `Amount: ₹ ${total.toFixed(2)}`,
+            `Amount: Rs. ${total.toFixed(2)}`,
             `Plan: ${plan.name}`,
         ];
         let ql = qy + 20;
@@ -245,17 +236,16 @@ async function buildBillPDF(billData) {
 
         const cbY = billToY + 22, cbH = 72, cbW = 220;
         doc.roundedRect(M, cbY, cbW, cbH, 5).fill(LIGHT_BG);
-        // Avatar
         doc.circle(M + 22, cbY + 36, 18).fill("#b0c4de");
         doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(18)
-            .text("👤", M + 12, cbY + 26);
+            .text("U", M + 14, cbY + 26);        // plain U instead of emoji
         const tx = M + 48;
         doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(9)
             .text(customer.name, tx, cbY + 10);
         doc.fillColor(GRAY).font("Helvetica").fontSize(8);
-        doc.text(`  ${customer.phone || "-"}`, tx, cbY + 24);
-        doc.text(`  ${customer.email || "-"}`, tx, cbY + 36);
-        doc.text(`  ${customer.address || "-"}`, tx, cbY + 48, { width: 160 });
+        doc.text(customer.phone || "-", tx, cbY + 24);
+        doc.text(customer.email || "-", tx, cbY + 36);
+        doc.text(customer.address || "-", tx, cbY + 48, { width: 160 });
 
         // ── Items Table ───────────────────────────────────────────────────────
         const tblY = cbY + cbH + 12;
@@ -263,7 +253,6 @@ async function buildBillPDF(billData) {
         const tblW = cols.reduce((a, b) => a + b, 0);
         const hdrs = ["#", "DESCRIPTION", "PLAN NAME", "DURATION", "PRICE (INR)"];
 
-        // Header
         doc.rect(M, tblY, tblW, 18).fill(DARK_BLUE);
         doc.fillColor("white").font("Helvetica-Bold").fontSize(7.5);
         let cx2 = M;
@@ -272,12 +261,12 @@ async function buildBillPDF(billData) {
             cx2 += cols[i];
         }
 
-        // Data row
         const drY = tblY + 18;
         doc.rect(M, drY, tblW, 18).stroke(GRAY);
         doc.fillColor(DARK_BLUE).font("Helvetica").fontSize(8);
+        // FIX: Use Rs. instead of ₹
         const vals = ["1", "Subscription Plan", plan.name,
-            validityLabel(plan.validityDays), `₹ ${plan.finalPrice.toFixed(2)}`];
+            validityLabel(plan.validityDays), `Rs. ${plan.finalPrice.toFixed(2)}`];
         let cx3 = M;
         for (let i = 0; i < vals.length; i++) {
             doc.text(vals[i], cx3 + 2, drY + 5, { width: cols[i] - 4, align: "center" });
@@ -297,31 +286,32 @@ async function buildBillPDF(billData) {
             const fx = M + 6 + col * 165, fy = ftY + 18 + row * 13;
             doc.circle(fx + 4, fy + 4, 3.5).fill(MID_BLUE);
             doc.fillColor("white").font("Helvetica-Bold").fontSize(5.5)
-                .text("✓", fx + 1.5, fy + 2);
+                .text("v", fx + 1.5, fy + 2);   // plain 'v' checkmark (no Unicode)
             doc.fillColor(GRAY).font("Helvetica").fontSize(7.5)
                 .text(f, fx + 10, fy);
         });
 
-        // ── Totals ────────────────────────────────────────────────────────────
+        // ── Totals (IGST removed as requested) ───────────────────────────────
         let totY = ftY + ftH + 8;
         const lx = W - M - 175;
         doc.fillColor(DARK_BLUE).font("Helvetica").fontSize(8.5);
         doc.text("Subtotal", lx, totY);
-        doc.text(`₹ ${plan.finalPrice.toFixed(2)}`, lx + 100, totY, { width: 75, align: "right" });
+        // FIX: Use Rs. instead of ₹
+        doc.text(`Rs. ${plan.finalPrice.toFixed(2)}`, lx + 100, totY, { width: 75, align: "right" });
         totY += 14;
-        doc.text(`IGST(${IGST_RATE}%)`, lx, totY);
-        doc.text(`₹ ${igst.toFixed(2)}`, lx + 100, totY, { width: 75, align: "right" });
-        totY += 10;
 
+        // TOTAL row (no IGST line)
         doc.rect(lx - 4, totY, 175 + 4, 18).fill(DARK_BLUE);
         doc.fillColor("white").font("Helvetica-Bold").fontSize(9)
             .text("TOTAL AMOUNT", lx, totY + 4);
-        doc.text(`₹ ${total.toFixed(2)}`, lx + 95, totY + 4, { width: 80, align: "right" });
+        // FIX: Use Rs. instead of ₹
+        doc.text(`Rs. ${total.toFixed(2)}`, lx + 95, totY + 4, { width: 80, align: "right" });
         totY += 24;
 
         doc.fillColor(GREEN).font("Helvetica-Bold").fontSize(9)
             .text("PAID", lx, totY);
-        doc.text(`₹ ${total.toFixed(2)}`, lx + 95, totY, { width: 80, align: "right" });
+        // FIX: Use Rs. instead of ₹
+        doc.text(`Rs. ${total.toFixed(2)}`, lx + 95, totY, { width: 80, align: "right" });
 
         // ── Amount in Words ───────────────────────────────────────────────────
         totY += 18;
@@ -340,28 +330,39 @@ async function buildBillPDF(billData) {
             .text(subscription.payment?.paymentGateway || "ONLINE", M, totY + 13)
             .text(subscription.payment?.transactionId || "N/A", M + 170, totY + 13);
 
-        // ── Footer ────────────────────────────────────────────────────────────
-        const pageH = doc.page.height;
-        doc.moveTo(M, pageH - 55).lineTo(W - M, pageH - 55)
-            .strokeColor("#cccccc").lineWidth(0.5).stroke();
-        doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(9)
-            .text(`Thank you for choosing ${COMPANY.name}.`, M, pageH - 46, { width: W - M * 2, align: "center" });
-        doc.fillColor(GRAY).font("Helvetica").fontSize(8)
-            .text("We appreciate your business!", M, pageH - 32, { width: W - M * 2, align: "center" });
+        // ── Footer (FIX: absolute Y positions, no cursor-driven positioning) ──
+        // Using fixed coordinates from the bottom of the A4 page (841.89 pt).
+        // This prevents PDFKit from auto-appending a blank second page.
+        const FOOTER_LINE_Y  = PAGE_HEIGHT - 58;
+        const FOOTER_TEXT1_Y = PAGE_HEIGHT - 50;
+        const FOOTER_TEXT2_Y = PAGE_HEIGHT - 36;
+        const FOOTER_BAR_Y   = PAGE_HEIGHT - 22;
 
-        doc.rect(0, pageH - 20, W, 20).fill(DARK_BLUE);
+        doc.moveTo(M, FOOTER_LINE_Y).lineTo(W - M, FOOTER_LINE_Y)
+            .strokeColor("#cccccc").lineWidth(0.5).stroke();
+
+        doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(9)
+            .text(`Thank you for choosing ${COMPANY.name}.`, M, FOOTER_TEXT1_Y,
+                  { width: W - M * 2, align: "center" });
+
+        doc.fillColor(GRAY).font("Helvetica").fontSize(8)
+            .text("We appreciate your business!", M, FOOTER_TEXT2_Y,
+                  { width: W - M * 2, align: "center" });
+
+        doc.rect(0, FOOTER_BAR_Y, W, 22).fill(DARK_BLUE);
         doc.fillColor("white").font("Helvetica").fontSize(7)
-            .text(`If you have any questions, feel free to contact us.`, M, pageH - 15);
+            .text("If you have any questions, feel free to contact us.", M, FOOTER_BAR_Y + 5);
         doc.text(`${COMPANY.phone}  |  ${COMPANY.email}  |  ${COMPANY.website}`,
-            W / 2 - 120, pageH - 15, { width: 300, align: "center" });
+            W / 2 - 120, FOOTER_BAR_Y + 5, { width: 300, align: "center" });
 
         doc.end();
     });
 }
 
+
 // ─── Email Sender ─────────────────────────────────────────────────────────────
 async function sendBillEmail(customer, billId, pdfBuffer) {
-    if (!customer.email) return;                  // skip if no email
+    if (!customer.email) return;
 
     const transporter = nodemailer.createTransport(MAIL_CONFIG);
 
@@ -405,10 +406,6 @@ async function sendBillEmail(customer, billId, pdfBuffer) {
 }
 
 // ─── Main Controller ──────────────────────────────────────────────────────────
-/**
- * POST /api/bills/generate
- * Body: { phone: "9876543210" }
- */
 export const generateBill = async (req, res) => {
     try {
         const { phone } = req.body;
@@ -417,13 +414,11 @@ export const generateBill = async (req, res) => {
             return res.status(400).json({ success: false, message: "phone is required" });
         }
 
-        // 1. Find user by phone
         const user = await User.findOne({ phone: phone.trim() }).lean();
         if (!user) {
             return res.status(404).json({ success: false, message: "No user found with this phone number" });
         }
 
-        // 2. Find latest active subscription
         const subscription = await Subscription.findOne({
             company: user._id,
             status: "ACTIVE",
@@ -437,16 +432,11 @@ export const generateBill = async (req, res) => {
         }
 
         const plan = subscription.plan;
-
-        // 3. Generate bill ID
         const billId = await generateBillId();
 
-        // 4. Calculate amounts
-        const subtotal = plan.finalPrice;
-        const igst = Math.round(subtotal * IGST_RATE) / 100;
-        const total = Math.round((subtotal + igst) * 100) / 100;
+        // IGST removed: total = plan price directly
+        const total = plan.finalPrice;
 
-        // 5. Customer info
         const customer = {
             name: user.name || "N/A",
             phone: user.phone || "N/A",
@@ -454,31 +444,24 @@ export const generateBill = async (req, res) => {
             address: user.manul_address || "N/A",
         };
 
-        // 6. Generate QR
         const qrBuffer = await buildQRBuffer(billId, customer, total, plan.name);
-
-        // 7. Build PDF
         const pdfBuffer = await buildBillPDF({
             billId,
             customer,
             plan,
             subscription,
-            igst,
             total,
             qrBuffer,
         });
 
-        // 8. Persist bill_id + date on subscription
         subscription.bill_id = billId;
         subscription.bill_generation_date = new Date();
         await subscription.save();
 
-        // 9. Send email (non-blocking, log error but don't fail)
         sendBillEmail(customer, billId, pdfBuffer).catch(err =>
             console.error("[Bill] Email failed:", err.message)
         );
 
-        // 10. Return PDF as download
         res.set({
             "Content-Type": "application/pdf",
             "Content-Disposition": `attachment; filename="Invoice_${billId}.pdf"`,
@@ -492,10 +475,6 @@ export const generateBill = async (req, res) => {
     }
 };
 
-/**
- * GET /api/bills/:billId
- * Re-download an existing bill PDF (re-generates on the fly from stored data)
- */
 export const downloadBill = async (req, res) => {
     try {
         const { billId } = req.params;
@@ -511,9 +490,8 @@ export const downloadBill = async (req, res) => {
         const plan = subscription.plan;
         const user = subscription.company;
 
-        const subtotal = plan.finalPrice;
-        const igst = Math.round(subtotal * IGST_RATE) / 100;
-        const total = Math.round((subtotal + igst) * 100) / 100;
+        // IGST removed
+        const total = plan.finalPrice;
         const customer = {
             name: user.name || "N/A",
             phone: user.phone || "N/A",
@@ -522,7 +500,7 @@ export const downloadBill = async (req, res) => {
         };
 
         const qrBuffer = await buildQRBuffer(billId, customer, total, plan.name);
-        const pdfBuffer = await buildBillPDF({ billId, customer, plan, subscription, igst, total, qrBuffer });
+        const pdfBuffer = await buildBillPDF({ billId, customer, plan, subscription, total, qrBuffer });
 
         res.set({
             "Content-Type": "application/pdf",
@@ -536,4 +514,3 @@ export const downloadBill = async (req, res) => {
         return res.status(500).json({ success: false, message: "Download failed", error: err.message });
     }
 };
-
