@@ -22,12 +22,12 @@ import { Subscription } from '../../models/Attandance/subscration/Subscription.j
 // ─── Config ──────────────────────────────────────────────────────────────────
 const COMPANY = {
     name: "Praecore Brandteck Pvt.Ltd",
-    address: "123, Business Park, Sector 62, Noida, UP 201301",
-    phone: "+91 120 456 7890",
+    address: "51, Rainbasera colony,Adityapura jamshedpur - 831013",
+    phone: "+91 8986147449",
     email: "info@praecorebrandteck.com",
-    website: "www.praecorebrandteck.com",
-    gstin: "09ABCDE1234F1Z5",
-    verifyBase: process.env.BILL_VERIFY_BASE_URL || "https://praecorebrandteck.com/verify",
+    website: "https://hr.praecore.in",
+    CIN: "U631122JH2025PTC025749",
+    verifyBase: process.env.BILL_VERIFY_BASE_URL || "https://web.praecore.in",
 };
 
 const MAIL_CONFIG = {
@@ -244,7 +244,7 @@ async function buildBillPDF(billData) {
             T(ln, M, ay);
             ay += 11;
         }
-        T(`GSTIN: ${COMPANY.gstin}`, M, ay);
+        T(`CIN: ${COMPANY.CIN}`, M, ay);
 
         // ── DIVIDER ───────────────────────────────────────────────────────────
         const divY = 164;
