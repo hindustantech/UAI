@@ -24,7 +24,7 @@ export const checkPermission = (permissionKey) => {
             }
 
             // 🔹 Global bypass
-            if (['super_admin', 'partner'].includes(user.type)) {
+            if (['admin', 'super_admin'].includes(user.type)) {
                 return next();
             }
 
@@ -50,9 +50,9 @@ export const checkPermission = (permissionKey) => {
             }
 
             // 🔹 Direct permission from AssingPermission
-            const assignment = await AssingPermission.findOne({ 
-                companyId, 
-                userId: user._id 
+            const assignment = await AssingPermission.findOne({
+                companyId,
+                userId: user._id
             });
             if (assignment && assignment.permissions.includes(permissionKey)) {
                 return next();
