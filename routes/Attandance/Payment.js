@@ -3,6 +3,7 @@ import authMiddleware from "../../middlewares/authMiddleware.js";
 import {
   createOrder,
   verifyPayment,
+  initializeFreePlan,
   getPaymentHistory,
   cancelSubscription,
   getActiveSubscription,
@@ -25,7 +26,13 @@ router.post(
   createOrder
 );
 
-// Verify Payment (after frontend payment success)
+router.post(
+  "/initialize-free",
+  authMiddleware,
+  initializeFreePlan
+);
+
+// Initialize Free Plan
 router.post(
   "/verify",
   authMiddleware,
