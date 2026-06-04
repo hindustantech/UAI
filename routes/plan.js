@@ -12,7 +12,7 @@ import {
 import { checkPermission } from '../middlewares/checkPermission.js'
 import authMiddleware from '../middlewares/authMiddleware.js';
 const router = express.Router();
-    all
+    // all
 // Plan Routes
 router.post('/', authMiddleware, checkPermission('plans.create'), createPlan);                    // Create Plan
 router.get('/', getAllPlans);                    // Get All Plans (with pagination & filters)

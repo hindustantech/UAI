@@ -10,7 +10,7 @@ export const checkPermission = (permissionKey) => {
         try {
             const userId = req.user?.id || req.user?._id;
             const companyId = req.user?.companyId || req.user?.companyId;
-
+            
             if (!userId) {
                 return res.status(401).json({ message: 'Unauthorized' });
             }
