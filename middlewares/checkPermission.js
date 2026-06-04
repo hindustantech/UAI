@@ -9,8 +9,8 @@ export const checkPermission = (permissionKey) => {
     return async (req, res, next) => {
         try {
             const userId = req.user?.id || req.user?._id;
-            const companyId = req.user?.companyId || req.user?.companyId;
-            
+            const companyId = req.user.companyId || req.user.companyId;
+
             if (!userId) {
                 return res.status(401).json({ message: 'Unauthorized' });
             }
@@ -24,7 +24,7 @@ export const checkPermission = (permissionKey) => {
             }
 
             // 🔹 Global bypass
-            if (['admin', 'super_admin'].includes(user.type)) {
+            if (['super_admin', 'partner'].includes(user.type)) {
                 return next();
             }
 
@@ -50,9 +50,9 @@ export const checkPermission = (permissionKey) => {
             }
 
             // 🔹 Direct permission from AssingPermission
-            const assignment = await AssingPermission.findOne({
-                companyId,
-                userId: user._id
+            const assignment = await AssingPermission.findOne({ 
+                companyId, 
+                userId: user._id 
             });
             if (assignment && assignment.permissions.includes(permissionKey)) {
                 return next();
