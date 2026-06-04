@@ -370,15 +370,10 @@ async function buildBillPDF(billData) {
         T("We appreciate your business!", M, F_TXT2, { width: W - M * 2, align: "center" });
 
         doc.rect(0, F_BAR, W, 26).fill(DARK_BLUE);
-        doc.fillColor("white").font("Helvetica").fontSize(7);
+        doc.fillColor("white").font("Helvetica").fontSize(6.8);
 
-        // Single centered line with all info
-        const footerText = `${COMPANY.phone}  |  ${COMPANY.email}  |  ${COMPANY.website}`;
-        // Approximate center without measuring (works for 6-8pt font)
-        T(footerText, W / 2 - 140, F_BAR + 9, { lineBreak: false });
-
-        // Or use this foolproof method - just center at 50% width
-        T(footerText, 0, F_BAR + 9, { width: W, align: "center", lineBreak: false });
+        T(` UAI | ${COMPANY.phone}  |  ${COMPANY.email}  |  ${COMPANY.website} `,
+            0, F_BAR + 8, { width: W, align: "center", lineBreak: false });
 
         doc.end();
     });
