@@ -168,7 +168,7 @@ async function buildBillPDF(billData) {
         };
 
         // ── TOP BAR (Inside border) ───────────────────────────────────────────
-        doc.rect(BORDER_OFFSET, BORDER_OFFSET, W - (BORDER_OFFSET * 2), 20).fill(DARK_BLUE);
+        // doc.rect(BORDER_OFFSET, BORDER_OFFSET, W - (BORDER_OFFSET * 2), 20).fill(DARK_BLUE);
 
         // ── LOGO ──────────────────────────────────────────────────────────────
         doc.circle(M + 18, 52, 16).fill(MID_BLUE);
