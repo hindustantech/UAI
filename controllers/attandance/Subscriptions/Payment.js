@@ -606,9 +606,18 @@ export const verifyPayment = async (req, res) => {
 export const initializeFreePlan = async (req, res) => {
     try {
         const companyId = req.user._id;
+        const planId = req.body.planId; // Optional: allow client to specify which free plan to initialize
 
-        // Find the FREE plan
-        const freePlan = await Plan.findOne({ isfree: true, isActive: true });
+
+        // Validate plan ID
+        if (!mongoose.Types.ObjectId.isValid(planId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid plan ID",
+            });
+        }
+
+        const freePlan = await Plan.findOne({ _id: planId, isfree: true, isActive: true });
 
         if (!freePlan) {
             return res.status(404).json({
