@@ -416,31 +416,50 @@ async function buildBillPDF(billData) {
         const FOOTER_MARGIN = PRINT_MARGIN + 8; // Additional margin for footer
         const FOOTER_BASE_Y = H - FOOTER_MARGIN - FOOTER_HEIGHT;
 
+        // ══════════════════════════════════════════════════════════════════════
+        // FOOTER - Properly positioned with inner border margin
+        // ══════════════════════════════════════════════════════════════════════
+
+        // Calculate footer position relative to inner border
+        const FOOTER_MARGIN_FROM_BORDER = 8; // 8 points margin from inner border
+        const FOOTER_BASE_Y = INNER_OFFSET + INNER_H - FOOTER_MARGIN_FROM_BORDER - FOOTER_HEIGHT;
+
         // Only add footer if there's enough space
         if (totY + 40 < FOOTER_BASE_Y) {
             const F_LINE = FOOTER_BASE_Y - 12;
             const F_TXT1 = FOOTER_BASE_Y - 24;
             const F_TXT2 = FOOTER_BASE_Y - 37;
 
-            // Divider line
-            doc.moveTo(M, F_LINE).lineTo(W - M, F_LINE).strokeColor("#cccccc").lineWidth(0.5).stroke();
+            // Divider line - inside inner border margins
+            doc.moveTo(INNER_OFFSET + 6, F_LINE)
+                .lineTo(INNER_OFFSET + INNER_W - 6, F_LINE)
+                .strokeColor("#cccccc")
+                .lineWidth(0.5)
+                .stroke();
 
-            // Thank you text
+            // Thank you text - centered within inner border
             doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(9);
-            T(`Thank you for choosing ${COMPANY.name}.`, M, F_TXT1, { width: W - M * 2, align: "center" });
+            T(`Thank you for choosing ${COMPANY.name}.`,
+                INNER_OFFSET, F_TXT1,
+                { width: INNER_W, align: "center" });
 
             doc.fillColor(GRAY).font("Helvetica").fontSize(8);
-            T("We appreciate your business!", M, F_TXT2, { width: W - M * 2, align: "center" });
+            T("We appreciate your business!",
+                INNER_OFFSET, F_TXT2,
+                { width: INNER_W, align: "center" });
 
-            // Footer bar - adjusted width to ensure it prints within page
-            const FOOTER_X = M - 4; // Slightly wider to compensate for print margins
-            const FOOTER_WIDTH = W - (M * 2) + 8;
+            // Footer bar - aligned with inner border, with margin
+            const FOOTER_MARGIN = 6; // Margin from inner border on both sides
+            const FOOTER_X = INNER_OFFSET + FOOTER_MARGIN;
+            const FOOTER_WIDTH = INNER_W - (FOOTER_MARGIN * 2);
 
-            doc.rect(FOOTER_X, FOOTER_BASE_Y, FOOTER_WIDTH, FOOTER_HEIGHT).fill(DARK_BLUE);
+            doc.rect(FOOTER_X, FOOTER_BASE_Y, FOOTER_WIDTH, FOOTER_HEIGHT)
+                .fill(DARK_BLUE);
+
             doc.fillColor("white").font("Helvetica").fontSize(6.8);
 
             T(`UAI Contact Us | ${COMPANY.phone} | ${COMPANY.email} | ${COMPANY.website}`,
-                FOOTER_X, FOOTER_BASE_Y + 12, {
+                FOOTER_X, FOOTER_BASE_Y + 8, {
                 width: FOOTER_WIDTH,
                 align: "center",
                 lineBreak: false
