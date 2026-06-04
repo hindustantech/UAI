@@ -122,8 +122,9 @@ async function buildBillPDF(billData) {
         const W = 595.28;
         const H = 841.89;
         const M = 36;
+        const BORDER_OFFSET = 12; // Inner border offset
         const BOTTOM_MARGIN_MM = 12; // 12mm bottom margin
-        const BOTTOM_MARGIN_PTS = BOTTOM_MARGIN_MM * 2.83465; // Convert mm to points (1mm = 2.83465 points)
+        const BOTTOM_MARGIN_PTS = BOTTOM_MARGIN_MM * 2.83465; // Convert mm to points
         const FOOTER_HEIGHT = 26; // Footer bar height in points
 
         const DARK_BLUE = "#0d2b4e";
@@ -144,7 +145,7 @@ async function buildBillPDF(billData) {
         // Inner border (thin, decorative)
         doc.lineWidth(0.5);
         doc.strokeColor(MID_BLUE);
-        doc.rect(12, 12, W - 24, H - 24).stroke();
+        doc.rect(BORDER_OFFSET, BORDER_OFFSET, W - (BORDER_OFFSET * 2), H - (BORDER_OFFSET * 2)).stroke();
 
         // Corner decorations - top-left
         doc.lineWidth(1.5);
@@ -166,8 +167,8 @@ async function buildBillPDF(billData) {
             doc.text(String(text), x, y, { lineBreak: false, ...opts });
         };
 
-        // ── TOP BAR ───────────────────────────────────────────────────────────
-        doc.rect(0, 0, W, 20).fill(DARK_BLUE);
+        // ── TOP BAR (Inside border) ───────────────────────────────────────────
+        doc.rect(BORDER_OFFSET, BORDER_OFFSET, W - (BORDER_OFFSET * 2), 20).fill(DARK_BLUE);
 
         // ── LOGO ──────────────────────────────────────────────────────────────
         doc.circle(M + 18, 52, 16).fill(MID_BLUE);
@@ -385,27 +386,36 @@ async function buildBillPDF(billData) {
         T(subscription.payment?.transactionId || "N/A", M + 200, totY);
 
         // ══════════════════════════════════════════════════════════════════════
-        // FOOTER - PERFECTED: Positioned with 12mm margin from bottom
+        // FOOTER - Perfectly positioned inside the border with 12mm bottom margin
         // ══════════════════════════════════════════════════════════════════════
-        const FOOTER_BASE_Y = H - BOTTOM_MARGIN_PTS - FOOTER_HEIGHT;
-        const F_LINE = FOOTER_BASE_Y - 8;
-        const F_TXT1 = FOOTER_BASE_Y - 18;
-        const F_TXT2 = FOOTER_BASE_Y - 31;
 
-        doc.moveTo(M, F_LINE).lineTo(W - M, F_LINE).strokeColor("#cccccc").lineWidth(0.5).stroke();
+        // Calculate footer position inside the border
+        const INNER_BOTTOM = H - BORDER_OFFSET; // Bottom edge of inner border
+        const FOOTER_BASE_Y = INNER_BOTTOM - BOTTOM_MARGIN_PTS - FOOTER_HEIGHT;
 
-        doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(9);
-        T(`Thank you for choosing ${COMPANY.name}.`, M, F_TXT1, { width: W - M * 2, align: "center" });
+        // Only add footer if there's enough space (content doesn't overlap)
+        if (totY + 40 < FOOTER_BASE_Y) {
+            const F_LINE = FOOTER_BASE_Y - 12;
+            const F_TXT1 = FOOTER_BASE_Y - 24;
+            const F_TXT2 = FOOTER_BASE_Y - 37;
 
-        doc.fillColor(GRAY).font("Helvetica").fontSize(8);
-        T("We appreciate your business!", M, F_TXT2, { width: W - M * 2, align: "center" });
+            // Divider line
+            doc.moveTo(M, F_LINE).lineTo(W - M, F_LINE).strokeColor("#cccccc").lineWidth(0.5).stroke();
 
-        // Footer bar - positioned exactly 12mm from bottom
-        doc.rect(0, FOOTER_BASE_Y, W, FOOTER_HEIGHT).fill(DARK_BLUE);
-        doc.fillColor("white").font("Helvetica").fontSize(6.8);
+            // Thank you text
+            doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(9);
+            T(`Thank you for choosing ${COMPANY.name}.`, M, F_TXT1, { width: W - M * 2, align: "center" });
 
-        T(` UAI Contact Us| ${COMPANY.phone}  |  ${COMPANY.email}  |  ${COMPANY.website} `,
-            0, FOOTER_BASE_Y + 8, { width: W, align: "center", lineBreak: false });
+            doc.fillColor(GRAY).font("Helvetica").fontSize(8);
+            T("We appreciate your business!", M, F_TXT2, { width: W - M * 2, align: "center" });
+
+            // Footer bar - positioned inside border with 12mm from inner border bottom
+            doc.rect(BORDER_OFFSET, FOOTER_BASE_Y, W - (BORDER_OFFSET * 2), FOOTER_HEIGHT).fill(DARK_BLUE);
+            doc.fillColor("white").font("Helvetica").fontSize(6.8);
+
+            T(`UAI Contact Us | ${COMPANY.phone} | ${COMPANY.email} | ${COMPANY.website}`,
+                BORDER_OFFSET, FOOTER_BASE_Y + 8, { width: W - (BORDER_OFFSET * 2), align: "center", lineBreak: false });
+        }
 
         doc.end();
     });
