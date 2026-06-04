@@ -440,7 +440,7 @@ async function buildBillPDF(billData) {
             doc.fillColor("white").font("Helvetica").fontSize(6.8);
 
             T(`UAI Contact Us | ${COMPANY.phone} | ${COMPANY.email} | ${COMPANY.website}`,
-                FOOTER_X, FOOTER_BASE_Y + 8, {
+                FOOTER_X, FOOTER_BASE_Y + 12, {
                 width: FOOTER_WIDTH,
                 align: "center",
                 lineBreak: false
