@@ -606,7 +606,7 @@ export const verifyPayment = async (req, res) => {
 export const initializeFreePlan = async (req, res) => {
     try {
         const companyId = req.user._id;
-        const planId = req.body.planId; // Optional: allow client to specify which free plan to initialize
+        const { planId } = req.body;
 
 
         // Validate plan ID
