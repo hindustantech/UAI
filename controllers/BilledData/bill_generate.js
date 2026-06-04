@@ -282,28 +282,33 @@ async function buildBillPDF(billData) {
         const ftH = 20 + feats.length * FT_ROW + 8;
 
         doc.rect(M, ftY, TBLW, ftH).fill("white").strokeColor(GRAY).lineWidth(0.5).stroke();
-        doc.rect(M, ftY, TBLW, 17).fill("#f0f4fc");
-        doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(7.5);
-        T("Plan Includes", M + 6, ftY + 5);
 
+        // Section header - "Plan Includes"
+        doc.rect(M, ftY, TBLW, 20).fill("#f0f4fc");
+        doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(8);
+        T("Plan Includes", M + 6, ftY + 6);
+
+        // Column headers - "FEATURE" and "VALUE" (below the section header)
+        const headerY = ftY + 22;
+        doc.fillColor(MID_BLUE).font("Helvetica-Bold").fontSize(7.5);
         const FK_W = 240;
-        doc.fillColor(MID_BLUE).font("Helvetica-Bold").fontSize(7);
-        T("FEATURE", M + 6, ftY + 5);
-        T("VALUE", M + FK_W, ftY + 5);
+        T("FEATURE", M + 6, headerY);
+        T("VALUE", M + FK_W, headerY);
 
-        let fy = ftY + 18;
+        // Feature rows (starting below the column headers)
+        let fy = headerY + 14;
         feats.forEach((f, idx) => {
-            if (idx % 2 === 0) doc.rect(M + 1, fy, TBLW - 2, FT_ROW).fill("#f7f9fe");
-            else doc.rect(M + 1, fy, TBLW - 2, FT_ROW).fill("white");
+            if (idx % 2 === 0) doc.rect(M + 1, fy - 2, TBLW - 2, FT_ROW).fill("#f7f9fe");
+            else doc.rect(M + 1, fy - 2, TBLW - 2, FT_ROW).fill("white");
 
-            doc.circle(M + 10, fy + 7.5, 3).fill(MID_BLUE);
+            doc.circle(M + 10, fy + 2, 3).fill(MID_BLUE);
             doc.fillColor("white").font("Helvetica-Bold").fontSize(5);
-            T("v", M + 8, fy + 5);
+            T("✓", M + 7, fy);
 
             doc.fillColor(DARK_BLUE).font("Helvetica").fontSize(7.5);
-            T(f.key, M + 18, fy + 4);
+            T(f.key, M + 22, fy);
             doc.fillColor(GRAY).font("Helvetica-Bold").fontSize(7.5);
-            T(f.val, M + FK_W, fy + 4);
+            T(f.val, M + FK_W, fy);
             fy += FT_ROW;
         });
 
@@ -366,7 +371,7 @@ async function buildBillPDF(billData) {
 
         doc.rect(0, F_BAR, W, 26).fill(DARK_BLUE);
         doc.fillColor("white").font("Helvetica").fontSize(6.8);
-        T("If you have any questions, feel free to contact us.", M, F_BAR + 6, { lineBreak: false });
+        T("contact us. ", M, F_BAR + 6, { lineBreak: false });
         T(`   |   ${COMPANY.phone}  |  ${COMPANY.email}  |  ${COMPANY.website}`,
             0, F_BAR + 8, { width: W, align: "center", lineBreak: false });
 
