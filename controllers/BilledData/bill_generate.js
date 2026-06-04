@@ -110,8 +110,22 @@ async function buildBillPDF(billData) {
     const { billId, customer, plan, subscription, total, qrBuffer } = billData;
 
     return new Promise((resolve, reject) => {
-        const doc = new PDFDocument({ size: "A4", margin: 0, autoFirstPage: false });
-        doc.addPage({ size: "A4", margin: 0 });
+        // Add print-friendly options
+        const doc = new PDFDocument({
+            size: "A4",
+            margin: 0,
+            autoFirstPage: false,
+            // Add these options for better print compatibility
+            pdfVersion: "1.7",
+            printScaling: "none" // Prevents automatic scaling in print
+        });
+
+        doc.addPage({
+            size: "A4",
+            margin: 0,
+            // Ensure the page size is explicitly set
+            mediaBox: [0, 0, 595.28, 841.89] // Explicit A4 dimensions
+        });
 
         const chunks = [];
         doc.on("data", c => chunks.push(c));
@@ -122,10 +136,11 @@ async function buildBillPDF(billData) {
         const W = 595.28;
         const H = 841.89;
         const M = 36;
-        const BORDER_OFFSET = 12; // Inner border offset
-        const BOTTOM_MARGIN_MM = 12; // 12mm bottom margin
-        const BOTTOM_MARGIN_PTS = BOTTOM_MARGIN_MM * 2.83465; // Convert mm to points
-        const FOOTER_HEIGHT = 26; // Footer bar height in points
+
+        // Reduced border offset and margins for better print compatibility
+        const BORDER_OFFSET = 10; // Reduced from 12 to ensure borders print
+        const PRINT_MARGIN = 4; // Small safety margin for printer limitations
+        const FOOTER_HEIGHT = 26;
 
         const DARK_BLUE = "#0d2b4e";
         const MID_BLUE = "#1a4a8a";
@@ -135,40 +150,48 @@ async function buildBillPDF(billData) {
         const LGRAY = "#888888";
         const BORDER_COLOR = "#1a4a8a";
 
-        // ── PAGE BORDER ───────────────────────────────────────────────────────
-        // Outer border (thick)
-        doc.save();
-        doc.lineWidth(2);
-        doc.strokeColor(BORDER_COLOR);
-        doc.rect(8, 8, W - 16, H - 16).stroke();
+        // ── PAGE BORDER (Adjusted for print compatibility) ───────────────────
+        const OUTER_MARGIN = PRINT_MARGIN;
+        const OUTER_W = W - (OUTER_MARGIN * 2);
+        const OUTER_H = H - (OUTER_MARGIN * 2);
 
-        // Inner border (thin, decorative)
+        // Outer border (thick) - positioned slightly inside page edge
+        doc.save();
+        doc.lineWidth(1.5); // Slightly thinner to ensure it prints
+        doc.strokeColor(BORDER_COLOR);
+        doc.rect(OUTER_MARGIN, OUTER_MARGIN, OUTER_W, OUTER_H).stroke();
+
+        // Inner border (thin, decorative) - with adjusted offset
+        const INNER_OFFSET = OUTER_MARGIN + BORDER_OFFSET;
+        const INNER_W = W - (INNER_OFFSET * 2);
+        const INNER_H = H - (INNER_OFFSET * 2);
+
         doc.lineWidth(0.5);
         doc.strokeColor(MID_BLUE);
-        doc.rect(BORDER_OFFSET, BORDER_OFFSET, W - (BORDER_OFFSET * 2), H - (BORDER_OFFSET * 2)).stroke();
+        doc.rect(INNER_OFFSET, INNER_OFFSET, INNER_W, INNER_H).stroke();
 
-        // Corner decorations - top-left
+        // Corner decorations - adjusted positions
         doc.lineWidth(1.5);
         doc.strokeColor(DARK_BLUE);
-        doc.moveTo(8, 20).lineTo(8, 8).lineTo(20, 8).stroke();
 
-        // Corner decorations - top-right
-        doc.moveTo(W - 8, 20).lineTo(W - 8, 8).lineTo(W - 20, 8).stroke();
+        // Top-left corner
+        doc.moveTo(OUTER_MARGIN, 28).lineTo(OUTER_MARGIN, OUTER_MARGIN).lineTo(28, OUTER_MARGIN).stroke();
 
-        // Corner decorations - bottom-left
-        doc.moveTo(8, H - 20).lineTo(8, H - 8).lineTo(20, H - 8).stroke();
+        // Top-right corner
+        doc.moveTo(W - OUTER_MARGIN, 28).lineTo(W - OUTER_MARGIN, OUTER_MARGIN).lineTo(W - 28, OUTER_MARGIN).stroke();
 
-        // Corner decorations - bottom-right
-        doc.moveTo(W - 8, H - 20).lineTo(W - 8, H - 8).lineTo(W - 20, H - 8).stroke();
+        // Bottom-left corner
+        doc.moveTo(OUTER_MARGIN, H - 28).lineTo(OUTER_MARGIN, H - OUTER_MARGIN).lineTo(28, H - OUTER_MARGIN).stroke();
+
+        // Bottom-right corner
+        doc.moveTo(W - OUTER_MARGIN, H - 28).lineTo(W - OUTER_MARGIN, H - OUTER_MARGIN).lineTo(W - 28, H - OUTER_MARGIN).stroke();
+
         doc.restore();
 
-        // Safe text function - NEVER advances doc.y
+        // Safe text function
         const T = (text, x, y, opts = {}) => {
             doc.text(String(text), x, y, { lineBreak: false, ...opts });
         };
-
-        // ── TOP BAR (Inside border) ───────────────────────────────────────────
-        // doc.rect(BORDER_OFFSET, BORDER_OFFSET, W - (BORDER_OFFSET * 2), 20).fill(DARK_BLUE);
 
         // ── LOGO ──────────────────────────────────────────────────────────────
         doc.circle(M + 18, 52, 16).fill(MID_BLUE);
@@ -231,9 +254,9 @@ async function buildBillPDF(billData) {
         // TWO-COLUMN SECTION: BILL TO (left) | QR (right)
         // ══════════════════════════════════════════════════════════════════════
         const COL_TOP = divY + 10;
-        const LEFT_W = 230;      // Width for BILL TO column
-        const RIGHT_X = M + LEFT_W + 12;  // QR column X position
-        const RIGHT_W = W - M - RIGHT_X;  // QR column width
+        const LEFT_W = 230;
+        const RIGHT_X = M + LEFT_W + 12;
+        const RIGHT_W = W - M - RIGHT_X;
 
         // ── BILL TO (LEFT COLUMN) ─────────────────────────────────────────────
         doc.rect(M, COL_TOP, 55, 15).fill(DARK_BLUE);
@@ -315,19 +338,19 @@ async function buildBillPDF(billData) {
 
         doc.rect(M, ftY, TBLW, ftH).fill("white").strokeColor(GRAY).lineWidth(0.5).stroke();
 
-        // Section header - "Plan Includes"
+        // Section header
         doc.rect(M, ftY, TBLW, 20).fill("#f0f4fc");
         doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(8);
         T("Plan Includes", M + 6, ftY + 6);
 
-        // Column headers - "FEATURE" and "VALUE" (below the section header)
+        // Column headers
         const headerY = ftY + 22;
         doc.fillColor(MID_BLUE).font("Helvetica-Bold").fontSize(7.5);
         const FK_W = 240;
         T("FEATURE", M + 6, headerY);
         T("VALUE", M + FK_W, headerY);
 
-        // Feature rows (starting below the column headers)
+        // Feature rows
         let fy = headerY + 14;
         feats.forEach((f, idx) => {
             if (idx % 2 === 0) doc.rect(M + 1, fy - 2, TBLW - 2, FT_ROW).fill("#f7f9fe");
@@ -386,14 +409,14 @@ async function buildBillPDF(billData) {
         T(subscription.payment?.transactionId || "N/A", M + 200, totY);
 
         // ══════════════════════════════════════════════════════════════════════
-        // FOOTER - Perfectly positioned inside the border with 12mm bottom margin
+        // FOOTER - Adjusted for print compatibility
         // ══════════════════════════════════════════════════════════════════════
 
-        // Calculate footer position inside the border
-        const INNER_BOTTOM = H - BORDER_OFFSET; // Bottom edge of inner border
-        const FOOTER_BASE_Y = INNER_BOTTOM - BOTTOM_MARGIN_PTS - FOOTER_HEIGHT;
+        // Calculate footer position with print margins in mind
+        const FOOTER_MARGIN = PRINT_MARGIN + 8; // Additional margin for footer
+        const FOOTER_BASE_Y = H - FOOTER_MARGIN - FOOTER_HEIGHT;
 
-        // Only add footer if there's enough space (content doesn't overlap)
+        // Only add footer if there's enough space
         if (totY + 40 < FOOTER_BASE_Y) {
             const F_LINE = FOOTER_BASE_Y - 12;
             const F_TXT1 = FOOTER_BASE_Y - 24;
@@ -409,12 +432,19 @@ async function buildBillPDF(billData) {
             doc.fillColor(GRAY).font("Helvetica").fontSize(8);
             T("We appreciate your business!", M, F_TXT2, { width: W - M * 2, align: "center" });
 
-            // Footer bar - positioned inside border with 12mm from inner border bottom
-            doc.rect(BORDER_OFFSET, FOOTER_BASE_Y, W - (BORDER_OFFSET * 2), FOOTER_HEIGHT).fill(DARK_BLUE);
+            // Footer bar - adjusted width to ensure it prints within page
+            const FOOTER_X = M - 4; // Slightly wider to compensate for print margins
+            const FOOTER_WIDTH = W - (M * 2) + 8;
+
+            doc.rect(FOOTER_X, FOOTER_BASE_Y, FOOTER_WIDTH, FOOTER_HEIGHT).fill(DARK_BLUE);
             doc.fillColor("white").font("Helvetica").fontSize(6.8);
 
             T(`UAI Contact Us | ${COMPANY.phone} | ${COMPANY.email} | ${COMPANY.website}`,
-                BORDER_OFFSET, FOOTER_BASE_Y + 8, { width: W - (BORDER_OFFSET * 2), align: "center", lineBreak: false });
+                FOOTER_X, FOOTER_BASE_Y + 8, {
+                width: FOOTER_WIDTH,
+                align: "center",
+                lineBreak: false
+            });
         }
 
         doc.end();
