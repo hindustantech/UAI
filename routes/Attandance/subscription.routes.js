@@ -12,5 +12,5 @@ const router = express.Router();
 router.get("/admin/subscriptions", authMiddleware, getAllSubscriptions);
 router.get("/admin/getCurrentActiveSubscription", authMiddleware, getCurrentActiveSubscription);
 // router.get("/admin/getSubscriptionHistory", authMiddleware, getSubscriptionHistory);
-r    
+// r    
 export default router;
