@@ -122,6 +122,9 @@ async function buildBillPDF(billData) {
         const W = 595.28;
         const H = 841.89;
         const M = 36;
+        const BOTTOM_MARGIN_MM = 12; // 12mm bottom margin
+        const BOTTOM_MARGIN_PTS = BOTTOM_MARGIN_MM * 2.83465; // Convert mm to points (1mm = 2.83465 points)
+        const FOOTER_HEIGHT = 26; // Footer bar height in points
 
         const DARK_BLUE = "#0d2b4e";
         const MID_BLUE = "#1a4a8a";
@@ -129,6 +132,34 @@ async function buildBillPDF(billData) {
         const GREEN = "#2ca02c";
         const GRAY = "#555555";
         const LGRAY = "#888888";
+        const BORDER_COLOR = "#1a4a8a";
+
+        // ── PAGE BORDER ───────────────────────────────────────────────────────
+        // Outer border (thick)
+        doc.save();
+        doc.lineWidth(2);
+        doc.strokeColor(BORDER_COLOR);
+        doc.rect(8, 8, W - 16, H - 16).stroke();
+
+        // Inner border (thin, decorative)
+        doc.lineWidth(0.5);
+        doc.strokeColor(MID_BLUE);
+        doc.rect(12, 12, W - 24, H - 24).stroke();
+
+        // Corner decorations - top-left
+        doc.lineWidth(1.5);
+        doc.strokeColor(DARK_BLUE);
+        doc.moveTo(8, 20).lineTo(8, 8).lineTo(20, 8).stroke();
+
+        // Corner decorations - top-right
+        doc.moveTo(W - 8, 20).lineTo(W - 8, 8).lineTo(W - 20, 8).stroke();
+
+        // Corner decorations - bottom-left
+        doc.moveTo(8, H - 20).lineTo(8, H - 8).lineTo(20, H - 8).stroke();
+
+        // Corner decorations - bottom-right
+        doc.moveTo(W - 8, H - 20).lineTo(W - 8, H - 8).lineTo(W - 20, H - 8).stroke();
+        doc.restore();
 
         // Safe text function - NEVER advances doc.y
         const T = (text, x, y, opts = {}) => {
@@ -354,12 +385,12 @@ async function buildBillPDF(billData) {
         T(subscription.payment?.transactionId || "N/A", M + 200, totY);
 
         // ══════════════════════════════════════════════════════════════════════
-        // FOOTER - PERFECTED: Always at bottom, never triggers new page
+        // FOOTER - PERFECTED: Positioned with 12mm margin from bottom
         // ══════════════════════════════════════════════════════════════════════
-        const F_LINE = H - 62;
-        const F_TXT1 = H - 54;
-        const F_TXT2 = H - 41;
-        const F_BAR = H - 26;
+        const FOOTER_BASE_Y = H - BOTTOM_MARGIN_PTS - FOOTER_HEIGHT;
+        const F_LINE = FOOTER_BASE_Y - 8;
+        const F_TXT1 = FOOTER_BASE_Y - 18;
+        const F_TXT2 = FOOTER_BASE_Y - 31;
 
         doc.moveTo(M, F_LINE).lineTo(W - M, F_LINE).strokeColor("#cccccc").lineWidth(0.5).stroke();
 
@@ -369,11 +400,12 @@ async function buildBillPDF(billData) {
         doc.fillColor(GRAY).font("Helvetica").fontSize(8);
         T("We appreciate your business!", M, F_TXT2, { width: W - M * 2, align: "center" });
 
-        doc.rect(0, F_BAR, W, 26).fill(DARK_BLUE);
+        // Footer bar - positioned exactly 12mm from bottom
+        doc.rect(0, FOOTER_BASE_Y, W, FOOTER_HEIGHT).fill(DARK_BLUE);
         doc.fillColor("white").font("Helvetica").fontSize(6.8);
 
         T(` UAI Contact Us| ${COMPANY.phone}  |  ${COMPANY.email}  |  ${COMPANY.website} `,
-            0, F_BAR + 8, { width: W, align: "center", lineBreak: false });
+            0, FOOTER_BASE_Y + 8, { width: W, align: "center", lineBreak: false });
 
         doc.end();
     });
