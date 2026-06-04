@@ -412,9 +412,9 @@ async function buildBillPDF(billData) {
         // FOOTER - Adjusted for print compatibility
         // ══════════════════════════════════════════════════════════════════════
 
-        // Calculate footer position with print margins in mind
-        const FOOTER_MARGIN = PRINT_MARGIN + 8; // Additional margin for footer
-        const FOOTER_BASE_Y = H - FOOTER_MARGIN - FOOTER_HEIGHT;
+        // // Calculate footer position with print margins in mind
+        // const FOOTER_MARGIN = PRINT_MARGIN + 8; // Additional margin for footer
+        // const FOOTER_BASE_Y = H - FOOTER_MARGIN - FOOTER_HEIGHT;
 
         // ══════════════════════════════════════════════════════════════════════
         // FOOTER - Properly positioned with inner border margin
