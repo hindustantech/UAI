@@ -59,14 +59,14 @@ function amountInWords(amount) {
         "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
         "Seventeen", "Eighteen", "Nineteen"];
     const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-    
+
     function say(n) {
         if (n === 0) return "";
         if (n < 20) return ones[n];
         if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? " " + ones[n % 10] : "");
         return ones[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " " + say(n % 100) : "");
     }
-    
+
     function full(n) {
         if (n === 0) return "Zero";
         const p = [];
@@ -76,7 +76,7 @@ function amountInWords(amount) {
         if (n > 0) { p.push(say(n)); }
         return p.join(" ");
     }
-    
+
     const rupees = Math.floor(amount);
     const paise = Math.round((amount - rupees) * 100);
     let result = `Rupees ${full(rupees)}`;
@@ -192,24 +192,46 @@ async function buildBillPDF(billData) {
         T(`GSTIN: ${COMPANY.gstin}`, M, ay);
 
         // ── DIVIDER ───────────────────────────────────────────────────────────
-        const divY = 158;
+        const divY = 164;
         doc.moveTo(M, divY).lineTo(W - M, divY).strokeColor("#dddddd").lineWidth(0.5).stroke();
 
         // ══════════════════════════════════════════════════════════════════════
-        // TWO-COLUMN SECTION: QR (left) | BILL TO (right)
+        // TWO-COLUMN SECTION: BILL TO (left) | QR (right)
         // ══════════════════════════════════════════════════════════════════════
         const COL_TOP = divY + 10;
-        const QR_W = 230;
-        const BT_X = M + QR_W + 12;
-        const BT_W = W - M - BT_X;
+        const LEFT_W = 230;      // Width for BILL TO column
+        const RIGHT_X = M + LEFT_W + 12;  // QR column X position
+        const RIGHT_W = W - M - RIGHT_X;  // QR column width
 
-        // ── QR BOX ────────────────────────────────────────────────────────────
+        // ── BILL TO (LEFT COLUMN) ─────────────────────────────────────────────
+        doc.rect(M, COL_TOP, 55, 15).fill(DARK_BLUE);
+        doc.fillColor("white").font("Helvetica-Bold").fontSize(7.5);
+        T("BILL TO", M + 4, COL_TOP + 4);
+
+        const cbY = COL_TOP + 20;
+        doc.roundedRect(M, cbY, LEFT_W, 88, 5).fill(LIGHT_BG);
+
+        // Avatar circle
+        doc.circle(M + 22, cbY + 38, 17).fill("#b0c4de");
+        doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(14);
+        T("U", M + 15, cbY + 28);
+
+        const tx = M + 46;
+        doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(9);
+        T(customer.name, tx, cbY + 10);
+
+        doc.fillColor(GRAY).font("Helvetica").fontSize(8);
+        T(customer.phone || "-", tx, cbY + 26);
+        T(customer.email || "-", tx, cbY + 39);
+        doc.text(customer.address || "-", tx, cbY + 52, { width: LEFT_W - 50, lineBreak: true });
+
+        // ── QR BOX (RIGHT COLUMN) ─────────────────────────────────────────────
         const qbH = 110;
-        doc.roundedRect(M, COL_TOP, QR_W, qbH, 5).fill(LIGHT_BG);
-        doc.image(qrBuffer, M + 6, COL_TOP + 6, { width: 78, height: 78 });
+        doc.roundedRect(RIGHT_X, COL_TOP, RIGHT_W, qbH, 5).fill(LIGHT_BG);
+        doc.image(qrBuffer, RIGHT_X + 6, COL_TOP + 6, { width: 78, height: 78 });
 
         doc.fillColor(MID_BLUE).font("Helvetica-Bold").fontSize(8);
-        T("Scan to Verify", M + 90, COL_TOP + 8);
+        T("Scan to Verify", RIGHT_X + 90, COL_TOP + 8);
 
         doc.fillColor(DARK_BLUE).font("Helvetica").fontSize(7);
         const qlines = [
@@ -220,34 +242,13 @@ async function buildBillPDF(billData) {
         ];
         let ql = COL_TOP + 20;
         for (const l of qlines) {
-            T(l, M + 90, ql);
+            T(l, RIGHT_X + 90, ql);
             ql += 13;
         }
 
         doc.fillColor(LGRAY).font("Helvetica-Oblique").fontSize(6.2);
         doc.text("Scan this QR code to view bill details and verification.",
-            M + 6, COL_TOP + 90, { width: 218, lineBreak: true });
-
-        // ── BILL TO ───────────────────────────────────────────────────────────
-        doc.rect(BT_X, COL_TOP, 55, 15).fill(DARK_BLUE);
-        doc.fillColor("white").font("Helvetica-Bold").fontSize(7.5);
-        T("BILL TO", BT_X + 4, COL_TOP + 4);
-
-        const cbY = COL_TOP + 20;
-        doc.roundedRect(BT_X, cbY, BT_W, 88, 5).fill(LIGHT_BG);
-
-        doc.circle(BT_X + 22, cbY + 38, 17).fill("#b0c4de");
-        doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(14);
-        T("U", BT_X + 15, cbY + 28);
-
-        const tx = BT_X + 46;
-        doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(9);
-        T(customer.name, tx, cbY + 10);
-
-        doc.fillColor(GRAY).font("Helvetica").fontSize(8);
-        T(customer.phone || "-", tx, cbY + 26);
-        T(customer.email || "-", tx, cbY + 39);
-        doc.text(customer.address || "-", tx, cbY + 52, { width: BT_W - 50, lineBreak: true });
+            RIGHT_X + 6, COL_TOP + 90, { width: RIGHT_W - 12, lineBreak: true });
 
         // ── ITEMS TABLE ───────────────────────────────────────────────────────
         const tblY = COL_TOP + qbH + 14;
@@ -276,16 +277,16 @@ async function buildBillPDF(billData) {
 
         // ── FEATURES TABLE ────────────────────────────────────────────────────
         const feats = (plan.features || []).map(f => ({ key: f.key, val: String(f.value) }));
-        const FT_ROW = 15;
-        const ftY = drY + 18;
-        const ftH = 18 + feats.length * FT_ROW + 6;
+        const FT_ROW = 18;
+        const ftY = drY + 20 + 18;
+        const ftH = 20 + feats.length * FT_ROW + 8;
 
         doc.rect(M, ftY, TBLW, ftH).fill("white").strokeColor(GRAY).lineWidth(0.5).stroke();
         doc.rect(M, ftY, TBLW, 17).fill("#f0f4fc");
         doc.fillColor(DARK_BLUE).font("Helvetica-Bold").fontSize(7.5);
         T("Plan Includes", M + 6, ftY + 5);
 
-        const FK_W = 220;
+        const FK_W = 240;
         doc.fillColor(MID_BLUE).font("Helvetica-Bold").fontSize(7);
         T("FEATURE", M + 6, ftY + 5);
         T("VALUE", M + FK_W, ftY + 5);
@@ -365,8 +366,8 @@ async function buildBillPDF(billData) {
 
         doc.rect(0, F_BAR, W, 26).fill(DARK_BLUE);
         doc.fillColor("white").font("Helvetica").fontSize(6.8);
-        T("If you have any questions, feel free to contact us.", M, F_BAR + 8, { lineBreak: false });
-        T(`${COMPANY.phone}  |  ${COMPANY.email}  |  ${COMPANY.website}`,
+        T("If you have any questions, feel free to contact us.", M, F_BAR + 6, { lineBreak: false });
+        T(`   |   ${COMPANY.phone}  |  ${COMPANY.email}  |  ${COMPANY.website}`,
             0, F_BAR + 8, { width: W, align: "center", lineBreak: false });
 
         doc.end();
@@ -406,7 +407,7 @@ export const generateBill = async (req, res) => {
         const subscription = await Subscription.findOne({
             company: user._id, status: "ACTIVE", isActive: true,
         }).populate("plan").sort({ startDate: -1 });
-        
+
         if (!subscription) return res.status(404).json({ success: false, message: "No active subscription" });
 
         const plan = subscription.plan;
@@ -448,7 +449,7 @@ export const downloadBill = async (req, res) => {
         const subscription = await Subscription.findOne({ bill_id: billId })
             .populate("plan")
             .populate("company", "name email phone manul_address");
-        
+
         if (!subscription) return res.status(404).json({ success: false, message: "Bill not found" });
 
         const plan = subscription.plan;
