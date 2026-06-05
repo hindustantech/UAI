@@ -544,7 +544,8 @@ export const exportSalesReport = async (req, res) => {
         // SECURITY: Extract company ID from authenticated user
         // ============================================
         const companyId = req.user?.companyId || req.user?._id;
-
+        console.log("Authenticated User ID:", req.user?._id);
+        console.log("Company ID:", companyId);  
         if (!companyId) {
             return res.status(403).json({
                 success: false,
@@ -559,7 +560,8 @@ export const exportSalesReport = async (req, res) => {
             companyId: companyId,
             employmentStatus: "active"
         }).select('userId user_name empCode employeeType role').lean();
-
+        console.log(`Found ${companyEmployees.length} active employees for company`);
+        
         if (!companyEmployees || companyEmployees.length === 0) {
             return res.status(404).json({
                 success: false,
