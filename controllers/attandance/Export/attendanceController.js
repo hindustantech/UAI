@@ -78,7 +78,6 @@ export const formatLateTime = (totalMinutes = 0) => {
 /* ─────────────────────────────────────────────
    MAIN EXPORT HANDLER
 ───────────────────────────────────────────── */
-
 export const generateAttendanceCSV = async (req, res) => {
     try {
         const { startDate, endDate, department, employeeCode, format = "xlsx" } = req.query;
@@ -129,136 +128,268 @@ export const generateAttendanceCSV = async (req, res) => {
             dateRange.push(new Date(d));
         }
 
-        // ── Build rows ─────────────────────────────────────────────────
-        const rows = [];
+        // ── Check premium access ───────────────────────────────────────
+        const isPremium = await checkPremiumAccess(companyId);
+        const employeeCount = employees.length;
+        const exceedsFreeLimit = !isPremium && employeeCount > PREMIUM_CONFIG.maxFreeRows;
 
-        for (const emp of employees) {
-            const weeklyOffDays = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
+        // ── Build rows (full or limited based on premium) ─────────────────
+        let rows = [];
 
-            // Shift — fallback to 09:00 – 18:00
-            const shiftStart = emp.shift?.startTime || "09:00";
-            const shiftEnd = emp.shift?.endTime || "18:00";
-            const shiftName = emp.shift?.shiftName || "Default (09:00–18:00)";
-            const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
-            const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
+        if (exceedsFreeLimit) {
+            // Build limited rows for free version
+            let recordsAdded = 0;
+            const maxRecords = PREMIUM_CONFIG.maxFreeRows;
+            const daysToShow = Math.min(dateRange.length, 5); // Show only 5 days per employee for free version
 
-            for (const date of dateRange) {
-                const dateKey = date.toISOString().split("T")[0];
-                const dayOfWeek = date.toLocaleDateString("en-IN", { weekday: "long" });
-                const attendance = attendanceMap.get(`${emp._id}_${dateKey}`);
-                const isWeeklyOff = weeklyOffDays.includes(dayOfWeek);
+            for (const emp of employees) {
+                if (recordsAdded >= maxRecords) break;
 
-                // ── Defaults ───────────────────────────────────────────
-                let punchInTime = "";
-                let punchOutTime = "";
-                let totalHours = "0.00";
-                let overtimeMinutes = 0;
-                let lateMinutes = 0;
-                let earlyLeaveMinutes = 0;
-                let breakMinutes = 0;
-                let statusLabel = "";
-                let locationVerified = "No";
-                let remarks = "";
-                let autoMarked = "No";
-                let suspicious = "No";
+                const weeklyOffDays = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
+                const shiftStart = emp.shift?.startTime || "09:00";
+                const shiftEnd = emp.shift?.endTime || "18:00";
+                const shiftName = emp.shift?.shiftName || "Default (09:00–18:00)";
+                const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
+                const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
 
-                if (isWeeklyOff) {
-                    // ── Weekly Off ─────────────────────────────────────
-                    punchInTime = "—";
-                    punchOutTime = "—";
-                    statusLabel = "Week Off";
+                // Show limited dates for free version
+                const limitedDateRange = dateRange.slice(0, daysToShow);
 
-                } else if (!attendance) {
-                    // ── Absent (no record) ─────────────────────────────
-                    punchInTime = "—";
-                    punchOutTime = "—";
-                    statusLabel = "Absent";
+                for (const date of limitedDateRange) {
+                    if (recordsAdded >= maxRecords) break;
 
-                } else {
-                    // ── Record exists ──────────────────────────────────
-                    punchInTime = attendance.punchIn ? formatTime(attendance.punchIn) : "—";
-                    punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
-                    totalHours = minutesToHours(attendance.workSummary?.totalMinutes || 0);
-                    overtimeMinutes = attendance.workSummary?.overtimeMinutes || 0;
-                    lateMinutes = formatLateTime(attendance?.workSummary?.lateMinutes) || 0;
-                    earlyLeaveMinutes = attendance.workSummary?.earlyLeaveMinutes || 0;
-                    breakMinutes = totalBreakMinutes(attendance.breaks);
-                    locationVerified = attendance.geoLocation?.verified ? "Yes" : "No";
-                    remarks = attendance.remarks || "";
-                    autoMarked = attendance.isAutoMarked ? "Yes" : "No";
-                    suspicious = attendance.isSuspicious ? "Yes" : "No";
+                    const dateKey = date.toISOString().split("T")[0];
+                    const dayOfWeek = date.toLocaleDateString("en-IN", { weekday: "long" });
+                    const attendance = attendanceMap.get(`${emp._id}_${dateKey}`);
+                    const isWeeklyOff = weeklyOffDays.includes(dayOfWeek);
 
-                    // ── Recalculate late/early if workSummary is 0 ─────
-                    if (lateMinutes === 0 && earlyLeaveMinutes === 0 && attendance.punchIn) {
-                        const inMins = timeStrToMinutes(formatTime(attendance.punchIn));
-                        const shiftInMins = timeStrToMinutes(shiftStart);
-                        if (inMins - shiftInMins > graceIn) lateMinutes = inMins - shiftInMins;
+                    let punchInTime = "";
+                    let punchOutTime = "";
+                    let totalHours = "0.00";
+                    let overtimeMinutes = 0;
+                    let lateMinutes = 0;
+                    let earlyLeaveMinutes = 0;
+                    let breakMinutes = 0;
+                    let statusLabel = "";
+                    let locationVerified = "No";
+                    let remarks = "";
+                    let autoMarked = "No";
+                    let suspicious = "No";
 
-                        if (attendance.punchOut) {
-                            const outMins = timeStrToMinutes(formatTime(attendance.punchOut));
-                            const shiftOutMins = timeStrToMinutes(shiftEnd);
-                            if (shiftOutMins - outMins > graceOut) earlyLeaveMinutes = shiftOutMins - outMins;
+                    if (isWeeklyOff) {
+                        punchInTime = "—";
+                        punchOutTime = "—";
+                        statusLabel = "Week Off";
+                    } else if (!attendance) {
+                        punchInTime = "—";
+                        punchOutTime = "—";
+                        statusLabel = "Absent";
+                    } else {
+                        punchInTime = attendance.punchIn ? formatTime(attendance.punchIn) : "—";
+                        punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
+                        totalHours = minutesToHours(attendance.workSummary?.totalMinutes || 0);
+                        overtimeMinutes = attendance.workSummary?.overtimeMinutes || 0;
+                        lateMinutes = formatLateTime(attendance?.workSummary?.lateMinutes) || 0;
+                        earlyLeaveMinutes = attendance.workSummary?.earlyLeaveMinutes || 0;
+                        breakMinutes = totalBreakMinutes(attendance.breaks);
+                        locationVerified = attendance.geoLocation?.verified ? "Yes" : "No";
+                        remarks = attendance.remarks || "";
+                        autoMarked = attendance.isAutoMarked ? "Yes" : "No";
+                        suspicious = attendance.isSuspicious ? "Yes" : "No";
+
+                        if (lateMinutes === 0 && earlyLeaveMinutes === 0 && attendance.punchIn) {
+                            const inMins = timeStrToMinutes(formatTime(attendance.punchIn));
+                            const shiftInMins = timeStrToMinutes(shiftStart);
+                            if (inMins - shiftInMins > graceIn) lateMinutes = inMins - shiftInMins;
+
+                            if (attendance.punchOut) {
+                                const outMins = timeStrToMinutes(formatTime(attendance.punchOut));
+                                const shiftOutMins = timeStrToMinutes(shiftEnd);
+                                if (shiftOutMins - outMins > graceOut) earlyLeaveMinutes = shiftOutMins - outMins;
+                            }
+                        }
+
+                        switch (attendance.status) {
+                            case "leave":
+                                statusLabel = "Leave";
+                                punchInTime = "—";
+                                punchOutTime = "—";
+                                totalHours = "0.00";
+                                break;
+                            case "half_day":
+                                statusLabel = "Half Day";
+                                break;
+                            case "holiday":
+                                statusLabel = "Holiday";
+                                punchInTime = "—";
+                                punchOutTime = "—";
+                                totalHours = "0.00";
+                                break;
+                            case "week_off":
+                                statusLabel = "Week Off";
+                                break;
+                            case "absent":
+                                statusLabel = "Absent";
+                                break;
+                            case "present":
+                            default: {
+                                const tags = getLateEarlyTags(
+                                    shiftStart, shiftEnd,
+                                    attendance.punchIn, attendance.punchOut,
+                                    graceIn, graceOut
+                                );
+                                statusLabel = tags.length ? tags.join(" + ") : "Present";
+                                break;
+                            }
                         }
                     }
 
-                    // ── Status label ───────────────────────────────────
-                    switch (attendance.status) {
-                        case "leave":
-                            statusLabel = "Leave";
-                            punchInTime = "—";
-                            punchOutTime = "—";
-                            totalHours = "0.00";
-                            break;
-                        case "half_day":
-                            statusLabel = "Half Day";
-                            break;
-                        case "holiday":
-                            statusLabel = "Holiday";
-                            punchInTime = "—";
-                            punchOutTime = "—";
-                            totalHours = "0.00";
-                            break;
-                        case "week_off":
-                            statusLabel = "Week Off";
-                            break;
-                        case "absent":
-                            statusLabel = "Absent";
-                            break;
-                        case "present":
-                        default: {
-                            const tags = getLateEarlyTags(
-                                shiftStart, shiftEnd,
-                                attendance.punchIn, attendance.punchOut,
-                                graceIn, graceOut
-                            );
-                            statusLabel = tags.length ? tags.join(" + ") : "Present";
-                            break;
-                        }
-                    }
+                    rows.push({
+                        "Emp Code": emp.empCode || "—",
+                        "Emp Name": emp.user_name || "N/A",
+                        "Department": emp.jobInfo?.department || "N/A",
+                        "Shift": shiftName,
+                        "Date": dateKey,
+                        "Day": dayOfWeek,
+                        "Punch In": punchInTime,
+                        "Punch Out": punchOutTime,
+                        "Total Hours": totalHours,
+                        "Overtime (min)": overtimeMinutes,
+                        "Late (min)": lateMinutes,
+                        "Early Leave (min)": earlyLeaveMinutes,
+                        "Break (min)": breakMinutes,
+                        "Status": statusLabel,
+                        "Location Verified": locationVerified,
+                        "Remarks": remarks,
+                        "Auto Marked": autoMarked,
+                        "Suspicious": suspicious,
+                    });
+
+                    recordsAdded++;
                 }
+            }
+        } else {
+            // Build full rows for premium users
+            for (const emp of employees) {
+                const weeklyOffDays = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
+                const shiftStart = emp.shift?.startTime || "09:00";
+                const shiftEnd = emp.shift?.endTime || "18:00";
+                const shiftName = emp.shift?.shiftName || "Default (09:00–18:00)";
+                const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
+                const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
 
-                rows.push({
-                    "Emp Code": emp.empCode || "—",
-                    "Emp Name": emp.user_name || "N/A",
-                    "Department": emp.jobInfo?.department || "N/A",
-                    "Shift": shiftName,
-                    "Date": dateKey,
-                    "Day": dayOfWeek,
-                    "Punch In": punchInTime,
-                    "Punch Out": punchOutTime,
-                    "Total Hours": totalHours,
-                    "Overtime (min)": overtimeMinutes,
-                    "Late (min)": lateMinutes,
-                    "Early Leave (min)": earlyLeaveMinutes,
-                    "Break (min)": breakMinutes,
-                    "Status": statusLabel,
-                    "Location Verified": locationVerified,
-                    "Remarks": remarks,
-                    "Auto Marked": autoMarked,
-                    "Suspicious": suspicious,
-                });
+                for (const date of dateRange) {
+                    const dateKey = date.toISOString().split("T")[0];
+                    const dayOfWeek = date.toLocaleDateString("en-IN", { weekday: "long" });
+                    const attendance = attendanceMap.get(`${emp._id}_${dateKey}`);
+                    const isWeeklyOff = weeklyOffDays.includes(dayOfWeek);
+
+                    let punchInTime = "";
+                    let punchOutTime = "";
+                    let totalHours = "0.00";
+                    let overtimeMinutes = 0;
+                    let lateMinutes = 0;
+                    let earlyLeaveMinutes = 0;
+                    let breakMinutes = 0;
+                    let statusLabel = "";
+                    let locationVerified = "No";
+                    let remarks = "";
+                    let autoMarked = "No";
+                    let suspicious = "No";
+
+                    if (isWeeklyOff) {
+                        punchInTime = "—";
+                        punchOutTime = "—";
+                        statusLabel = "Week Off";
+                    } else if (!attendance) {
+                        punchInTime = "—";
+                        punchOutTime = "—";
+                        statusLabel = "Absent";
+                    } else {
+                        punchInTime = attendance.punchIn ? formatTime(attendance.punchIn) : "—";
+                        punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
+                        totalHours = minutesToHours(attendance.workSummary?.totalMinutes || 0);
+                        overtimeMinutes = attendance.workSummary?.overtimeMinutes || 0;
+                        lateMinutes = formatLateTime(attendance?.workSummary?.lateMinutes) || 0;
+                        earlyLeaveMinutes = attendance.workSummary?.earlyLeaveMinutes || 0;
+                        breakMinutes = totalBreakMinutes(attendance.breaks);
+                        locationVerified = attendance.geoLocation?.verified ? "Yes" : "No";
+                        remarks = attendance.remarks || "";
+                        autoMarked = attendance.isAutoMarked ? "Yes" : "No";
+                        suspicious = attendance.isSuspicious ? "Yes" : "No";
+
+                        if (lateMinutes === 0 && earlyLeaveMinutes === 0 && attendance.punchIn) {
+                            const inMins = timeStrToMinutes(formatTime(attendance.punchIn));
+                            const shiftInMins = timeStrToMinutes(shiftStart);
+                            if (inMins - shiftInMins > graceIn) lateMinutes = inMins - shiftInMins;
+
+                            if (attendance.punchOut) {
+                                const outMins = timeStrToMinutes(formatTime(attendance.punchOut));
+                                const shiftOutMins = timeStrToMinutes(shiftEnd);
+                                if (shiftOutMins - outMins > graceOut) earlyLeaveMinutes = shiftOutMins - outMins;
+                            }
+                        }
+
+                        switch (attendance.status) {
+                            case "leave":
+                                statusLabel = "Leave";
+                                punchInTime = "—";
+                                punchOutTime = "—";
+                                totalHours = "0.00";
+                                break;
+                            case "half_day":
+                                statusLabel = "Half Day";
+                                break;
+                            case "holiday":
+                                statusLabel = "Holiday";
+                                punchInTime = "—";
+                                punchOutTime = "—";
+                                totalHours = "0.00";
+                                break;
+                            case "week_off":
+                                statusLabel = "Week Off";
+                                break;
+                            case "absent":
+                                statusLabel = "Absent";
+                                break;
+                            case "present":
+                            default: {
+                                const tags = getLateEarlyTags(
+                                    shiftStart, shiftEnd,
+                                    attendance.punchIn, attendance.punchOut,
+                                    graceIn, graceOut
+                                );
+                                statusLabel = tags.length ? tags.join(" + ") : "Present";
+                                break;
+                            }
+                        }
+                    }
+
+                    rows.push({
+                        "Emp Code": emp.empCode || "—",
+                        "Emp Name": emp.user_name || "N/A",
+                        "Department": emp.jobInfo?.department || "N/A",
+                        "Shift": shiftName,
+                        "Date": dateKey,
+                        "Day": dayOfWeek,
+                        "Punch In": punchInTime,
+                        "Punch Out": punchOutTime,
+                        "Total Hours": totalHours,
+                        "Overtime (min)": overtimeMinutes,
+                        "Late (min)": lateMinutes,
+                        "Early Leave (min)": earlyLeaveMinutes,
+                        "Break (min)": breakMinutes,
+                        "Status": statusLabel,
+                        "Location Verified": locationVerified,
+                        "Remarks": remarks,
+                        "Auto Marked": autoMarked,
+                        "Suspicious": suspicious,
+                    });
+                }
             }
         }
+
+        const totalRecords = employees.length * dateRange.length;
 
         /* ─────────────────────────────────────────────
            OUTPUT: XLSX  (default)
@@ -268,128 +399,152 @@ export const generateAttendanceCSV = async (req, res) => {
             workbook.creator = "HR System";
             workbook.created = new Date();
 
-            const sheet = workbook.addWorksheet("Attendance Report", {
-                views: [{ state: "frozen", ySplit: 1 }],
-            });
+            // Add upgrade message worksheet if free tier exceeded
+            if (exceedsFreeLimit) {
+                // Create the upgrade worksheet using the existing function
+                const wsUpgrade = createUpgradeWorksheet(workbook, startDate, endDate, employeeCount);
+                // Move it to first position
+                workbook.addWorksheet("UPGRADE_REQUIRED", 1);
+                const tempSheet = workbook.getWorksheet(workbook.worksheets.length);
+                // Copy content - simpler: just ensure upgrade sheet is first
+                workbook.moveWorksheet(wsUpgrade, 0);
+            }
 
-            // ── Column definitions ────────────────────────────────────
-            sheet.columns = [
-                { header: "Emp Code", key: "Emp Code", width: 12 },
-                { header: "Emp Name", key: "Emp Name", width: 22 },
-                { header: "Department", key: "Department", width: 18 },
-                { header: "Shift", key: "Shift", width: 22 },
-                { header: "Date", key: "Date", width: 14 },
-                { header: "Day", key: "Day", width: 12 },
-                { header: "Punch In", key: "Punch In", width: 12 },
-                { header: "Punch Out", key: "Punch Out", width: 12 },
-                { header: "Total Hours", key: "Total Hours", width: 14 },
-                { header: "Overtime (min)", key: "Overtime (min)", width: 15 },
-                { header: "Late (min)", key: "Late (min)", width: 12 },
-                { header: "Early Leave (min)", key: "Early Leave (min)", width: 18 },
-                { header: "Break (min)", key: "Break (min)", width: 13 },
-                { header: "Status", key: "Status", width: 16 },
-                { header: "Location Verified", key: "Location Verified", width: 18 },
-                { header: "Remarks", key: "Remarks", width: 25 },
-                { header: "Auto Marked", key: "Auto Marked", width: 13 },
-                { header: "Suspicious", key: "Suspicious", width: 13 },
-            ];
+            // Only show data if not exceeding free limit OR if we're showing limited data
+            if (!exceedsFreeLimit || rows.length > 0) {
+                const sheet = workbook.addWorksheet("Attendance Report", {
+                    views: [{ state: "frozen", ySplit: 1 }],
+                });
 
-            // ── Header row styling ────────────────────────────────────
-            const headerRow = sheet.getRow(1);
-            headerRow.eachCell((cell) => {
-                cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
-                cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2F5496" } };
-                cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-                cell.border = {
-                    bottom: { style: "thin", color: { argb: "FFAAAAAA" } },
+                // ── Column definitions ────────────────────────────────────
+                sheet.columns = [
+                    { header: "Emp Code", key: "Emp Code", width: 12 },
+                    { header: "Emp Name", key: "Emp Name", width: 22 },
+                    { header: "Department", key: "Department", width: 18 },
+                    { header: "Shift", key: "Shift", width: 22 },
+                    { header: "Date", key: "Date", width: 14 },
+                    { header: "Day", key: "Day", width: 12 },
+                    { header: "Punch In", key: "Punch In", width: 12 },
+                    { header: "Punch Out", key: "Punch Out", width: 12 },
+                    { header: "Total Hours", key: "Total Hours", width: 14 },
+                    { header: "Overtime (min)", key: "Overtime (min)", width: 15 },
+                    { header: "Late (min)", key: "Late (min)", width: 12 },
+                    { header: "Early Leave (min)", key: "Early Leave (min)", width: 18 },
+                    { header: "Break (min)", key: "Break (min)", width: 13 },
+                    { header: "Status", key: "Status", width: 16 },
+                    { header: "Location Verified", key: "Location Verified", width: 18 },
+                    { header: "Remarks", key: "Remarks", width: 25 },
+                    { header: "Auto Marked", key: "Auto Marked", width: 13 },
+                    { header: "Suspicious", key: "Suspicious", width: 13 },
+                ];
+
+                // ── Header row styling ────────────────────────────────────
+                const headerRow = sheet.getRow(1);
+                headerRow.eachCell((cell) => {
+                    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
+                    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2F5496" } };
+                    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+                    cell.border = {
+                        bottom: { style: "thin", color: { argb: "FFAAAAAA" } },
+                    };
+                });
+                headerRow.height = 20;
+
+                // ── Status colour map ─────────────────────────────────────
+                const STATUS_COLORS = {
+                    "Present": "FFD9EAD3",
+                    "Late": "FFFFF2CC",
+                    "Late + Early Leave": "FFFCE5CD",
+                    "Early Leave": "FFFCE5CD",
+                    "Half Day": "FFFFE599",
+                    "Absent": "FFFFC7CE",
+                    "Leave": "FFD9D2E9",
+                    "Week Off": "FFD0E4F7",
+                    "Holiday": "FFD9EAD3",
                 };
-            });
-            headerRow.height = 20;
 
-            // ── Status colour map ─────────────────────────────────────
-            const STATUS_COLORS = {
-                "Present": "FFD9EAD3",   // light green
-                "Late": "FFFFF2CC",   // light yellow
-                "Late + Early Leave": "FFFCE5CD", // orange-ish
-                "Early Leave": "FFFCE5CD",
-                "Half Day": "FFFFE599",
-                "Absent": "FFFFC7CE",   // light red
-                "Leave": "FFD9D2E9",   // lavender
-                "Week Off": "FFD0E4F7",   // light blue
-                "Holiday": "FFD9EAD3",
-            };
+                // ── Data rows ─────────────────────────────────────────────
+                rows.forEach((r, idx) => {
+                    const row = sheet.addRow(r);
+                    row.height = 16;
+                    row.font = { name: "Arial", size: 9 };
 
-            // ── Data rows ─────────────────────────────────────────────
-            rows.forEach((r, idx) => {
-                const row = sheet.addRow(r);
-                row.height = 16;
-                row.font = { name: "Arial", size: 9 };
+                    const baseFill = idx % 2 === 0 ? "FFF9FAFB" : "FFFFFFFF";
 
-                // Alternating row background
-                const baseFill = idx % 2 === 0 ? "FFF9FAFB" : "FFFFFFFF";
-
-                row.eachCell({ includeEmpty: true }, (cell) => {
-                    cell.alignment = { horizontal: "center", vertical: "middle" };
-                    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: baseFill } };
-                });
-
-                // Status cell colour override
-                const statusCell = row.getCell("Status");
-                const bgColor = STATUS_COLORS[r["Status"]] || baseFill;
-                statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
-                statusCell.font = { name: "Arial", size: 9, bold: true };
-
-                // Highlight suspicious rows in red font
-                if (r["Suspicious"] === "Yes") {
-                    row.eachCell((cell) => {
-                        cell.font = { ...cell.font, color: { argb: "FF9C0006" } };
+                    row.eachCell({ includeEmpty: true }, (cell) => {
+                        cell.alignment = { horizontal: "center", vertical: "middle" };
+                        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: baseFill } };
                     });
-                }
-            });
 
-            // ── Auto-filter ───────────────────────────────────────────
-            sheet.autoFilter = {
-                from: { row: 1, column: 1 },
-                to: { row: 1, column: sheet.columns.length },
-            };
+                    const statusCell = row.getCell("Status");
+                    const bgColor = STATUS_COLORS[r["Status"]] || baseFill;
+                    statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
+                    statusCell.font = { name: "Arial", size: 9, bold: true };
 
-            // ── Summary sheet ─────────────────────────────────────────
-            const summary = workbook.addWorksheet("Summary");
-            summary.columns = [
-                { header: "Status", key: "status", width: 20 },
-                { header: "Count", key: "count", width: 10 },
-                { header: "% of Total", key: "pct", width: 14 },
-            ];
-
-            const summaryHeaderRow = summary.getRow(1);
-            summaryHeaderRow.eachCell((cell) => {
-                cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
-                cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2F5496" } };
-                cell.alignment = { horizontal: "center" };
-            });
-
-            const statusCounts = rows.reduce((acc, r) => {
-                const s = r["Status"] || "Unknown";
-                acc[s] = (acc[s] || 0) + 1;
-                return acc;
-            }, {});
-            const total = rows.length;
-            Object.entries(statusCounts).forEach(([status, count]) => {
-                summary.addRow({
-                    status,
-                    count,
-                    pct: `${((count / total) * 100).toFixed(1)}%`,
+                    if (r["Suspicious"] === "Yes") {
+                        row.eachCell((cell) => {
+                            cell.font = { ...cell.font, color: { argb: "FF9C0006" } };
+                        });
+                    }
                 });
-            });
-            summary.addRow({});
-            summary.addRow({ status: "Total Records", count: total, pct: "100%" });
+
+                // Add note about limited data if applicable
+                if (exceedsFreeLimit) {
+                    const noteRow = sheet.addRow({});
+                    noteRow.height = 20;
+                    const noteCell = noteRow.getCell(1);
+                    noteCell.value = `Note: Limited to ${rows.length} out of ${totalRecords} records (Free Version). Upgrade to premium for complete data.`;
+                    noteCell.font = { name: "Arial", size: 9, italic: true, color: { argb: "FF9C0006" } };
+                    sheet.mergeCells(noteRow.number, 1, noteRow.number, 18);
+                }
+
+                // ── Auto-filter ───────────────────────────────────────────
+                sheet.autoFilter = {
+                    from: { row: 1, column: 1 },
+                    to: { row: 1, column: sheet.columns.length },
+                };
+            }
+
+            // Only add summary sheet for premium users
+            if (isPremium && !exceedsFreeLimit) {
+                const summary = workbook.addWorksheet("Summary");
+                summary.columns = [
+                    { header: "Status", key: "status", width: 20 },
+                    { header: "Count", key: "count", width: 10 },
+                    { header: "% of Total", key: "pct", width: 14 },
+                ];
+
+                const summaryHeaderRow = summary.getRow(1);
+                summaryHeaderRow.eachCell((cell) => {
+                    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
+                    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2F5496" } };
+                    cell.alignment = { horizontal: "center" };
+                });
+
+                const statusCounts = rows.reduce((acc, r) => {
+                    const s = r["Status"] || "Unknown";
+                    acc[s] = (acc[s] || 0) + 1;
+                    return acc;
+                }, {});
+                const total = rows.length;
+                Object.entries(statusCounts).forEach(([status, count]) => {
+                    summary.addRow({
+                        status,
+                        count,
+                        pct: `${((count / total) * 100).toFixed(1)}%`,
+                    });
+                });
+                summary.addRow({});
+                summary.addRow({ status: "Total Records", count: total, pct: "100%" });
+            }
 
             // ── Send response ─────────────────────────────────────────
+            const filename = isPremium && !exceedsFreeLimit
+                ? `attendance_premium_${startDate}_to_${endDate}.xlsx`
+                : `attendance_basic_${startDate}_to_${endDate}.xlsx`;
+
             res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            res.setHeader(
-                "Content-Disposition",
-                `attachment; filename=attendance_${startDate}_to_${endDate}.xlsx`
-            );
+            res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
             await workbook.xlsx.write(res);
             return res.end();
         }
@@ -403,13 +558,31 @@ export const generateAttendanceCSV = async (req, res) => {
             "Total Hours", "Overtime (min)", "Late (min)", "Early Leave (min)", "Break (min)",
             "Status", "Location Verified", "Remarks", "Auto Marked", "Suspicious",
         ];
+
+        // For CSV, add warning comment if limited data
+        if (exceedsFreeLimit) {
+            // Add warning as comment lines (using # for comments in CSV)
+            let csvOutput = `# WARNING: Limited to ${rows.length} out of ${totalRecords} records (Free Version)\n`;
+            csvOutput += `# Free version only allows export of basic attendance summary\n`;
+            csvOutput += `# Upgrade to premium for complete data export\n`;
+
+            // Add headers
+            csvOutput += fields.map(f => `"${f}"`).join(",") + "\n";
+
+            // Add data rows
+            rows.forEach(row => {
+                csvOutput += fields.map(f => `"${row[f] || ""}"`).join(",") + "\n";
+            });
+
+            res.setHeader("Content-Type", "text/csv");
+            res.setHeader("Content-Disposition", `attachment; filename=attendance_basic_${startDate}_to_${endDate}.csv`);
+            return res.status(200).send(csvOutput);
+        }
+
         const parser = new Parser({ fields });
         const csv = parser.parse(rows);
         res.setHeader("Content-Type", "text/csv");
-        res.setHeader(
-            "Content-Disposition",
-            `attachment; filename=attendance_${startDate}_to_${endDate}.csv`
-        );
+        res.setHeader("Content-Disposition", `attachment; filename=attendance_${startDate}_to_${endDate}.csv`);
         return res.status(200).send(csv);
 
     } catch (error) {
@@ -786,6 +959,119 @@ const styleDataCell = (cell, value, opts = {}) => {
    SUMMARY + SALARY PIVOT EXPORT
 ───────────────────────────────────────── */
 
+// Add this configuration at the top of your file or in a config module
+const PREMIUM_CONFIG = {
+    isPremium: false, // Change this based on your premium check logic
+    maxFreeRows: 100, // Define your limit here
+};
+
+const checkPremiumAccess = async (companyId) => {
+    try {
+
+        const subscription = await Subscription.findOne({
+            company: companyId,
+            isActive: true,
+            status: "ACTIVE",
+            endDate: { $gte: new Date() }
+        })
+            .populate("plan")
+            .sort({ endDate: -1 });
+
+        if (!subscription || !subscription.plan) {
+            return {
+                isPremium: false,
+                plan: null
+            };
+        }
+
+        return {
+            isPremium: !subscription.plan.isfree,
+            plan: subscription.plan
+        };
+
+    } catch (error) {
+        console.error("Premium Check Error:", error);
+
+        return {
+            isPremium: false,
+            plan: null
+        };
+    }
+};
+
+// Function to create upgrade message worksheet
+const createUpgradeWorksheet = (wb, startDate, endDate, recordCount) => {
+    const wsUpgrade = wb.addWorksheet("UPGRADE_REQUIRED");
+
+    // Set column widths
+    wsUpgrade.columns = [{ width: 50 }];
+
+    // Title
+    wsUpgrade.mergeCells(1, 1, 1, 1);
+    const titleCell = wsUpgrade.getCell(1, 1);
+    titleCell.value = "⚠️ PREMIUM FEATURE - UPGRADE REQUIRED ⚠️";
+    titleCell.font = { name: "Arial", bold: true, size: 16, color: { argb: "FF9C0006" } };
+    titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    wsUpgrade.getRow(1).height = 30;
+
+    // Message row 2
+    wsUpgrade.getRow(2).height = 25;
+    const msgCell2 = wsUpgrade.getCell(2, 1);
+    msgCell2.value = `Full attendance report with salary structure is a PREMIUM feature.`;
+    msgCell2.font = { name: "Arial", size: 12, bold: true };
+    msgCell2.alignment = { horizontal: "center", vertical: "middle" };
+
+    // Message row 3
+    wsUpgrade.getRow(3).height = 25;
+    const msgCell3 = wsUpgrade.getCell(3, 1);
+    msgCell3.value = `Your request contains ${recordCount} employee records and covers period from ${startDate} to ${endDate}.`;
+    msgCell3.font = { name: "Arial", size: 12 };
+    msgCell3.alignment = { horizontal: "center", vertical: "middle" };
+
+    // Message row 4 - SIMPLIFIED VERSION
+    wsUpgrade.getRow(4).height = 25;
+    const msgCell4 = wsUpgrade.getCell(4, 1);
+    msgCell4.value = `Free version only allows export of basic attendance summary.`;
+    msgCell4.font = { name: "Arial", size: 12 };
+    msgCell4.alignment = { horizontal: "center", vertical: "middle" };
+
+    // Upgrade button text
+    wsUpgrade.getRow(5).height = 30;
+    const upgradeCell = wsUpgrade.getCell(5, 1);
+    upgradeCell.value = "🔓 UPGRADE TO PREMIUM to unlock:";
+    upgradeCell.font = { name: "Arial", bold: true, size: 13, color: { argb: "FF137333" } };
+    upgradeCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    // Features list
+    const features = [
+        "✓ Full attendance summary with salary structure (Basic, HRA, DA, Bonus, etc.)",
+        "✓ Department-wise pivot analysis",
+        "✓ Overtime calculations and reports",
+        "✓ Advanced attendance metrics and grading",
+        "✓ Export unlimited records",
+        "✓ Custom report builder",
+        "✓ Priority email support"
+    ];
+
+    features.forEach((feature, index) => {
+        wsUpgrade.getRow(6 + index).height = 20;
+        const featureCell = wsUpgrade.getCell(6 + index, 1);
+        featureCell.value = feature;
+        featureCell.font = { name: "Arial", size: 11 };
+        featureCell.alignment = { horizontal: "left", vertical: "middle" };
+    });
+
+    // Contact info
+    wsUpgrade.getRow(6 + features.length).height = 25;
+    const contactCell = wsUpgrade.getCell(6 + features.length, 1);
+    contactCell.value = "📧 Contact us at: sales@yourcompany.com for premium upgrade details";
+    contactCell.font = { name: "Arial", size: 11, italic: true, color: { argb: "FF243F60" } };
+    contactCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    return wsUpgrade;
+};
+
 export const generateAttendanceSummaryCSV = async (req, res) => {
     try {
         const { startDate, endDate, department, employeeCode } = req.query;
@@ -816,7 +1102,14 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         const dateRange = buildDateRange(start, end);
         const totalDays = dateRange.length;
 
-        /* ── Calculate per-employee stats ── */
+        // Check if user has premium access
+        const isPremium = await checkPremiumAccess(companyId);
+
+        // Calculate if this request exceeds free tier limits - SIMPLIFIED
+        const employeeCount = employees.length;
+        const exceedsFreeLimit = !isPremium && employeeCount > PREMIUM_CONFIG.maxFreeRows;
+
+        /* ── Calculate per-employee stats (always calculate for data purposes) ── */
         const summaryRows = employees.map((emp) => {
             const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
             const shiftStart = emp.shift?.startTime || "09:00";
@@ -864,8 +1157,6 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const presentableDays = totalDays - weekOff - holiday;
             const attPct = presentableDays > 0 ? ((present / presentableDays) * 100) : 0;
             const avgHrs = present > 0 ? (totalWorkMin / present / 60) : 0;
-
-            // Convert late minutes to hours
             const totalLateHrs = totalLateMin / 60;
 
             return {
@@ -892,22 +1183,94 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 totalLateHrs: parseFloat(totalLateHrs.toFixed(2)),
                 attPct: parseFloat(attPct.toFixed(2)),
 
-                // Salary structure fields
-                basic: emp.salaryStructure?.basic || 0,
-                hra: emp.salaryStructure?.hra || 0,
-                da: emp.salaryStructure?.da || 0,
-                bonus: emp.salaryStructure?.bonus || 0,
-                perDay: emp.salaryStructure?.perDay || 0,
-                perHour: emp.salaryStructure?.perHour || 0,
-                overtimeRate: emp.salaryStructure?.overtimeRate || 0,
+                // Salary structure fields (only included for premium)
+                basic: isPremium ? (emp.salaryStructure?.basic || 0) : 0,
+                hra: isPremium ? (emp.salaryStructure?.hra || 0) : 0,
+                da: isPremium ? (emp.salaryStructure?.da || 0) : 0,
+                bonus: isPremium ? (emp.salaryStructure?.bonus || 0) : 0,
+                perDay: isPremium ? (emp.salaryStructure?.perDay || 0) : 0,
+                perHour: isPremium ? (emp.salaryStructure?.perHour || 0) : 0,
+                overtimeRate: isPremium ? (emp.salaryStructure?.overtimeRate || 0) : 0,
             };
         });
 
         /* ══════════════════════════════
-           WORKBOOK
+           CREATE WORKBOOK
         ══════════════════════════════ */
         const wb = new ExcelJS.Workbook();
         wb.creator = "HR System";
+
+        // If not premium or exceeds free limit, create upgrade message instead of full report
+        if (!isPremium || exceedsFreeLimit) {
+            // Create upgrade worksheet
+            createUpgradeWorksheet(wb, startDate, endDate, employeeCount);
+
+            // Still create a basic summary sheet with limited data
+            const wsBasic = wb.addWorksheet("Basic Summary (Free Version)");
+
+            // Add basic headers
+            wsBasic.mergeCells(1, 1, 1, 8);
+            const basicTitleCell = wsBasic.getCell(1, 1);
+            basicTitleCell.value = `BASIC ATTENDANCE SUMMARY (FREE VERSION)  |  ${startDate}  to  ${endDate}`;
+            basicTitleCell.font = { name: "Arial", bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+            basicTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF243F60" } };
+            basicTitleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+            // Headers for basic report
+            const basicHeaders = ["#", "Emp Code", "Emp Name", "Department", "Present Days", "Absent Days", "Leave Days", "Attendance %"];
+            const basicHeaderRow = wsBasic.getRow(3);
+            basicHeaders.forEach((h, i) => {
+                const cell = basicHeaderRow.getCell(i + 1);
+                cell.value = h;
+                cell.font = { name: "Arial", bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+                cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF243F60" } };
+                cell.alignment = { horizontal: "center", vertical: "middle" };
+            });
+
+            // Add limited rows (first maxFreeRows)
+            const rowsToShow = Math.min(employeeCount, PREMIUM_CONFIG.maxFreeRows);
+            for (let i = 0; i < rowsToShow; i++) {
+                const r = summaryRows[i];
+                const row = wsBasic.addRow([
+                    i + 1,
+                    r.empCode,
+                    r.empName,
+                    r.department,
+                    r.present,
+                    r.absent,
+                    r.leave,
+                    `${r.attPct}%`
+                ]);
+                row.height = 16;
+                row.eachCell(cell => {
+                    cell.font = { name: "Arial", size: 9 };
+                    cell.alignment = { horizontal: "center", vertical: "middle" };
+                });
+            }
+
+            // Add note about limited data
+            if (employeeCount > PREMIUM_CONFIG.maxFreeRows) {
+                const noteRow = wsBasic.addRow([`Note: Only first ${PREMIUM_CONFIG.maxFreeRows} records shown. Total records: ${employeeCount}`]);
+                noteRow.height = 20;
+                noteRow.getCell(1).font = { name: "Arial", size: 9, italic: true, color: { argb: "FF9C0006" } };
+                wsBasic.mergeCells(noteRow.number, 1, noteRow.number, 8);
+            }
+
+            wsBasic.columns = [
+                { width: 8 }, { width: 15 }, { width: 25 }, { width: 20 },
+                { width: 15 }, { width: 15 }, { width: 15 }, { width: 15 }
+            ];
+
+            // Send the limited report
+            res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            res.setHeader("Content-Disposition", `attachment; filename=attendance_basic_${startDate}_to_${endDate}.xlsx`);
+            await wb.xlsx.write(res);
+            return res.end();
+        }
+
+        // PREMIUM USER - Full report with all features
+        const HEADER_BG = "FF243F60";
+        const ALT_ROW = "FFF2F2F2";
 
         /* ──────────────────────────────
            SHEET 1 — ATTENDANCE SUMMARY (with Salary Structure)
@@ -917,10 +1280,10 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         });
 
         // Title row
-        const sCols = 25; // Increased columns count
+        const sCols = 25;
         wsSummary.mergeCells(1, 1, 1, sCols);
         const sTitleCell = wsSummary.getCell(1, 1);
-        sTitleCell.value = `ATTENDANCE SUMMARY REPORT WITH SALARY STRUCTURE  |  ${startDate}  to  ${endDate}`;
+        sTitleCell.value = `PREMIUM ATTENDANCE SUMMARY REPORT WITH SALARY STRUCTURE  |  ${startDate}  to  ${endDate}`;
         sTitleCell.font = { name: "Arial", bold: true, size: 14, color: { argb: "FFFFFFFF" } };
         sTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
         sTitleCell.alignment = { horizontal: "center", vertical: "middle" };
@@ -937,7 +1300,11 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         ];
         groups.forEach(({ label, start, span }) => {
             if (span > 1) wsSummary.mergeCells(2, start, 2, start + span - 1);
-            applyHeader(wsSummary.getCell(2, start), label, { bg: "FF243F60", size: 9 });
+            const cell = wsSummary.getCell(2, start);
+            cell.value = label;
+            cell.font = { name: "Arial", bold: true, size: 9, color: { argb: "FFFFFFFF" } };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF243F60" } };
+            cell.alignment = { horizontal: "center", vertical: "middle" };
         });
         grpRow.height = 16;
 
@@ -951,16 +1318,22 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         ];
         const sHeaderRow = wsSummary.getRow(3);
         sHeaders.forEach((h, i) => {
-            applyHeader(sHeaderRow.getCell(i + 1), h);
+            const cell = sHeaderRow.getCell(i + 1);
+            cell.value = h;
+            cell.font = { name: "Arial", bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
+            cell.alignment = { horizontal: "center", vertical: "middle" };
         });
         sHeaderRow.height = 18;
 
         wsSummary.columns = [
             { width: 5 }, { width: 12 }, { width: 22 }, { width: 18 }, { width: 18 },
-            { width: 11 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 },
+            { width: 11 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 },
+            { width: 10 }, { width: 10 }, { width: 10 },
             { width: 11 }, { width: 13 }, { width: 10 }, { width: 11 },
             { width: 10 }, { width: 12 },
-            { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }
+            { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
+            { width: 12 }, { width: 12 }, { width: 12 }
         ];
 
         summaryRows.forEach((r, idx) => {
@@ -980,15 +1353,19 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 r.attPct, grade,
                 r.basic, r.hra, r.da, r.bonus, r.perDay, r.perHour, r.overtimeRate
             ];
+
             vals.forEach((v, i) => {
                 const c = row.getCell(i + 1);
-                const isNum = typeof v === "number";
-                styleDataCell(c, v, {
-                    bg,
-                    bold: i <= 1,
-                    align: i === 2 || i === 3 || i === 4 ? "left" : "center",
-                    numFmt: isNum && (i >= 13 && i <= 16 || i >= 19) ? "0.00" : undefined,
-                });
+                c.value = v;
+                c.font = { name: "Arial", size: 9, bold: i <= 1 };
+                c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+                c.alignment = {
+                    horizontal: i === 2 || i === 3 || i === 4 ? "left" : "center",
+                    vertical: "middle"
+                };
+                if (typeof v === "number" && (i >= 13 && i <= 16 || i >= 19)) {
+                    c.numFmt = "0.00";
+                }
             });
 
             // Att % cell
@@ -1022,8 +1399,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         const totRow = wsSummary.addRow([]);
         totRow.height = 18;
         const lastDataRow = 3 + summaryRows.length;
-        
-        // Create totals array with 25 columns
+
         const totalsArray = [];
         for (let i = 1; i <= 26; i++) {
             if (i === 1) totalsArray.push("Total / Avg");
@@ -1051,7 +1427,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             else if (i === 26) totalsArray.push(`=AVERAGE(Z4:Z${lastDataRow})`);
             else totalsArray.push("");
         }
-        
+
         totalsArray.forEach((v, i) => {
             const c = totRow.getCell(i + 1);
             c.value = v;
@@ -1070,7 +1446,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         const wsDept = wb.addWorksheet("Dept Pivot");
         wsDept.views = [{ state: "frozen", ySplit: 2 }];
 
-        wsDept.mergeCells(1, 1, 1, 10);
+        wsDept.mergeCells(1, 1, 1, 11);
         const deptTitleCell = wsDept.getCell(1, 1);
         deptTitleCell.value = `DEPARTMENT-WISE PIVOT  |  ${startDate}  to  ${endDate}`;
         deptTitleCell.font = { name: "Arial", bold: true, size: 13, color: { argb: "FFFFFFFF" } };
@@ -1080,7 +1456,13 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
 
         const deptHdrs = ["Department", "Headcount", "Present Days", "Absent Days", "Leave Days", "Week Off", "Half Days", "Late Days", "Total OT Hrs", "Total Late Hrs", "Avg Att %"];
         const deptHdrRow = wsDept.getRow(2);
-        deptHdrs.forEach((h, i) => { applyHeader(deptHdrRow.getCell(i + 1), h); });
+        deptHdrs.forEach((h, i) => {
+            const cell = deptHdrRow.getCell(i + 1);
+            cell.value = h;
+            cell.font = { name: "Arial", bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
+            cell.alignment = { horizontal: "center", vertical: "middle" };
+        });
         deptHdrRow.height = 18;
 
         // Aggregate by department
@@ -1088,8 +1470,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         summaryRows.forEach((r) => {
             const dept = r.department || "N/A";
             if (!deptMap.has(dept)) {
-                deptMap.set(dept, { 
-                    headcount: 0, present: 0, absent: 0, leave: 0, weekOff: 0, 
+                deptMap.set(dept, {
+                    headcount: 0, present: 0, absent: 0, leave: 0, weekOff: 0,
                     halfDay: 0, late: 0, otHrs: 0, lateHrs: 0, attPctSum: 0
                 });
             }
@@ -1111,12 +1493,15 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             row.height = 16;
             const bg = idx % 2 === 0 ? ALT_ROW : "FFFFFFFF";
             const avgAtt = d.headcount > 0 ? d.attPctSum / d.headcount : 0;
-            [dept, d.headcount, d.present, d.absent, d.leave, d.weekOff, d.halfDay, d.late,
-                parseFloat(d.otHrs.toFixed(2)), parseFloat(d.lateHrs.toFixed(2)), 
-                parseFloat(avgAtt.toFixed(2))
-            ].forEach((v, i) => {
+            const values = [
+                dept, d.headcount, d.present, d.absent, d.leave, d.weekOff,
+                d.halfDay, d.late, parseFloat(d.otHrs.toFixed(2)),
+                parseFloat(d.lateHrs.toFixed(2)), avgAtt / 100
+            ];
+
+            values.forEach((v, i) => {
                 const c = row.getCell(i + 1);
-                c.value = i === 10 ? v / 100 : v;
+                c.value = v;
                 c.font = { name: "Arial", size: 9, bold: i === 0 };
                 c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
                 c.alignment = { horizontal: i === 0 ? "left" : "center", vertical: "middle" };
@@ -1125,14 +1510,14 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         });
 
         wsDept.columns = [
-            { width: 22 }, { width: 12 }, { width: 13 }, { width: 13 }, { width: 12 }, 
-            { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 12 }, 
+            { width: 22 }, { width: 12 }, { width: 13 }, { width: 13 }, { width: 12 },
+            { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 12 },
             { width: 12 }
         ];
 
-        /* ── Send ── */
+        /* ── Send Premium Report ── */
         res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        res.setHeader("Content-Disposition", `attachment; filename=attendance_salary_${startDate}_to_${endDate}.xlsx`);
+        res.setHeader("Content-Disposition", `attachment; filename=attendance_premium_${startDate}_to_${endDate}.xlsx`);
         await wb.xlsx.write(res);
         return res.end();
 
@@ -1141,6 +1526,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to generate summary report", error: err.message });
     }
 };
+
+
 
 // Helper function to format time from Date object
 export function formatTime(date) {
