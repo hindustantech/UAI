@@ -130,6 +130,8 @@ export const generateAttendanceCSV = async (req, res) => {
 
         // ── Check premium access ───────────────────────────────────────
         const isPremium = await checkPremiumAccess(companyId);
+        console.log(`Company ${companyId} premium access: ${isPremium}`);
+
         const employeeCount = employees.length;
         const exceedsFreeLimit = !isPremium && employeeCount > PREMIUM_CONFIG.maxFreeRows;
 
@@ -1096,7 +1098,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
 
         // Check if user has premium access
         const isPremium = await checkPremiumAccess(companyId);
-
+        console.log(`Premium access for company ${companyId}:`, isPremium);
+        
         // Calculate if this request exceeds free tier limits
         const employeeCount = employees.length;
         const exceedsFreeLimit = !isPremium && employeeCount > PREMIUM_CONFIG.maxFreeRows;
