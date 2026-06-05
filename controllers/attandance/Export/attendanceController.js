@@ -1097,94 +1097,178 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         // Check if user has premium access
         const isPremium = await checkPremiumAccess(companyId);
 
-        // Calculate if this request exceeds free tier limits - SIMPLIFIED
+        // Calculate if this request exceeds free tier limits
         const employeeCount = employees.length;
         const exceedsFreeLimit = !isPremium && employeeCount > PREMIUM_CONFIG.maxFreeRows;
 
-        /* ── Calculate per-employee stats (always calculate for data purposes) ── */
-        const summaryRows = employees.map((emp) => {
-            const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
-            const shiftStart = emp.shift?.startTime || "09:00";
-            const shiftEnd = emp.shift?.endTime || "18:00";
-            const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
-            const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
+        /* ── Calculate per-employee stats ── */
+        let summaryRows = [];
 
-            let present = 0, absent = 0, leave = 0, weekOff = 0, halfDay = 0;
-            let holiday = 0, late = 0, earlyExit = 0;
-            let totalWorkMin = 0, totalOTMin = 0, totalLateMin = 0;
+        if (exceedsFreeLimit) {
+            // FREE VERSION: Calculate stats for only 1 employee (sample)
+            const sampleEmployee = employees[0];
+            if (sampleEmployee) {
+                const emp = sampleEmployee;
+                const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
+                const shiftStart = emp.shift?.startTime || "09:00";
+                const shiftEnd = emp.shift?.endTime || "18:00";
+                const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
+                const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
 
-            for (const date of dateRange) {
-                const dateKey = date.toISOString().split("T")[0];
-                const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
-                const att = attMap.get(`${emp._id}_${dateKey}`);
-                const isWO = weeklyOff.includes(dayName);
-                const { code } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
+                let present = 0, absent = 0, leave = 0, weekOff = 0, halfDay = 0;
+                let holiday = 0, late = 0, earlyExit = 0;
+                let totalWorkMin = 0, totalOTMin = 0, totalLateMin = 0;
 
-                switch (code) {
-                    case "WO": weekOff++; break;
-                    case "A": absent++; break;
-                    case "L": leave++; break;
-                    case "H": holiday++; break;
-                    case "HD":
-                        halfDay++;
-                        present++;
-                        if (att) {
-                            totalWorkMin += att.workSummary?.totalMinutes || 0;
-                            totalOTMin += att.workSummary?.overtimeMinutes || 0;
-                            totalLateMin += att.workSummary?.lateMinutes || 0;
-                        }
-                        break;
-                    default: // P, PL, PE, PLE
-                        present++;
-                        if (code === "PL" || code === "PLE") late++;
-                        if (code === "PE" || code === "PLE") earlyExit++;
-                        if (att) {
-                            totalWorkMin += att.workSummary?.totalMinutes || 0;
-                            totalOTMin += att.workSummary?.overtimeMinutes || 0;
-                            totalLateMin += att.workSummary?.lateMinutes || 0;
-                        }
+                for (const date of dateRange) {
+                    const dateKey = date.toISOString().split("T")[0];
+                    const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
+                    const att = attMap.get(`${emp._id}_${dateKey}`);
+                    const isWO = weeklyOff.includes(dayName);
+                    const { code } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
+
+                    switch (code) {
+                        case "WO": weekOff++; break;
+                        case "A": absent++; break;
+                        case "L": leave++; break;
+                        case "H": holiday++; break;
+                        case "HD":
+                            halfDay++;
+                            present++;
+                            if (att) {
+                                totalWorkMin += att.workSummary?.totalMinutes || 0;
+                                totalOTMin += att.workSummary?.overtimeMinutes || 0;
+                                totalLateMin += att.workSummary?.lateMinutes || 0;
+                            }
+                            break;
+                        default:
+                            present++;
+                            if (code === "PL" || code === "PLE") late++;
+                            if (code === "PE" || code === "PLE") earlyExit++;
+                            if (att) {
+                                totalWorkMin += att.workSummary?.totalMinutes || 0;
+                                totalOTMin += att.workSummary?.overtimeMinutes || 0;
+                                totalLateMin += att.workSummary?.lateMinutes || 0;
+                            }
+                    }
                 }
+
+                const presentableDays = totalDays - weekOff - holiday;
+                const attPct = presentableDays > 0 ? ((present / presentableDays) * 100) : 0;
+                const avgHrs = present > 0 ? (totalWorkMin / present / 60) : 0;
+                const totalLateHrs = totalLateMin / 60;
+
+                summaryRows.push({
+                    empCode: emp.empCode || "—",
+                    empName: emp.user_name || "N/A",
+                    department: emp.jobInfo?.department || "N/A",
+                    designation: emp.jobInfo?.designation || "N/A",
+                    shift: emp.shift?.shiftName || `${shiftStart}–${shiftEnd}`,
+                    totalDays,
+                    weekOff,
+                    holiday,
+                    presentableDays,
+                    present,
+                    halfDay,
+                    absent,
+                    leave,
+                    late,
+                    earlyExit,
+                    totalWorkHrs: parseFloat((totalWorkMin / 60).toFixed(2)),
+                    avgWorkHrs: parseFloat(avgHrs.toFixed(2)),
+                    totalOTHrs: parseFloat((totalOTMin / 60).toFixed(2)),
+                    totalLateHrs: parseFloat(totalLateHrs.toFixed(2)),
+                    attPct: parseFloat(attPct.toFixed(2)),
+                    basic: 0,
+                    hra: 0,
+                    da: 0,
+                    bonus: 0,
+                    perDay: 0,
+                    perHour: 0,
+                    overtimeRate: 0,
+                });
             }
+        } else {
+            // PREMIUM VERSION: Calculate stats for all employees
+            for (const emp of employees) {
+                const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
+                const shiftStart = emp.shift?.startTime || "09:00";
+                const shiftEnd = emp.shift?.endTime || "18:00";
+                const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
+                const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
 
-            const presentableDays = totalDays - weekOff - holiday;
-            const attPct = presentableDays > 0 ? ((present / presentableDays) * 100) : 0;
-            const avgHrs = present > 0 ? (totalWorkMin / present / 60) : 0;
-            const totalLateHrs = totalLateMin / 60;
+                let present = 0, absent = 0, leave = 0, weekOff = 0, halfDay = 0;
+                let holiday = 0, late = 0, earlyExit = 0;
+                let totalWorkMin = 0, totalOTMin = 0, totalLateMin = 0;
 
-            return {
-                empCode: emp.empCode || "—",
-                empName: emp.user_name || "N/A",
-                department: emp.jobInfo?.department || "N/A",
-                designation: emp.jobInfo?.designation || "N/A",
-                shift: emp.shift?.shiftName || `${shiftStart}–${shiftEnd}`,
+                for (const date of dateRange) {
+                    const dateKey = date.toISOString().split("T")[0];
+                    const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
+                    const att = attMap.get(`${emp._id}_${dateKey}`);
+                    const isWO = weeklyOff.includes(dayName);
+                    const { code } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
 
-                totalDays,
-                weekOff,
-                holiday,
-                presentableDays,
-                present,
-                halfDay,
-                absent,
-                leave,
-                late,
-                earlyExit,
+                    switch (code) {
+                        case "WO": weekOff++; break;
+                        case "A": absent++; break;
+                        case "L": leave++; break;
+                        case "H": holiday++; break;
+                        case "HD":
+                            halfDay++;
+                            present++;
+                            if (att) {
+                                totalWorkMin += att.workSummary?.totalMinutes || 0;
+                                totalOTMin += att.workSummary?.overtimeMinutes || 0;
+                                totalLateMin += att.workSummary?.lateMinutes || 0;
+                            }
+                            break;
+                        default:
+                            present++;
+                            if (code === "PL" || code === "PLE") late++;
+                            if (code === "PE" || code === "PLE") earlyExit++;
+                            if (att) {
+                                totalWorkMin += att.workSummary?.totalMinutes || 0;
+                                totalOTMin += att.workSummary?.overtimeMinutes || 0;
+                                totalLateMin += att.workSummary?.lateMinutes || 0;
+                            }
+                    }
+                }
 
-                totalWorkHrs: parseFloat((totalWorkMin / 60).toFixed(2)),
-                avgWorkHrs: parseFloat(avgHrs.toFixed(2)),
-                totalOTHrs: parseFloat((totalOTMin / 60).toFixed(2)),
-                totalLateHrs: parseFloat(totalLateHrs.toFixed(2)),
-                attPct: parseFloat(attPct.toFixed(2)),
+                const presentableDays = totalDays - weekOff - holiday;
+                const attPct = presentableDays > 0 ? ((present / presentableDays) * 100) : 0;
+                const avgHrs = present > 0 ? (totalWorkMin / present / 60) : 0;
+                const totalLateHrs = totalLateMin / 60;
 
-                // Salary structure fields (only included for premium)
-                basic: isPremium ? (emp.salaryStructure?.basic || 0) : 0,
-                hra: isPremium ? (emp.salaryStructure?.hra || 0) : 0,
-                da: isPremium ? (emp.salaryStructure?.da || 0) : 0,
-                bonus: isPremium ? (emp.salaryStructure?.bonus || 0) : 0,
-                perDay: isPremium ? (emp.salaryStructure?.perDay || 0) : 0,
-                perHour: isPremium ? (emp.salaryStructure?.perHour || 0) : 0,
-                overtimeRate: isPremium ? (emp.salaryStructure?.overtimeRate || 0) : 0,
-            };
-        });
+                summaryRows.push({
+                    empCode: emp.empCode || "—",
+                    empName: emp.user_name || "N/A",
+                    department: emp.jobInfo?.department || "N/A",
+                    designation: emp.jobInfo?.designation || "N/A",
+                    shift: emp.shift?.shiftName || `${shiftStart}–${shiftEnd}`,
+                    totalDays,
+                    weekOff,
+                    holiday,
+                    presentableDays,
+                    present,
+                    halfDay,
+                    absent,
+                    leave,
+                    late,
+                    earlyExit,
+                    totalWorkHrs: parseFloat((totalWorkMin / 60).toFixed(2)),
+                    avgWorkHrs: parseFloat(avgHrs.toFixed(2)),
+                    totalOTHrs: parseFloat((totalOTMin / 60).toFixed(2)),
+                    totalLateHrs: parseFloat(totalLateHrs.toFixed(2)),
+                    attPct: parseFloat(attPct.toFixed(2)),
+                    basic: emp.salaryStructure?.basic || 0,
+                    hra: emp.salaryStructure?.hra || 0,
+                    da: emp.salaryStructure?.da || 0,
+                    bonus: emp.salaryStructure?.bonus || 0,
+                    perDay: emp.salaryStructure?.perDay || 0,
+                    perHour: emp.salaryStructure?.perHour || 0,
+                    overtimeRate: emp.salaryStructure?.overtimeRate || 0,
+                });
+            }
+        }
 
         /* ══════════════════════════════
            CREATE WORKBOOK
@@ -1192,75 +1276,109 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         const wb = new ExcelJS.Workbook();
         wb.creator = "HR System";
 
-        // If not premium or exceeds free limit, create upgrade message instead of full report
+        // If not premium or exceeds free limit, create upgrade message + sample data
         if (!isPremium || exceedsFreeLimit) {
-            // Create upgrade worksheet
+            // Create upgrade worksheet (first sheet)
             createUpgradeWorksheet(wb, startDate, endDate, employeeCount);
 
-            // Still create a basic summary sheet with limited data
-            const wsBasic = wb.addWorksheet("Basic Summary (Free Version)");
+            // Create sample summary sheet (second sheet)
+            const wsSample = wb.addWorksheet("Sample Summary (Upgrade Required)");
 
-            // Add basic headers
-            wsBasic.mergeCells(1, 1, 1, 8);
-            const basicTitleCell = wsBasic.getCell(1, 1);
-            basicTitleCell.value = `BASIC ATTENDANCE SUMMARY (FREE VERSION)  |  ${startDate}  to  ${endDate}`;
-            basicTitleCell.font = { name: "Arial", bold: true, size: 14, color: { argb: "FFFFFFFF" } };
-            basicTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF243F60" } };
-            basicTitleCell.alignment = { horizontal: "center", vertical: "middle" };
+            // Headers for sample report (same as premium but with note)
+            const sampleHeaders = [
+                "#", "Emp Code", "Emp Name", "Department", "Designation",
+                "Total Days", "Week Off", "Holiday", "Present", "Half Day", "Absent", "Leave", "Late Days",
+                "Total Hrs", "Avg Hrs/Day", "OT Hrs", "Late (Hrs)",
+                "Att %", "Att Grade",
+                "Basic", "HRA", "DA", "Bonus", "Per Day", "Per Hour", "OT Rate"
+            ];
 
-            // Headers for basic report
-            const basicHeaders = ["#", "Emp Code", "Emp Name", "Department", "Present Days", "Absent Days", "Leave Days", "Attendance %"];
-            const basicHeaderRow = wsBasic.getRow(3);
-            basicHeaders.forEach((h, i) => {
-                const cell = basicHeaderRow.getCell(i + 1);
+            // Add sample title
+            wsSample.mergeCells(1, 1, 1, sampleHeaders.length);
+            const sampleTitleCell = wsSample.getCell(1, 1);
+            sampleTitleCell.value = `⚠️ SAMPLE REPORT - UPGRADE REQUIRED ⚠️  |  ${startDate}  to  ${endDate}`;
+            sampleTitleCell.font = { name: "Arial", bold: true, size: 14, color: { argb: "FF9C0006" } };
+            sampleTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+            sampleTitleCell.alignment = { horizontal: "center", vertical: "middle" };
+            wsSample.getRow(1).height = 28;
+
+            // Add note row
+            wsSample.mergeCells(2, 1, 2, sampleHeaders.length);
+            const noteCell = wsSample.getCell(2, 1);
+            noteCell.value = `NOTE: This is a SAMPLE report showing only 1 employee. Total employees: ${employeeCount} | Total records: ${employeeCount * totalDays}. Upgrade to premium to download complete report.`;
+            noteCell.font = { name: "Arial", size: 10, italic: true, color: { argb: "FF9C0006" } };
+            noteCell.alignment = { horizontal: "center", vertical: "middle" };
+            wsSample.getRow(2).height = 22;
+
+            // Headers row
+            const headerRow = wsSample.getRow(3);
+            sampleHeaders.forEach((h, i) => {
+                const cell = headerRow.getCell(i + 1);
                 cell.value = h;
                 cell.font = { name: "Arial", bold: true, size: 10, color: { argb: "FFFFFFFF" } };
                 cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF243F60" } };
                 cell.alignment = { horizontal: "center", vertical: "middle" };
             });
+            headerRow.height = 18;
 
-            // Add limited rows (first maxFreeRows)
-            const rowsToShow = Math.min(employeeCount, PREMIUM_CONFIG.maxFreeRows);
-            for (let i = 0; i < rowsToShow; i++) {
-                const r = summaryRows[i];
-                const row = wsBasic.addRow([
-                    i + 1,
+            // Add sample data row (only 1 row if available)
+            if (summaryRows.length > 0) {
+                const r = summaryRows[0];
+                const grade = r.attPct >= 95 ? "Excellent" : r.attPct >= 85 ? "Good" : r.attPct >= 75 ? "Average" : "Poor";
+
+                const row = wsSample.addRow([
+                    1,
                     r.empCode,
                     r.empName,
                     r.department,
+                    r.designation,
+                    r.totalDays,
+                    r.weekOff,
+                    r.holiday,
                     r.present,
+                    r.halfDay,
                     r.absent,
                     r.leave,
-                    `${r.attPct}%`
+                    r.late,
+                    r.totalWorkHrs,
+                    r.avgWorkHrs,
+                    r.totalOTHrs,
+                    r.totalLateHrs,
+                    r.attPct,
+                    grade,
+                    "—", "—", "—", "—", "—", "—", "—"  // No salary data for free
                 ]);
                 row.height = 16;
                 row.eachCell(cell => {
                     cell.font = { name: "Arial", size: 9 };
                     cell.alignment = { horizontal: "center", vertical: "middle" };
                 });
+
+                // Format percentage
+                const attCell = row.getCell(18);
+                attCell.value = r.attPct / 100;
+                attCell.numFmt = "0.0%";
             }
 
-            // Add note about limited data
-            if (employeeCount > PREMIUM_CONFIG.maxFreeRows) {
-                const noteRow = wsBasic.addRow([`Note: Only first ${PREMIUM_CONFIG.maxFreeRows} records shown. Total records: ${employeeCount}`]);
-                noteRow.height = 20;
-                noteRow.getCell(1).font = { name: "Arial", size: 9, italic: true, color: { argb: "FF9C0006" } };
-                wsBasic.mergeCells(noteRow.number, 1, noteRow.number, 8);
-            }
-
-            wsBasic.columns = [
-                { width: 8 }, { width: 15 }, { width: 25 }, { width: 20 },
-                { width: 15 }, { width: 15 }, { width: 15 }, { width: 15 }
+            // Set column widths
+            wsSample.columns = [
+                { width: 5 }, { width: 12 }, { width: 22 }, { width: 18 }, { width: 18 },
+                { width: 11 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 },
+                { width: 10 }, { width: 10 }, { width: 10 },
+                { width: 11 }, { width: 13 }, { width: 10 }, { width: 11 },
+                { width: 10 }, { width: 12 },
+                { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
+                { width: 12 }, { width: 12 }, { width: 12 }
             ];
 
-            // Send the limited report
+            // Send the sample report
             res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            res.setHeader("Content-Disposition", `attachment; filename=attendance_basic_${startDate}_to_${endDate}.xlsx`);
+            res.setHeader("Content-Disposition", `attachment; filename=attendance_sample_${startDate}_to_${endDate}.xlsx`);
             await wb.xlsx.write(res);
             return res.end();
         }
 
-        // PREMIUM USER - Full report with all features
+        // PREMIUM USER - Full report with all features (original code continues here)
         const HEADER_BG = "FF243F60";
         const ALT_ROW = "FFF2F2F2";
 
