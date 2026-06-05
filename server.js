@@ -33,6 +33,7 @@ import billedDateRoutes from './routes/BilledDate/billedDate.js';
 import attendanceReportRoute from './routes/Attandance/attendanceReportRoutes.js';
 import TodayAttendanceRoute from './routes/Attandance/todayAttendanceRoutes.js';
 import salesR from './routes/Attandance/Sales/salses.js';
+import onboardingRoutes from './routes/onboarding.routes.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
@@ -90,7 +91,7 @@ app.use('/api/admin/company', comapnayAdmin);
 app.use('/api/admin/bulk', Bulkcreation);
 app.use('/api/attendance/report', attendanceReportRoute);
 app.use('/api/salesR', salesR);
-
+app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/today/pi', TodayAttendanceRoute);
 
 // Add this after your existing middleware setup
