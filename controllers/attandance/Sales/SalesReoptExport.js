@@ -527,16 +527,17 @@ export const exportSalesPersonReport = async (req, res) => {
  * @route   GET /api/sales/reports/export
  * @access  Private (Company Admin/Manager - only sees their company data)
  */
+
 export const exportSalesReport = async (req, res) => {
     try {
         const {
             startDate,
             endDate,
-            employeeId,      // Filter by specific employee (must belong to company)
-            employeeIds,     // Multiple employees (must all belong to company)
+            employeeId,      // Single employee ID
+            employeeIds,     // Multiple employee IDs
             status,          // SalesStatus filter
             sessionStatus,   // Session status filter
-            format = 'csv'   // csv or excel
+            format = 'csv'
         } = req.query;
 
         // ============================================
@@ -552,11 +553,11 @@ export const exportSalesReport = async (req, res) => {
         }
 
         // ============================================
-        // STEP 1: Get ALL employees of this company first
+        // STEP 1: Get ALL employees of this company
         // ============================================
         const companyEmployees = await Employee.find({
             companyId: companyId,
-            employmentStatus: "active"  // Only active employees
+            employmentStatus: "active"
         }).select('userId user_name empCode employeeType role').lean();
 
         if (!companyEmployees || companyEmployees.length === 0) {
@@ -566,12 +567,12 @@ export const exportSalesReport = async (req, res) => {
             });
         }
 
-        // Create a map of valid employee userIds for this company
+        // Create valid employee IDs set
         const validEmployeeIds = new Set(
             companyEmployees.map(emp => emp.userId?.toString()).filter(Boolean)
         );
 
-        // Create employee details map for quick lookup
+        // Employee details map
         const employeeDetailsMap = new Map();
         companyEmployees.forEach(emp => {
             if (emp.userId) {
@@ -586,120 +587,92 @@ export const exportSalesReport = async (req, res) => {
         });
 
         // ============================================
-        // STEP 2: Validate requested employee filters
+        // STEP 2: Determine which employees to filter
         // ============================================
-        let requestedEmployeeIds = [];
+        let targetEmployeeIds = [];
 
+        // Handle single employeeId
         if (employeeId) {
-            // Check if requested employee belongs to this company
-            if (!validEmployeeIds.has(employeeId.toString())) {
+            const empIdStr = employeeId.toString();
+            if (!validEmployeeIds.has(empIdStr)) {
                 return res.status(403).json({
                     success: false,
                     message: "Access denied. Employee does not belong to your company."
                 });
             }
-            requestedEmployeeIds.push(employeeId.toString());
+            targetEmployeeIds = [empIdStr];
         }
-
-        if (employeeIds) {
+        // Handle multiple employeeIds
+        else if (employeeIds) {
             const parsedIds = Array.isArray(employeeIds)
                 ? employeeIds
                 : employeeIds.split(',').map(id => id.trim());
 
-            // Validate all requested employees belong to this company
+            // Validate all belong to company
             const invalidIds = parsedIds.filter(id => !validEmployeeIds.has(id.toString()));
-
             if (invalidIds.length > 0) {
                 return res.status(403).json({
                     success: false,
                     message: `Access denied. Employees [${invalidIds.join(', ')}] do not belong to your company.`
                 });
             }
-
-            requestedEmployeeIds.push(...parsedIds.map(id => id.toString()));
+            targetEmployeeIds = parsedIds.map(id => id.toString());
+        }
+        // If no employee filter, get ALL company employees
+        else {
+            targetEmployeeIds = [...validEmployeeIds];
         }
 
-        // If no specific employees requested, use ALL company employees
-        if (requestedEmployeeIds.length === 0) {
-            requestedEmployeeIds = [...validEmployeeIds];
-        } else {
-            // Remove duplicates
-            requestedEmployeeIds = [...new Set(requestedEmployeeIds)];
-        }
+        // Remove duplicates
+        targetEmployeeIds = [...new Set(targetEmployeeIds)];
 
         // ============================================
-        // STEP 3: Build query with strict company filtering
+        // STEP 3: Build query - GET ALL SESSIONS associated with these employees
         // ============================================
         const query = {
-            companyId: companyId  // CRITICAL: Always filter by company
+            companyId: companyId  // Always filter by company first
         };
 
-        // FIXED: Use $or with individual conditions, not combined
-        const employeeConditions = [];
+        // CRITICAL FIX: Use $or to find sessions where employee appears ANYWHERE
+        // This will get ALL sales records associated with the employee(s)
+        query.$or = [
+            { employeeId: { $in: targetEmployeeIds } },           // Main employee
+            { createdBy: { $in: targetEmployeeIds } },            // Created by
+            { assignedTo: { $in: targetEmployeeIds } },           // Assigned to
+            { 'visitLogs.userId': { $in: targetEmployeeIds } },    // In visit logs
+            { 'salesLogs.userId': { $in: targetEmployeeIds } },    // In sales logs
+            { 'meetingLogs.userId': { $in: targetEmployeeIds } }   // In meeting logs
+        ];
 
-        // Add conditions only if employees are specified
-        if (requestedEmployeeIds.length > 0) {
-            employeeConditions.push(
-                { employeeId: { $in: requestedEmployeeIds } },
-                { createdBy: { $in: requestedEmployeeIds } },
-                { assignedTo: { $in: requestedEmployeeIds } },
-                { 'visitLogs.userId': { $in: requestedEmployeeIds } },
-                { 'salesLogs.userId': { $in: requestedEmployeeIds } },
-                { 'meetingLogs.userId': { $in: requestedEmployeeIds } }
-            );
-
-            // Only add $or if we have conditions
-            if (employeeConditions.length > 0) {
-                query.$or = employeeConditions;
-            }
-        }
-
-        // FIXED: Date range filter - use punchInTime OR createdAt based on what's available
+        // ============================================
+        // STEP 4: Date range filter (if provided)
+        // ============================================
         if (startDate || endDate) {
-            const dateConditions = [];
+            const dateFilter = {};
 
             if (startDate) {
                 const start = new Date(startDate);
                 start.setHours(0, 0, 0, 0);
+                dateFilter.$gte = start;
+            }
 
-                if (endDate) {
-                    const end = new Date(endDate);
-                    end.setHours(23, 59, 59, 999);
-                    dateConditions.push({
-                        $or: [
-                            { punchInTime: { $gte: start, $lte: end } },
-                            { createdAt: { $gte: start, $lte: end } },
-                            { 'visitLogs.punchInTime': { $gte: start, $lte: end } }
-                        ]
-                    });
-                } else {
-                    dateConditions.push({
-                        $or: [
-                            { punchInTime: { $gte: start } },
-                            { createdAt: { $gte: start } },
-                            { 'visitLogs.punchInTime': { $gte: start } }
-                        ]
-                    });
-                }
-            } else if (endDate) {
+            if (endDate) {
                 const end = new Date(endDate);
                 end.setHours(23, 59, 59, 999);
-                dateConditions.push({
-                    $or: [
-                        { punchInTime: { $lte: end } },
-                        { createdAt: { $lte: end } },
-                        { 'visitLogs.punchInTime': { $lte: end } }
-                    ]
-                });
+                dateFilter.$lte = end;
             }
 
-            if (dateConditions.length > 0) {
-                query.$and = query.$and || [];
-                query.$and.push(...dateConditions);
-            }
+            // Check multiple date fields
+            query.$or.push(
+                { punchInTime: dateFilter },
+                { createdAt: dateFilter },
+                { 'visitLogs.punchInTime': dateFilter }
+            );
         }
 
-        // Sales Status filter
+        // ============================================
+        // STEP 5: Status filters
+        // ============================================
         if (status) {
             const validStatuses = ["open", "closed", "follow_up"];
             if (!validStatuses.includes(status)) {
@@ -711,7 +684,6 @@ export const exportSalesReport = async (req, res) => {
             query.SalesStatus = status;
         }
 
-        // Session Status filter
         if (sessionStatus) {
             const validSessionStatuses = ["in_progress", "completed"];
             if (!validSessionStatuses.includes(sessionStatus)) {
@@ -723,16 +695,16 @@ export const exportSalesReport = async (req, res) => {
             query.status = sessionStatus;
         }
 
-        console.log("Final Query:", JSON.stringify(query, null, 2)); // Debug log
+        console.log("Target Employee IDs:", targetEmployeeIds);
+        console.log("Final Query:", JSON.stringify(query, null, 2));
 
         // ============================================
-        // STEP 4: Fetch sessions with populated data
+        // STEP 6: Fetch sessions
         // ============================================
         const sessions = await SalesSession.find(query)
             .populate({
                 path: 'employeeId',
-                select: 'user_name empCode',
-                match: { companyId: companyId }
+                select: 'user_name empCode'
             })
             .populate({
                 path: 'createdBy',
@@ -757,7 +729,7 @@ export const exportSalesReport = async (req, res) => {
             .sort({ createdAt: -1 })
             .lean();
 
-        console.log(`Found ${sessions.length} sessions`); // Debug log
+        console.log(`Found ${sessions.length} sessions for employee(s)`);
 
         if (!sessions || sessions.length === 0) {
             return res.status(404).json({
@@ -765,91 +737,76 @@ export const exportSalesReport = async (req, res) => {
                 message: "No sales data found for the given criteria",
                 filters: {
                     companyId: companyId.toString(),
-                    employeeIds: requestedEmployeeIds,
+                    employeeIds: targetEmployeeIds,
                     startDate,
                     endDate,
                     status,
                     sessionStatus
-                },
-                debug: process.env.NODE_ENV === 'development' ? {
-                    query: query,
-                    employeeCount: requestedEmployeeIds.length,
-                    validEmployees: Array.from(validEmployeeIds)
-                } : undefined
+                }
             });
         }
 
         // ============================================
-        // STEP 5: Process sessions and create report rows
+        // STEP 7: Process sessions and create report rows
         // ============================================
         const reportData = [];
 
         for (const session of sessions) {
-            // Get unique employees involved in this session
+            // Get ALL employees involved in this session that belong to the company
             const involvedEmployees = new Map();
 
-            // Helper to add employee from any log
             const addEmployeeIfValid = (userId, populatedUser) => {
                 if (!userId) return;
-
                 const userIdStr = userId._id ? userId._id.toString() : userId.toString();
 
-                // Only include if employee belongs to this company
-                if (validEmployeeIds.has(userIdStr)) {
-                    const empDetails = employeeDetailsMap.get(userIdStr);
-                    involvedEmployees.set(userIdStr, {
-                        userId: userId._id || userId,
-                        empCode: populatedUser?.empCode || empDetails?.empCode || 'N/A',
-                        user_name: populatedUser?.user_name || empDetails?.user_name || 'Unknown',
-                        employeeType: empDetails?.employeeType || 'non_sales',
-                        role: empDetails?.role || 'employee'
-                    });
+                // Only include if employee belongs to this company AND is in our target list
+                if (validEmployeeIds.has(userIdStr) && targetEmployeeIds.includes(userIdStr)) {
+                    if (!involvedEmployees.has(userIdStr)) {
+                        const empDetails = employeeDetailsMap.get(userIdStr);
+                        involvedEmployees.set(userIdStr, {
+                            userId: userId._id || userId,
+                            empCode: populatedUser?.empCode || empDetails?.empCode || 'N/A',
+                            user_name: populatedUser?.user_name || empDetails?.user_name || 'Unknown',
+                            employeeType: empDetails?.employeeType || 'non_sales',
+                            role: empDetails?.role || 'employee'
+                        });
+                    }
                 }
             };
 
-            // Main employee of the session
-            if (session.employeeId) {
-                addEmployeeIfValid(session.employeeId._id, session.employeeId);
-            }
+            // Check all possible locations where employee could appear
+            if (session.employeeId) addEmployeeIfValid(session.employeeId._id, session.employeeId);
+            if (session.createdBy) addEmployeeIfValid(session.createdBy._id, session.createdBy);
 
-            // Creator of the session
-            if (session.createdBy) {
-                addEmployeeIfValid(session.createdBy._id, session.createdBy);
-            }
-
-            // Assigned employees
             if (session.assignedTo && Array.isArray(session.assignedTo)) {
                 session.assignedTo.forEach(assigned => {
-                    if (assigned) {
-                        addEmployeeIfValid(assigned._id || assigned, assigned);
-                    }
+                    if (assigned) addEmployeeIfValid(assigned._id || assigned, assigned);
                 });
             }
 
-            // Employees from visit logs
             session.visitLogs?.forEach(log => {
-                if (log.userId) {
-                    addEmployeeIfValid(log.userId._id, log.userId);
-                }
+                if (log.userId) addEmployeeIfValid(log.userId._id, log.userId);
             });
 
-            // Employees from sales logs
             session.salesLogs?.forEach(log => {
-                if (log.userId) {
-                    addEmployeeIfValid(log.userId._id, log.userId);
-                }
+                if (log.userId) addEmployeeIfValid(log.userId._id, log.userId);
             });
 
-            // Employees from meeting logs
             session.meetingLogs?.forEach(log => {
-                if (log.userId) {
-                    addEmployeeIfValid(log.userId._id, log.userId);
-                }
+                if (log.userId) addEmployeeIfValid(log.userId._id, log.userId);
             });
 
-            // Create rows for each involved employee or one row if no employees
-            if (involvedEmployees.size === 0) {
-                reportData.push(createCompanyReportRow(session, null));
+            // Create rows for each involved employee
+            if (involvedEmployees.size === 0 && targetEmployeeIds.length > 0) {
+                // If session has no direct employee match but should be included
+                // Create a row with session data but unknown employee
+                reportData.push({
+                    ...createCompanyReportRow(session, null),
+                    empCode: 'N/A',
+                    empName: 'Unknown Employee',
+                    employeeType: 'N/A',
+                    role: 'N/A'
+                });
             } else {
                 for (const [empId, empData] of involvedEmployees) {
                     reportData.push(createCompanyReportRow(session, empData));
@@ -858,8 +815,15 @@ export const exportSalesReport = async (req, res) => {
         }
 
         // ============================================
-        // STEP 6: Generate CSV
+        // STEP 8: Generate CSV
         // ============================================
+        if (reportData.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "No report data to export"
+            });
+        }
+
         const fields = [
             { label: 'Date', value: 'date' },
             { label: 'Employee Code', value: 'empCode' },
@@ -872,7 +836,7 @@ export const exportSalesReport = async (req, res) => {
             { label: 'Phone Number', value: 'phoneNumber' },
             { label: 'Address', value: 'address' },
             { label: 'Landmark', value: 'landmark' },
-            { label: 'Customer Location (Lat,Lng)', value: 'customerLocation' },
+            { label: 'Customer Location', value: 'customerLocation' },
             { label: 'Sales Logs', value: 'salesLogs' },
             { label: 'Total Sales Amount', value: 'totalSalesAmount' },
             { label: 'Payment Collected', value: 'paymentCollected' },
@@ -894,24 +858,20 @@ export const exportSalesReport = async (req, res) => {
             { label: 'Total Distance (km)', value: 'totalDistance' }
         ];
 
-        const json2csvParser = new Parser({
-            fields,
-            delimiter: ',',
-            quote: '"',
-            header: true
-        });
-
+        const json2csvParser = new Parser({ fields, delimiter: ',', quote: '"', header: true });
         const csv = json2csvParser.parse(reportData);
 
         // Generate filename
         const companyName = req.user?.companyName || 'Company';
+        const employeeName = targetEmployeeIds.length === 1
+            ? employeeDetailsMap.get(targetEmployeeIds[0])?.user_name || 'Employee'
+            : 'Multiple_Employees';
         const dateRange = startDate && endDate
-            ? `${startDate}_to_${endDate}`
+            ? `${startDate.split('T')[0]}_to_${endDate.split('T')[0]}`
             : new Date().toISOString().split('T')[0];
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `Sales_Report_${companyName}_${dateRange}_${timestamp}.csv`;
+        const filename = `Sales_Report_${companyName}_${employeeName}_${dateRange}_${timestamp}.csv`;
 
-        // Send CSV file
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
