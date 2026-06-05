@@ -962,7 +962,7 @@ const styleDataCell = (cell, value, opts = {}) => {
 // Add this configuration at the top of your file or in a config module
 const PREMIUM_CONFIG = {
     isPremium: false, // Change this based on your premium check logic
-    maxFreeRows: 100, // Define your limit here
+    maxFreeRows: 5, // Define your limit here
 };
 
 const checkPremiumAccess = async (companyId) => {
