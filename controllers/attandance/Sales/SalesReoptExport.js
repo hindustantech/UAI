@@ -522,6 +522,11 @@ export const exportSalesPersonReport = async (req, res) => {
  * @route   GET /api/sales/reports/export
  * @access  Private (Company Admin/Manager - only sees their company data)
  */
+/**
+ * @desc    Export Sales Reports (Company-specific data only)
+ * @route   GET /api/sales/reports/export
+ * @access  Private (Company Admin/Manager - only sees their company data)
+ */
 export const exportSalesReport = async (req, res) => {
     try {
         const {
@@ -536,7 +541,6 @@ export const exportSalesReport = async (req, res) => {
 
         // ============================================
         // SECURITY: Extract company ID from authenticated user
-        // Company can ONLY access their own data
         // ============================================
         const companyId = req.user?.companyId || req.user?._id;
 
@@ -627,33 +631,71 @@ export const exportSalesReport = async (req, res) => {
         // STEP 3: Build query with strict company filtering
         // ============================================
         const query = {
-            companyId: companyId,  // CRITICAL: Always filter by company
-            $or: [
-                // Sessions created by company employees
-                { createdBy: { $in: requestedEmployeeIds } },
-                // Sessions assigned to company employees
-                { employeeId: { $in: requestedEmployeeIds } },
-                // Sessions where company employees are in visit logs
-                { 'visitLogs.userId': { $in: requestedEmployeeIds } },
-                // Sessions where company employees are in sales logs
-                { 'salesLogs.userId': { $in: requestedEmployeeIds } },
-                // Sessions where company employees are in meeting logs
-                { 'meetingLogs.userId': { $in: requestedEmployeeIds } }
-            ]
+            companyId: companyId  // CRITICAL: Always filter by company
         };
 
-        // Date range filter
+        // FIXED: Use $or with individual conditions, not combined
+        const employeeConditions = [];
+
+        // Add conditions only if employees are specified
+        if (requestedEmployeeIds.length > 0) {
+            employeeConditions.push(
+                { employeeId: { $in: requestedEmployeeIds } },
+                { createdBy: { $in: requestedEmployeeIds } },
+                { assignedTo: { $in: requestedEmployeeIds } },
+                { 'visitLogs.userId': { $in: requestedEmployeeIds } },
+                { 'salesLogs.userId': { $in: requestedEmployeeIds } },
+                { 'meetingLogs.userId': { $in: requestedEmployeeIds } }
+            );
+
+            // Only add $or if we have conditions
+            if (employeeConditions.length > 0) {
+                query.$or = employeeConditions;
+            }
+        }
+
+        // FIXED: Date range filter - use punchInTime OR createdAt based on what's available
         if (startDate || endDate) {
-            query.createdAt = {};
+            const dateConditions = [];
+
             if (startDate) {
                 const start = new Date(startDate);
                 start.setHours(0, 0, 0, 0);
-                query.createdAt.$gte = start;
-            }
-            if (endDate) {
+
+                if (endDate) {
+                    const end = new Date(endDate);
+                    end.setHours(23, 59, 59, 999);
+                    dateConditions.push({
+                        $or: [
+                            { punchInTime: { $gte: start, $lte: end } },
+                            { createdAt: { $gte: start, $lte: end } },
+                            { 'visitLogs.punchInTime': { $gte: start, $lte: end } }
+                        ]
+                    });
+                } else {
+                    dateConditions.push({
+                        $or: [
+                            { punchInTime: { $gte: start } },
+                            { createdAt: { $gte: start } },
+                            { 'visitLogs.punchInTime': { $gte: start } }
+                        ]
+                    });
+                }
+            } else if (endDate) {
                 const end = new Date(endDate);
                 end.setHours(23, 59, 59, 999);
-                query.createdAt.$lte = end;
+                dateConditions.push({
+                    $or: [
+                        { punchInTime: { $lte: end } },
+                        { createdAt: { $lte: end } },
+                        { 'visitLogs.punchInTime': { $lte: end } }
+                    ]
+                });
+            }
+
+            if (dateConditions.length > 0) {
+                query.$and = query.$and || [];
+                query.$and.push(...dateConditions);
             }
         }
 
@@ -681,6 +723,8 @@ export const exportSalesReport = async (req, res) => {
             query.status = sessionStatus;
         }
 
+        console.log("Final Query:", JSON.stringify(query, null, 2)); // Debug log
+
         // ============================================
         // STEP 4: Fetch sessions with populated data
         // ============================================
@@ -688,10 +732,14 @@ export const exportSalesReport = async (req, res) => {
             .populate({
                 path: 'employeeId',
                 select: 'user_name empCode',
-                match: { companyId: companyId }  // Extra security: only match company employees
+                match: { companyId: companyId }
             })
             .populate({
                 path: 'createdBy',
+                select: 'user_name empCode'
+            })
+            .populate({
+                path: 'assignedTo',
                 select: 'user_name empCode'
             })
             .populate({
@@ -709,18 +757,25 @@ export const exportSalesReport = async (req, res) => {
             .sort({ createdAt: -1 })
             .lean();
 
+        console.log(`Found ${sessions.length} sessions`); // Debug log
+
         if (!sessions || sessions.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: "No sales data found for the given criteria",
                 filters: {
-                    companyId,
+                    companyId: companyId.toString(),
                     employeeIds: requestedEmployeeIds,
                     startDate,
                     endDate,
                     status,
                     sessionStatus
-                }
+                },
+                debug: process.env.NODE_ENV === 'development' ? {
+                    query: query,
+                    employeeCount: requestedEmployeeIds.length,
+                    validEmployees: Array.from(validEmployeeIds)
+                } : undefined
             });
         }
 
@@ -762,6 +817,15 @@ export const exportSalesReport = async (req, res) => {
                 addEmployeeIfValid(session.createdBy._id, session.createdBy);
             }
 
+            // Assigned employees
+            if (session.assignedTo && Array.isArray(session.assignedTo)) {
+                session.assignedTo.forEach(assigned => {
+                    if (assigned) {
+                        addEmployeeIfValid(assigned._id || assigned, assigned);
+                    }
+                });
+            }
+
             // Employees from visit logs
             session.visitLogs?.forEach(log => {
                 if (log.userId) {
@@ -785,10 +849,8 @@ export const exportSalesReport = async (req, res) => {
 
             // Create rows for each involved employee or one row if no employees
             if (involvedEmployees.size === 0) {
-                // Still create a row with session data but no employee info
                 reportData.push(createCompanyReportRow(session, null));
             } else {
-                // Create separate rows for each involved employee
                 for (const [empId, empData] of involvedEmployees) {
                     reportData.push(createCompanyReportRow(session, empData));
                 }
@@ -799,14 +861,11 @@ export const exportSalesReport = async (req, res) => {
         // STEP 6: Generate CSV
         // ============================================
         const fields = [
-            // Date & Employee Info
             { label: 'Date', value: 'date' },
             { label: 'Employee Code', value: 'empCode' },
             { label: 'Employee Name', value: 'empName' },
             { label: 'Employee Type', value: 'employeeType' },
             { label: 'Role', value: 'role' },
-
-            // Customer Information
             { label: 'Customer ID', value: 'customerId' },
             { label: 'Company Name', value: 'companyName' },
             { label: 'Contact Name', value: 'contactName' },
@@ -814,25 +873,17 @@ export const exportSalesReport = async (req, res) => {
             { label: 'Address', value: 'address' },
             { label: 'Landmark', value: 'landmark' },
             { label: 'Customer Location (Lat,Lng)', value: 'customerLocation' },
-
-            // Sales Information
             { label: 'Sales Logs', value: 'salesLogs' },
             { label: 'Total Sales Amount', value: 'totalSalesAmount' },
             { label: 'Payment Collected', value: 'paymentCollected' },
-
-            // Meeting Information
             { label: 'Meeting Logs', value: 'meetingLogs' },
             { label: 'Next Meeting Decided', value: 'nextMeetingDecided' },
             { label: 'Next Meeting Date', value: 'nextMeetingDate' },
             { label: 'Next Meeting Time', value: 'nextMeetingTime' },
             { label: 'Next Meeting Notes', value: 'nextMeetingNotes' },
-
-            // Status
             { label: 'Sales Status', value: 'salesStatus' },
             { label: 'Session Status', value: 'sessionStatus' },
             { label: 'Form Completed', value: 'formCompleted' },
-
-            // Time Tracking
             { label: 'Session Created', value: 'sessionCreated' },
             { label: 'Punch In Time', value: 'punchInTime' },
             { label: 'Punch In Location', value: 'punchInLocation' },
@@ -864,9 +915,7 @@ export const exportSalesReport = async (req, res) => {
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-        // Add BOM for Excel UTF-8 compatibility
         const BOM = '\uFEFF';
-
         return res.status(200).send(BOM + csv);
 
     } catch (error) {
