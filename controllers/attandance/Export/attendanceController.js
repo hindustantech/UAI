@@ -3,7 +3,7 @@ import Employee from "../../../models/Attandance/Employee.js";
 import mongoose from "mongoose";
 import { Parser } from "json2csv";
 import ExcelJS from "exceljs";
-
+import { Subscription } from "../../../models/Attandance/subscration/Subscription.js";
 
 /* ─────────────────────────────────────────────
    HELPERS
@@ -133,17 +133,15 @@ export const generateAttendanceCSV = async (req, res) => {
         const employeeCount = employees.length;
         const exceedsFreeLimit = !isPremium && employeeCount > PREMIUM_CONFIG.maxFreeRows;
 
-        // ── Build rows (full or limited based on premium) ─────────────────
+        // ── Build rows based on premium status ─────────────────────────
         let rows = [];
 
         if (exceedsFreeLimit) {
-            // Build limited rows for free version
-            let recordsAdded = 0;
-            const maxRecords = PREMIUM_CONFIG.maxFreeRows;
-            const daysToShow = Math.min(dateRange.length, 5); // Show only 5 days per employee for free version
+            // FREE VERSION: Only show 1 sample record
+            let sampleAdded = false;
 
             for (const emp of employees) {
-                if (recordsAdded >= maxRecords) break;
+                if (sampleAdded) break; // Only add one sample record
 
                 const weeklyOffDays = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
                 const shiftStart = emp.shift?.startTime || "09:00";
@@ -152,124 +150,119 @@ export const generateAttendanceCSV = async (req, res) => {
                 const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
                 const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
 
-                // Show limited dates for free version
-                const limitedDateRange = dateRange.slice(0, daysToShow);
+                // Only take first date for sample
+                const sampleDate = dateRange[0];
+                const dateKey = sampleDate.toISOString().split("T")[0];
+                const dayOfWeek = sampleDate.toLocaleDateString("en-IN", { weekday: "long" });
+                const attendance = attendanceMap.get(`${emp._id}_${dateKey}`);
+                const isWeeklyOff = weeklyOffDays.includes(dayOfWeek);
 
-                for (const date of limitedDateRange) {
-                    if (recordsAdded >= maxRecords) break;
+                let punchInTime = "";
+                let punchOutTime = "";
+                let totalHours = "0.00";
+                let overtimeMinutes = 0;
+                let lateMinutes = 0;
+                let earlyLeaveMinutes = 0;
+                let breakMinutes = 0;
+                let statusLabel = "";
+                let locationVerified = "No";
+                let remarks = "";
+                let autoMarked = "No";
+                let suspicious = "No";
 
-                    const dateKey = date.toISOString().split("T")[0];
-                    const dayOfWeek = date.toLocaleDateString("en-IN", { weekday: "long" });
-                    const attendance = attendanceMap.get(`${emp._id}_${dateKey}`);
-                    const isWeeklyOff = weeklyOffDays.includes(dayOfWeek);
+                if (isWeeklyOff) {
+                    punchInTime = "—";
+                    punchOutTime = "—";
+                    statusLabel = "Week Off";
+                } else if (!attendance) {
+                    punchInTime = "—";
+                    punchOutTime = "—";
+                    statusLabel = "Absent";
+                } else {
+                    punchInTime = attendance.punchIn ? formatTime(attendance.punchIn) : "—";
+                    punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
+                    totalHours = minutesToHours(attendance.workSummary?.totalMinutes || 0);
+                    overtimeMinutes = attendance.workSummary?.overtimeMinutes || 0;
+                    lateMinutes = formatLateTime(attendance?.workSummary?.lateMinutes) || 0;
+                    earlyLeaveMinutes = attendance.workSummary?.earlyLeaveMinutes || 0;
+                    breakMinutes = totalBreakMinutes(attendance.breaks);
+                    locationVerified = attendance.geoLocation?.verified ? "Yes" : "No";
+                    remarks = attendance.remarks || "";
+                    autoMarked = attendance.isAutoMarked ? "Yes" : "No";
+                    suspicious = attendance.isSuspicious ? "Yes" : "No";
 
-                    let punchInTime = "";
-                    let punchOutTime = "";
-                    let totalHours = "0.00";
-                    let overtimeMinutes = 0;
-                    let lateMinutes = 0;
-                    let earlyLeaveMinutes = 0;
-                    let breakMinutes = 0;
-                    let statusLabel = "";
-                    let locationVerified = "No";
-                    let remarks = "";
-                    let autoMarked = "No";
-                    let suspicious = "No";
+                    if (lateMinutes === 0 && earlyLeaveMinutes === 0 && attendance.punchIn) {
+                        const inMins = timeStrToMinutes(formatTime(attendance.punchIn));
+                        const shiftInMins = timeStrToMinutes(shiftStart);
+                        if (inMins - shiftInMins > graceIn) lateMinutes = inMins - shiftInMins;
 
-                    if (isWeeklyOff) {
-                        punchInTime = "—";
-                        punchOutTime = "—";
-                        statusLabel = "Week Off";
-                    } else if (!attendance) {
-                        punchInTime = "—";
-                        punchOutTime = "—";
-                        statusLabel = "Absent";
-                    } else {
-                        punchInTime = attendance.punchIn ? formatTime(attendance.punchIn) : "—";
-                        punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
-                        totalHours = minutesToHours(attendance.workSummary?.totalMinutes || 0);
-                        overtimeMinutes = attendance.workSummary?.overtimeMinutes || 0;
-                        lateMinutes = formatLateTime(attendance?.workSummary?.lateMinutes) || 0;
-                        earlyLeaveMinutes = attendance.workSummary?.earlyLeaveMinutes || 0;
-                        breakMinutes = totalBreakMinutes(attendance.breaks);
-                        locationVerified = attendance.geoLocation?.verified ? "Yes" : "No";
-                        remarks = attendance.remarks || "";
-                        autoMarked = attendance.isAutoMarked ? "Yes" : "No";
-                        suspicious = attendance.isSuspicious ? "Yes" : "No";
-
-                        if (lateMinutes === 0 && earlyLeaveMinutes === 0 && attendance.punchIn) {
-                            const inMins = timeStrToMinutes(formatTime(attendance.punchIn));
-                            const shiftInMins = timeStrToMinutes(shiftStart);
-                            if (inMins - shiftInMins > graceIn) lateMinutes = inMins - shiftInMins;
-
-                            if (attendance.punchOut) {
-                                const outMins = timeStrToMinutes(formatTime(attendance.punchOut));
-                                const shiftOutMins = timeStrToMinutes(shiftEnd);
-                                if (shiftOutMins - outMins > graceOut) earlyLeaveMinutes = shiftOutMins - outMins;
-                            }
-                        }
-
-                        switch (attendance.status) {
-                            case "leave":
-                                statusLabel = "Leave";
-                                punchInTime = "—";
-                                punchOutTime = "—";
-                                totalHours = "0.00";
-                                break;
-                            case "half_day":
-                                statusLabel = "Half Day";
-                                break;
-                            case "holiday":
-                                statusLabel = "Holiday";
-                                punchInTime = "—";
-                                punchOutTime = "—";
-                                totalHours = "0.00";
-                                break;
-                            case "week_off":
-                                statusLabel = "Week Off";
-                                break;
-                            case "absent":
-                                statusLabel = "Absent";
-                                break;
-                            case "present":
-                            default: {
-                                const tags = getLateEarlyTags(
-                                    shiftStart, shiftEnd,
-                                    attendance.punchIn, attendance.punchOut,
-                                    graceIn, graceOut
-                                );
-                                statusLabel = tags.length ? tags.join(" + ") : "Present";
-                                break;
-                            }
+                        if (attendance.punchOut) {
+                            const outMins = timeStrToMinutes(formatTime(attendance.punchOut));
+                            const shiftOutMins = timeStrToMinutes(shiftEnd);
+                            if (shiftOutMins - outMins > graceOut) earlyLeaveMinutes = shiftOutMins - outMins;
                         }
                     }
 
-                    rows.push({
-                        "Emp Code": emp.empCode || "—",
-                        "Emp Name": emp.user_name || "N/A",
-                        "Department": emp.jobInfo?.department || "N/A",
-                        "Shift": shiftName,
-                        "Date": dateKey,
-                        "Day": dayOfWeek,
-                        "Punch In": punchInTime,
-                        "Punch Out": punchOutTime,
-                        "Total Hours": totalHours,
-                        "Overtime (min)": overtimeMinutes,
-                        "Late (min)": lateMinutes,
-                        "Early Leave (min)": earlyLeaveMinutes,
-                        "Break (min)": breakMinutes,
-                        "Status": statusLabel,
-                        "Location Verified": locationVerified,
-                        "Remarks": remarks,
-                        "Auto Marked": autoMarked,
-                        "Suspicious": suspicious,
-                    });
-
-                    recordsAdded++;
+                    switch (attendance.status) {
+                        case "leave":
+                            statusLabel = "Leave";
+                            punchInTime = "—";
+                            punchOutTime = "—";
+                            totalHours = "0.00";
+                            break;
+                        case "half_day":
+                            statusLabel = "Half Day";
+                            break;
+                        case "holiday":
+                            statusLabel = "Holiday";
+                            punchInTime = "—";
+                            punchOutTime = "—";
+                            totalHours = "0.00";
+                            break;
+                        case "week_off":
+                            statusLabel = "Week Off";
+                            break;
+                        case "absent":
+                            statusLabel = "Absent";
+                            break;
+                        case "present":
+                        default: {
+                            const tags = getLateEarlyTags(
+                                shiftStart, shiftEnd,
+                                attendance.punchIn, attendance.punchOut,
+                                graceIn, graceOut
+                            );
+                            statusLabel = tags.length ? tags.join(" + ") : "Present";
+                            break;
+                        }
+                    }
                 }
+
+                rows.push({
+                    "Emp Code": emp.empCode || "—",
+                    "Emp Name": emp.user_name || "N/A",
+                    "Department": emp.jobInfo?.department || "N/A",
+                    "Shift": shiftName,
+                    "Date": dateKey,
+                    "Day": dayOfWeek,
+                    "Punch In": punchInTime,
+                    "Punch Out": punchOutTime,
+                    "Total Hours": totalHours,
+                    "Overtime (min)": overtimeMinutes,
+                    "Late (min)": lateMinutes,
+                    "Early Leave (min)": earlyLeaveMinutes,
+                    "Break (min)": breakMinutes,
+                    "Status": statusLabel,
+                    "Location Verified": locationVerified,
+                    "Remarks": remarks,
+                    "Auto Marked": autoMarked,
+                    "Suspicious": suspicious,
+                });
+
+                sampleAdded = true;
             }
         } else {
-            // Build full rows for premium users
+            // PREMIUM VERSION: Full data
             for (const emp of employees) {
                 const weeklyOffDays = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
                 const shiftStart = emp.shift?.startTime || "09:00";
@@ -390,6 +383,12 @@ export const generateAttendanceCSV = async (req, res) => {
         }
 
         const totalRecords = employees.length * dateRange.length;
+        const fields = [
+            "Emp Code", "Emp Name", "Department", "Shift",
+            "Date", "Day", "Punch In", "Punch Out",
+            "Total Hours", "Overtime (min)", "Late (min)", "Early Leave (min)", "Break (min)",
+            "Status", "Location Verified", "Remarks", "Auto Marked", "Suspicious",
+        ];
 
         /* ─────────────────────────────────────────────
            OUTPUT: XLSX  (default)
@@ -399,58 +398,62 @@ export const generateAttendanceCSV = async (req, res) => {
             workbook.creator = "HR System";
             workbook.created = new Date();
 
-            // Add upgrade message worksheet if free tier exceeded
+            // For free users with limit exceeded
             if (exceedsFreeLimit) {
-                // Create the upgrade worksheet using the existing function
+                // Create upgrade worksheet as first sheet
                 const wsUpgrade = createUpgradeWorksheet(workbook, startDate, endDate, employeeCount);
-                // Move it to first position
-                workbook.addWorksheet("UPGRADE_REQUIRED", 1);
-                const tempSheet = workbook.getWorksheet(workbook.worksheets.length);
-                // Copy content - simpler: just ensure upgrade sheet is first
-                workbook.moveWorksheet(wsUpgrade, 0);
-            }
 
-            // Only show data if not exceeding free limit OR if we're showing limited data
-            if (!exceedsFreeLimit || rows.length > 0) {
+                // Create sample data sheet as second sheet (only headers + 1 record)
+                const wsSample = workbook.addWorksheet("Sample Data (Upgrade Required)");
+
+                // Set column widths
+                wsSample.columns = fields.map(f => ({ header: f, key: f, width: 15 }));
+
+                // Style headers
+                const headerRow = wsSample.getRow(1);
+                headerRow.eachCell((cell) => {
+                    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
+                    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2F5496" } };
+                    cell.alignment = { horizontal: "center", vertical: "middle" };
+                });
+                headerRow.height = 20;
+
+                // Add the single sample row
+                if (rows.length > 0) {
+                    const dataRow = wsSample.addRow(rows[0]);
+                    dataRow.height = 16;
+                    dataRow.eachCell((cell) => {
+                        cell.font = { name: "Arial", size: 9 };
+                        cell.alignment = { horizontal: "center", vertical: "middle" };
+                    });
+                }
+
+                // Add note about limited data
+                const noteRow = wsSample.addRow({});
+                noteRow.height = 20;
+                const noteCell = noteRow.getCell(1);
+                noteCell.value = `Note: This is just a sample (1 record). Total available: ${totalRecords} records. Upgrade to premium to download complete data.`;
+                noteCell.font = { name: "Arial", size: 9, italic: true, color: { argb: "FF9C0006" } };
+                wsSample.mergeCells(noteRow.number, 1, noteRow.number, fields.length);
+            } else {
+                // Premium user - full report
                 const sheet = workbook.addWorksheet("Attendance Report", {
                     views: [{ state: "frozen", ySplit: 1 }],
                 });
 
-                // ── Column definitions ────────────────────────────────────
-                sheet.columns = [
-                    { header: "Emp Code", key: "Emp Code", width: 12 },
-                    { header: "Emp Name", key: "Emp Name", width: 22 },
-                    { header: "Department", key: "Department", width: 18 },
-                    { header: "Shift", key: "Shift", width: 22 },
-                    { header: "Date", key: "Date", width: 14 },
-                    { header: "Day", key: "Day", width: 12 },
-                    { header: "Punch In", key: "Punch In", width: 12 },
-                    { header: "Punch Out", key: "Punch Out", width: 12 },
-                    { header: "Total Hours", key: "Total Hours", width: 14 },
-                    { header: "Overtime (min)", key: "Overtime (min)", width: 15 },
-                    { header: "Late (min)", key: "Late (min)", width: 12 },
-                    { header: "Early Leave (min)", key: "Early Leave (min)", width: 18 },
-                    { header: "Break (min)", key: "Break (min)", width: 13 },
-                    { header: "Status", key: "Status", width: 16 },
-                    { header: "Location Verified", key: "Location Verified", width: 18 },
-                    { header: "Remarks", key: "Remarks", width: 25 },
-                    { header: "Auto Marked", key: "Auto Marked", width: 13 },
-                    { header: "Suspicious", key: "Suspicious", width: 13 },
-                ];
+                // Column definitions
+                sheet.columns = fields.map(f => ({ header: f, key: f, width: 15 }));
 
-                // ── Header row styling ────────────────────────────────────
+                // Header row styling
                 const headerRow = sheet.getRow(1);
                 headerRow.eachCell((cell) => {
                     cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
                     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2F5496" } };
                     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-                    cell.border = {
-                        bottom: { style: "thin", color: { argb: "FFAAAAAA" } },
-                    };
                 });
                 headerRow.height = 20;
 
-                // ── Status colour map ─────────────────────────────────────
+                // Status colour map
                 const STATUS_COLORS = {
                     "Present": "FFD9EAD3",
                     "Late": "FFFFF2CC",
@@ -463,7 +466,7 @@ export const generateAttendanceCSV = async (req, res) => {
                     "Holiday": "FFD9EAD3",
                 };
 
-                // ── Data rows ─────────────────────────────────────────────
+                // Data rows
                 rows.forEach((r, idx) => {
                     const row = sheet.addRow(r);
                     row.height = 16;
@@ -488,25 +491,12 @@ export const generateAttendanceCSV = async (req, res) => {
                     }
                 });
 
-                // Add note about limited data if applicable
-                if (exceedsFreeLimit) {
-                    const noteRow = sheet.addRow({});
-                    noteRow.height = 20;
-                    const noteCell = noteRow.getCell(1);
-                    noteCell.value = `Note: Limited to ${rows.length} out of ${totalRecords} records (Free Version). Upgrade to premium for complete data.`;
-                    noteCell.font = { name: "Arial", size: 9, italic: true, color: { argb: "FF9C0006" } };
-                    sheet.mergeCells(noteRow.number, 1, noteRow.number, 18);
-                }
-
-                // ── Auto-filter ───────────────────────────────────────────
                 sheet.autoFilter = {
                     from: { row: 1, column: 1 },
                     to: { row: 1, column: sheet.columns.length },
                 };
-            }
 
-            // Only add summary sheet for premium users
-            if (isPremium && !exceedsFreeLimit) {
+                // Add summary sheet
                 const summary = workbook.addWorksheet("Summary");
                 summary.columns = [
                     { header: "Status", key: "status", width: 20 },
@@ -538,10 +528,10 @@ export const generateAttendanceCSV = async (req, res) => {
                 summary.addRow({ status: "Total Records", count: total, pct: "100%" });
             }
 
-            // ── Send response ─────────────────────────────────────────
-            const filename = isPremium && !exceedsFreeLimit
-                ? `attendance_premium_${startDate}_to_${endDate}.xlsx`
-                : `attendance_basic_${startDate}_to_${endDate}.xlsx`;
+            // Send response
+            const filename = exceedsFreeLimit
+                ? `attendance_sample_${startDate}_to_${endDate}.xlsx`
+                : `attendance_premium_${startDate}_to_${endDate}.xlsx`;
 
             res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
             res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
@@ -552,37 +542,38 @@ export const generateAttendanceCSV = async (req, res) => {
         /* ─────────────────────────────────────────────
            OUTPUT: CSV  (format=csv)
         ───────────────────────────────────────────── */
-        const fields = [
-            "Emp Code", "Emp Name", "Department", "Shift",
-            "Date", "Day", "Punch In", "Punch Out",
-            "Total Hours", "Overtime (min)", "Late (min)", "Early Leave (min)", "Break (min)",
-            "Status", "Location Verified", "Remarks", "Auto Marked", "Suspicious",
-        ];
 
-        // For CSV, add warning comment if limited data
+        // For free users - only headers + 1 record with warnings
         if (exceedsFreeLimit) {
-            // Add warning as comment lines (using # for comments in CSV)
-            let csvOutput = `# WARNING: Limited to ${rows.length} out of ${totalRecords} records (Free Version)\n`;
+            let csvOutput = `# PREMIUM FEATURE - UPGRADE REQUIRED\n`;
             csvOutput += `# Free version only allows export of basic attendance summary\n`;
-            csvOutput += `# Upgrade to premium for complete data export\n`;
+            csvOutput += `# Total records available: ${totalRecords}\n`;
+            csvOutput += `# Showing only 1 sample record\n`;
+            csvOutput += `# Upgrade to premium to download complete data\n`;
+            csvOutput += `# Contact: sales@yourcompany.com\n`;
+            csvOutput += `\n`;
 
             // Add headers
             csvOutput += fields.map(f => `"${f}"`).join(",") + "\n";
 
-            // Add data rows
-            rows.forEach(row => {
-                csvOutput += fields.map(f => `"${row[f] || ""}"`).join(",") + "\n";
-            });
+            // Add single sample row
+            if (rows.length > 0) {
+                csvOutput += fields.map(f => `"${rows[0][f] || ""}"`).join(",") + "\n";
+            }
+
+            // Add upgrade message row
+            csvOutput += `\n"UPGRADE REQUIRED","To download complete data with all ${totalRecords} records, please upgrade to premium","","","","","","","","","","","","","","","",""`;
 
             res.setHeader("Content-Type", "text/csv");
-            res.setHeader("Content-Disposition", `attachment; filename=attendance_basic_${startDate}_to_${endDate}.csv`);
+            res.setHeader("Content-Disposition", `attachment; filename=attendance_sample_${startDate}_to_${endDate}.csv`);
             return res.status(200).send(csvOutput);
         }
 
+        // Premium users - full CSV
         const parser = new Parser({ fields });
         const csv = parser.parse(rows);
         res.setHeader("Content-Type", "text/csv");
-        res.setHeader("Content-Disposition", `attachment; filename=attendance_${startDate}_to_${endDate}.csv`);
+        res.setHeader("Content-Disposition", `attachment; filename=attendance_premium_${startDate}_to_${endDate}.csv`);
         return res.status(200).send(csv);
 
     } catch (error) {
@@ -594,6 +585,7 @@ export const generateAttendanceCSV = async (req, res) => {
         });
     }
 };
+
 /**
  * Alternative method to generate CSV in the exact matrix format with dates as headers
  */
