@@ -1,6 +1,7 @@
 // controllers/onboarding.controller.js
 
 import Onboarding from "../models/Onboarding.js";
+import Lead from '../models/uaileads.js';
 
 export const createOnboarding = async (req, res) => {
     try {
@@ -89,6 +90,60 @@ export const getOnboardingdatabyPhone = async (req, res) => {
             success: false,
             message: "Failed to fetch onboarding data",
 
+        });
+    }
+};
+
+
+
+export const createLead = async (req, res) => {
+    try {
+        const {
+            companyName,
+            phone,
+            companySize,
+            salesTeam,
+            notes,
+        } = req.body;
+
+        // Validation
+        if (!companyName || !phone || !companySize) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Company name, phone, and company size are required.",
+            });
+        }
+
+        const existingLead = await Lead.findOne({ phone });
+
+        if (existingLead) {
+            return res.status(409).json({
+                success: false,
+                message: "Lead already exists with this phone number.",
+            });
+        }
+
+        const lead = await Lead.create({
+            companyName,
+            phone,
+            companySize,
+            salesTeam,
+            notes,
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Lead created successfully.",
+            data: lead,
+        });
+    } catch (error) {
+        console.error("Create Lead Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to create lead.",
+            error: error.message,
         });
     }
 };
