@@ -765,7 +765,7 @@ const styleDataCell = (cell, value, opts = {}) => {
    SUMMARY + SALARY PIVOT EXPORT
 ───────────────────────────────────────── */
 const PREMIUM_CONFIG = {
-    maxFreeRows: 5,
+    maxFreeRows: 1,
 };
 
 
