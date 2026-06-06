@@ -517,11 +517,7 @@ export const exportSalesPersonReport = async (req, res) => {
         });
     }
 };
-/**
- * @desc    Export Sales Reports (Company-specific data only)
- * @route   GET /api/sales/reports/export
- * @access  Private (Company Admin/Manager - only sees their company data)
- */
+
 /**
  * @desc    Export Sales Reports (Company-specific data only)
  * @route   GET /api/sales/reports/export
@@ -543,9 +539,9 @@ export const exportSalesReport = async (req, res) => {
         // ============================================
         // SECURITY: Extract company ID from authenticated user
         // ============================================
-        const companyId =  req.user?._id || re.use?.id;
+        const companyId = req.user?._id || re.use?.id;
         console.log("Authenticated User ID:", req.user?._id);
-        console.log("Company ID:", companyId);  
+        console.log("Company ID:", companyId);
         if (!companyId) {
             return res.status(403).json({
                 success: false,
@@ -1004,3 +1000,202 @@ const createCompanyReportRow = (session, employeeData) => {
         totalDistance: session.totalDistance ? Math.round(session.totalDistance / 1000 * 100) / 100 : 0
     };
 };
+
+
+
+
+
+
+/* ============================================================
+CONTROLLER: Export Sales Data to CSV
+============================================================ */
+
+export const exportDataSalesCSV = async (req, res) => {
+    try {
+        const { companyId, startDate, endDate } = req.query;
+
+        // Build query filter
+        let matchFilter = {};
+
+        if (companyId) {
+            matchFilter.companyId = new mongoose.Types.ObjectId(companyId);
+        }
+
+        if (startDate || endDate) {
+            matchFilter.createdAt = {};
+            if (startDate) matchFilter.createdAt.$gte = new Date(startDate);
+            if (endDate) matchFilter.createdAt.$lte = new Date(endDate);
+        }
+
+        // Aggregation pipeline to get sales data with metrics
+        const salesData = await SalesSession.aggregate([
+            // Match filter
+            { $match: matchFilter },
+
+            // Unwind salesLogs to get individual sales
+            { $unwind: { path: "$salesLogs", preserveNullAndEmptyArrays: true } },
+
+            // Unwind visitLogs to calculate call metrics
+            { $unwind: { path: "$visitLogs", preserveNullAndEmptyArrays: true } },
+
+            // Group by session and user to calculate metrics
+            {
+                $group: {
+                    _id: {
+                        sessionId: "$_id",
+                        employeeId: "$employeeId",
+                        createdBy: "$createdBy",
+                        date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }
+                    },
+                    employeeName: { $first: "$employeeId" },
+                    createdByName: { $first: "$createdBy" },
+                    // Visit/call metrics
+                    visitCount: { $sum: { $cond: [{ $ifNull: ["$visitLogs", false] }, 1, 0] } },
+                    totalCallDuration: {
+                        $sum: {
+                            $cond: [
+                                { $and: ["$visitLogs.punchInTime", "$visitLogs.punchOutTime"] },
+                                {
+                                    $divide: [
+                                        { $subtract: ["$visitLogs.punchOutTime", "$visitLogs.punchInTime"] },
+                                        60000 // Convert to minutes
+                                    ]
+                                },
+                                0
+                            ]
+                        }
+                    },
+                    // Payment metrics from salesLogs
+                    totalAmountCollected: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$salesLogs.paymentCollected", true] },
+                                { $ifNull: ["$salesLogs.amount", 0] },
+                                0
+                            ]
+                        }
+                    },
+                    paidCount: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$salesLogs.paymentCollected", true] },
+                                1,
+                                0
+                            ]
+                        }
+                    }
+                }
+            },
+
+            // Lookup user details
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "employeeName",
+                    foreignField: "_id",
+                    as: "employeeDetails"
+                }
+            },
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "createdByName",
+                    foreignField: "_id",
+                    as: "createdByDetails"
+                }
+            },
+
+            // Unwind user details
+            {
+                $addFields: {
+                    employeeName: { $arrayElemAt: ["$employeeDetails.name", 0] },
+                    employeeEmail: { $arrayElemAt: ["$employeeDetails.email", 0] },
+                    createdByName: { $arrayElemAt: ["$createdByDetails.name", 0] }
+                }
+            },
+
+            // Calculate avg call time
+            {
+                $addFields: {
+                    avgCallTime: {
+                        $cond: [
+                            { $eq: ["$visitCount", 0] },
+                            0,
+                            { $divide: ["$totalCallDuration", "$visitCount"] }
+                        ]
+                    }
+                }
+            },
+
+            // Project final fields
+            {
+                $project: {
+                    date: "$_id.date",
+                    salesPersonName: { $ifNull: ["$employeeName", "$createdByName"] },
+                    noOfCalls: "$visitCount",
+                    avgCallTime: { $round: ["$avgCallTime", 2] },
+                    totalAmountCollected: { $round: ["$totalAmountCollected", 2] },
+                    noOfPaidCounts: "$paidCount"
+                }
+            },
+
+            // Sort by date
+            { $sort: { date: 1, salesPersonName: 1 } }
+        ]);
+
+        if (!salesData.length) {
+            return res.status(404).json({
+                success: false,
+                message: "No data found for the selected criteria"
+            });
+        }
+
+        // Generate CSV
+        const csvRows = [];
+
+        // Add headers
+        const headers = [
+            "Date",
+            "Sales person Name",
+            "No of calls",
+            "Avg call time (minutes)",
+            "Total amount collected",
+            "No of paid counts"
+        ];
+        csvRows.push(headers.join(","));
+
+        // Add data rows
+        for (const row of salesData) {
+            const csvRow = [
+                row.date || "",
+                `"${(row.salesPersonName || "Unknown").replace(/"/g, '""')}"`,
+                row.noOfCalls || 0,
+                row.avgCallTime || 0,
+                row.totalAmountCollected || 0,
+                row.noOfPaidCounts || 0
+            ];
+            csvRows.push(csvRow.join(","));
+        }
+
+        const csvContent = csvRows.join("\n");
+
+        // Set response headers for CSV download
+        const filename = `sales_export_${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.csv`;
+
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+        // Add BOM for UTF-8 characters
+        const BOM = "\uFEFF";
+        res.send(BOM + csvContent);
+
+    } catch (error) {
+        console.error("Error exporting sales CSV:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to export sales data",
+            error: error.message
+        });
+    }
+};
+
