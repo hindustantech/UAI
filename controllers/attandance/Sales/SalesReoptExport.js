@@ -1024,48 +1024,77 @@ export const exportDataSalesCSV = async (req, res) => {
         if (startDate || endDate) {
             matchFilter.createdAt = {};
             if (startDate) matchFilter.createdAt.$gte = new Date(startDate);
-            if (endDate) matchFilter.createdAt.$lte = new Date(endDate);
+            if (endDate) {
+                // Include the full end date (up to 23:59:59)
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                matchFilter.createdAt.$lte = end;
+            }
         }
 
-        // Aggregation pipeline to get sales data with metrics
         const salesData = await SalesSession.aggregate([
-            // Match filter
             { $match: matchFilter },
 
-            // Unwind salesLogs to get individual sales
-            { $unwind: { path: "$salesLogs", preserveNullAndEmptyArrays: true } },
+            // Unwind salesLogs to get individual sales entries
+            {
+                $unwind: {
+                    path: "$salesLogs",
+                    preserveNullAndEmptyArrays: true
+                }
+            },
 
-            // Unwind visitLogs to calculate call metrics
-            { $unwind: { path: "$visitLogs", preserveNullAndEmptyArrays: true } },
+            // Unwind visitLogs to get individual visit/call entries
+            {
+                $unwind: {
+                    path: "$visitLogs",
+                    preserveNullAndEmptyArrays: true
+                }
+            },
 
-            // Group by session and user to calculate metrics
+            // ─────────────────────────────────────────────────────────
+            // GROUP BY EMPLOYEE ONLY (no date) → summary for full range
+            // ─────────────────────────────────────────────────────────
             {
                 $group: {
                     _id: {
-                        sessionId: "$_id",
                         employeeId: "$employeeId",
-                        createdBy: "$createdBy",
-                        date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }
+                        createdBy: "$createdBy"
                     },
-                    employeeName: { $first: "$employeeId" },
-                    createdByName: { $first: "$createdBy" },
-                    // Visit/call metrics
-                    visitCount: { $sum: { $cond: [{ $ifNull: ["$visitLogs", false] }, 1, 0] } },
+
+                    // Total visits/calls across all sessions
+                    totalCalls: {
+                        $sum: {
+                            $cond: [{ $ifNull: ["$visitLogs", false] }, 1, 0]
+                        }
+                    },
+
+                    // Total call duration in minutes
                     totalCallDuration: {
                         $sum: {
                             $cond: [
-                                { $and: ["$visitLogs.punchInTime", "$visitLogs.punchOutTime"] },
+                                {
+                                    $and: [
+                                        "$visitLogs.punchInTime",
+                                        "$visitLogs.punchOutTime"
+                                    ]
+                                },
                                 {
                                     $divide: [
-                                        { $subtract: ["$visitLogs.punchOutTime", "$visitLogs.punchInTime"] },
-                                        60000 // Convert to minutes
+                                        {
+                                            $subtract: [
+                                                "$visitLogs.punchOutTime",
+                                                "$visitLogs.punchInTime"
+                                            ]
+                                        },
+                                        60000 // ms → minutes
                                     ]
                                 },
                                 0
                             ]
                         }
                     },
-                    // Payment metrics from salesLogs
+
+                    // Total amount collected across all paid sales
                     totalAmountCollected: {
                         $sum: {
                             $cond: [
@@ -1075,7 +1104,9 @@ export const exportDataSalesCSV = async (req, res) => {
                             ]
                         }
                     },
-                    paidCount: {
+
+                    // Total paid sales count
+                    totalPaidCount: {
                         $sum: {
                             $cond: [
                                 { $eq: ["$salesLogs.paymentCollected", true] },
@@ -1083,15 +1114,23 @@ export const exportDataSalesCSV = async (req, res) => {
                                 0
                             ]
                         }
-                    }
+                    },
+
+                    // Date range actually covered by this employee's data
+                    firstDate: { $min: "$createdAt" },
+                    lastDate: { $max: "$createdAt" },
+
+                    // Keep refs for lookup
+                    employeeIdRef: { $first: "$employeeId" },
+                    createdByRef: { $first: "$createdBy" }
                 }
             },
 
-            // Lookup user details
+            // Lookup employee user details
             {
                 $lookup: {
                     from: "users",
-                    localField: "employeeName",
+                    localField: "employeeIdRef",
                     foreignField: "_id",
                     as: "employeeDetails"
                 }
@@ -1099,48 +1138,60 @@ export const exportDataSalesCSV = async (req, res) => {
             {
                 $lookup: {
                     from: "users",
-                    localField: "createdByName",
+                    localField: "createdByRef",
                     foreignField: "_id",
                     as: "createdByDetails"
                 }
             },
 
-            // Unwind user details
+            // Flatten user details
             {
                 $addFields: {
-                    employeeName: { $arrayElemAt: ["$employeeDetails.name", 0] },
-                    employeeEmail: { $arrayElemAt: ["$employeeDetails.email", 0] },
-                    createdByName: { $arrayElemAt: ["$createdByDetails.name", 0] }
+                    employeeName: {
+                        $ifNull: [
+                            { $arrayElemAt: ["$employeeDetails.name", 0] },
+                            { $arrayElemAt: ["$createdByDetails.name", 0] }
+                        ]
+                    },
+                    employeeEmail: {
+                        $arrayElemAt: ["$employeeDetails.email", 0]
+                    }
                 }
             },
 
-            // Calculate avg call time
+            // Average call time = totalDuration / totalCalls
             {
                 $addFields: {
                     avgCallTime: {
                         $cond: [
-                            { $eq: ["$visitCount", 0] },
+                            { $eq: ["$totalCalls", 0] },
                             0,
-                            { $divide: ["$totalCallDuration", "$visitCount"] }
+                            { $divide: ["$totalCallDuration", "$totalCalls"] }
                         ]
                     }
                 }
             },
 
-            // Project final fields
+            // Final projection
             {
                 $project: {
-                    date: "$_id.date",
-                    salesPersonName: { $ifNull: ["$employeeName", "$createdByName"] },
-                    noOfCalls: "$visitCount",
+                    _id: 0,
+                    salesPersonName: { $ifNull: ["$employeeName", "Unknown"] },
+                    employeeEmail: { $ifNull: ["$employeeEmail", ""] },
+                    periodFrom: {
+                        $dateToString: { format: "%Y-%m-%d", date: "$firstDate" }
+                    },
+                    periodTo: {
+                        $dateToString: { format: "%Y-%m-%d", date: "$lastDate" }
+                    },
+                    totalCalls: "$totalCalls",
                     avgCallTime: { $round: ["$avgCallTime", 2] },
                     totalAmountCollected: { $round: ["$totalAmountCollected", 2] },
-                    noOfPaidCounts: "$paidCount"
+                    totalPaidCount: "$totalPaidCount"
                 }
             },
 
-            // Sort by date
-            { $sort: { date: 1, salesPersonName: 1 } }
+            { $sort: { salesPersonName: 1 } }
         ]);
 
         if (!salesData.length) {
@@ -1150,44 +1201,79 @@ export const exportDataSalesCSV = async (req, res) => {
             });
         }
 
-        // Generate CSV
+        // ── Build CSV ──────────────────────────────────────────────
         const csvRows = [];
 
-        // Add headers
-        const headers = [
-            "Date",
-            "Sales person Name",
-            "No of calls",
-            "Avg call time (minutes)",
-            "Total amount collected",
-            "No of paid counts"
-        ];
-        csvRows.push(headers.join(","));
+        // Report meta header (shows the queried date range)
+        const rangeFrom = startDate
+            ? new Date(startDate).toISOString().slice(0, 10)
+            : "All time";
+        const rangeTo = endDate
+            ? new Date(endDate).toISOString().slice(0, 10)
+            : "All time";
 
-        // Add data rows
+        csvRows.push(`"Sales Summary Report"`);
+        csvRows.push(`"Period:","${rangeFrom} to ${rangeTo}"`);
+        csvRows.push(`"Generated:","${new Date().toISOString().slice(0, 19).replace("T", " ")}"`);
+        csvRows.push(""); // blank separator row
+
+        // Column headers
+        csvRows.push([
+            "Sales Person Name",
+            "Email",
+            "Period From",
+            "Period To",
+            "Total Calls",
+            "Avg Call Time (min)",
+            "Total Amount Collected",
+            "Total Paid Count"
+        ].join(","));
+
+        // Data rows — one row per employee
         for (const row of salesData) {
-            const csvRow = [
-                row.date || "",
-                `"${(row.salesPersonName || "Unknown").replace(/"/g, '""')}"`,
-                row.noOfCalls || 0,
+            csvRows.push([
+                `"${row.salesPersonName.replace(/"/g, '""')}"`,
+                `"${row.employeeEmail.replace(/"/g, '""')}"`,
+                row.periodFrom || "",
+                row.periodTo || "",
+                row.totalCalls || 0,
                 row.avgCallTime || 0,
                 row.totalAmountCollected || 0,
-                row.noOfPaidCounts || 0
-            ];
-            csvRows.push(csvRow.join(","));
+                row.totalPaidCount || 0
+            ].join(","));
         }
+
+        // Grand total row
+        const grandTotal = salesData.reduce(
+            (acc, r) => {
+                acc.totalCalls += r.totalCalls || 0;
+                acc.totalAmountCollected += r.totalAmountCollected || 0;
+                acc.totalPaidCount += r.totalPaidCount || 0;
+                return acc;
+            },
+            { totalCalls: 0, totalAmountCollected: 0, totalPaidCount: 0 }
+        );
+
+        csvRows.push([
+            '"TOTAL"', '""', '""', '""',
+            grandTotal.totalCalls,
+            '""',
+            grandTotal.totalAmountCollected.toFixed(2),
+            grandTotal.totalPaidCount
+        ].join(","));
 
         const csvContent = csvRows.join("\n");
 
-        // Set response headers for CSV download
-        const filename = `sales_export_${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.csv`;
+        // ── Send file ──────────────────────────────────────────────
+        const filename = `sales_summary_${rangeFrom}_to_${rangeTo}.csv`;
 
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
-        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="${filename}"`
+        );
 
-        // Add BOM for UTF-8 characters
-        const BOM = "\uFEFF";
-        res.send(BOM + csvContent);
+        res.send("\uFEFF" + csvContent); // BOM for Excel UTF-8
 
     } catch (error) {
         console.error("Error exporting sales CSV:", error);
@@ -1198,4 +1284,3 @@ export const exportDataSalesCSV = async (req, res) => {
         });
     }
 };
-
