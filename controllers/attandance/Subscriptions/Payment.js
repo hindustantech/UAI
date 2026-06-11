@@ -659,6 +659,134 @@ export const initializeFreePlan = async (req, res) => {
     }
 };
 
+
+export const createSubscription = async (req, res) => {
+    try {
+        const { companyId, planId } = req.body;
+
+        // Validate IDs
+        if (
+            !mongoose.Types.ObjectId.isValid(companyId) ||
+            !mongoose.Types.ObjectId.isValid(planId)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid Company ID or Plan ID",
+            });
+        }
+
+        // Check company exists
+        const company = await User.findById(companyId);
+
+        if (!company) {
+            return res.status(404).json({
+                success: false,
+                message: "Company not found",
+            });
+        }
+
+        // Check plan exists
+        const plan = await Plan.findById(planId);
+
+        if (!plan || !plan.isActive) {
+            return res.status(404).json({
+                success: false,
+                message: "Plan not found or inactive",
+            });
+        }
+
+        // Check existing active subscription
+        const existingSubscription = await Subscription.findOne({
+            company: companyId,
+            isActive: true,
+            status: { $in: ["ACTIVE", "PENDING"] },
+        });
+
+        if (existingSubscription) {
+            return res.status(400).json({
+                success: false,
+                message: "Company already has an active subscription",
+            });
+        }
+
+        const startDate = new Date();
+
+        const endDate = new Date();
+        endDate.setDate(
+            endDate.getDate() + (plan.validityDays || 30)
+        );
+
+        // Convert plan features to snapshot
+        const featuresSnapshot =
+            plan.features?.map((feature) => ({
+                key: feature.key,
+                value: feature.value,
+            })) || [];
+
+        const subscription = await Subscription.create({
+            company: companyId,
+            plan: plan._id,
+
+            planSnapshot: {
+                name: plan.name,
+                price: plan.price,
+                discount: plan.discount || 0,
+                finalPrice: plan.finalPrice || plan.price,
+                validityDays: plan.validityDays,
+                features: featuresSnapshot,
+            },
+
+            startDate,
+            endDate,
+
+            status: "ACTIVE",
+
+            payment: {
+                paymentGateway: "MANUAL",
+                paymentStatus: "SUCCESS",
+                amountPaid: plan.finalPrice || plan.price,
+                currency: "INR",
+                paidAt: new Date(),
+            },
+
+            usage: {
+                employeesUsed: 0,
+                maxEmployees: plan.no_of_employees || 0,
+
+                no_of_sales_person_employeesUsed: 0,
+                no_of_pro_sales_person_employeesUsed: 0,
+
+                no_of_sales_person_maxEmployees:
+                    plan.no_of_sales_person || 0,
+
+                no_of_pro_sales_person_maxEmployees:
+                    plan.no_of_pro_sales_person || 0,
+
+                DATA_SEE: false,
+                DATA_EXPORT: false,
+            },
+
+            autoRenew: false,
+            isActive: true,
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Subscription created successfully",
+            data: subscription,
+        });
+
+    } catch (error) {
+        console.error("Create Subscription Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to create subscription",
+            error: error.message,
+        });
+    }
+}; 
+
 // @desc    Get payment history
 // @route   GET /api/payment/history
 // @access  Private
@@ -876,6 +1004,134 @@ export const getActiveSubscription = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to fetch subscription",
+            error: error.message,
+        });
+    }
+};
+
+
+export const createSubscriptionManual = async (req, res) => {
+    try {
+        const { companyId, planId } = req.body;
+
+        // Validate IDs
+        if (
+            !mongoose.Types.ObjectId.isValid(companyId) ||
+            !mongoose.Types.ObjectId.isValid(planId)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid Company ID or Plan ID",
+            });
+        }
+
+        // Check company exists
+        const company = await User.findById(companyId);
+
+        if (!company) {
+            return res.status(404).json({
+                success: false,
+                message: "Company not found",
+            });
+        }
+
+        // Check plan exists
+        const plan = await Plan.findById(planId);
+
+        if (!plan || !plan.isActive) {
+            return res.status(404).json({
+                success: false,
+                message: "Plan not found or inactive",
+            });
+        }
+
+        // Check existing active subscription
+        const existingSubscription = await Subscription.findOne({
+            company: companyId,
+            isActive: true,
+            status: { $in: ["ACTIVE", "PENDING"] },
+        });
+
+        if (existingSubscription) {
+            return res.status(400).json({
+                success: false,
+                message: "Company already has an active subscription",
+            });
+        }
+
+        const startDate = new Date();
+
+        const endDate = new Date();
+        endDate.setDate(
+            endDate.getDate() + (plan.validityDays || 30)
+        );
+
+        // Convert plan features to snapshot
+        const featuresSnapshot =
+            plan.features?.map((feature) => ({
+                key: feature.key,
+                value: feature.value,
+            })) || [];
+
+        const subscription = await Subscription.create({
+            company: companyId,
+            plan: plan._id,
+
+            planSnapshot: {
+                name: plan.name,
+                price: plan.price,
+                discount: plan.discount || 0,
+                finalPrice: plan.finalPrice || plan.price,
+                validityDays: plan.validityDays,
+                features: featuresSnapshot,
+            },
+
+            startDate,
+            endDate,
+
+            status: "ACTIVE",
+
+            payment: {
+                paymentGateway: "MANUAL",
+                paymentStatus: "SUCCESS",
+                amountPaid: plan.finalPrice || plan.price,
+                currency: "INR",
+                paidAt: new Date(),
+            },
+
+            usage: {
+                employeesUsed: 0,
+                maxEmployees: plan.no_of_employees || 0,
+
+                no_of_sales_person_employeesUsed: 0,
+                no_of_pro_sales_person_employeesUsed: 0,
+
+                no_of_sales_person_maxEmployees:
+                    plan.no_of_sales_person || 0,
+
+                no_of_pro_sales_person_maxEmployees:
+                    plan.no_of_pro_sales_person || 0,
+
+                DATA_SEE: false,
+                DATA_EXPORT: false,
+            },
+
+            autoRenew: false,
+            isActive: true,
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Subscription created successfully",
+            data: subscription,
+        });
+
+    } catch (error) {
+        console.error("Create Subscription Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to create subscription",
             error: error.message,
         });
     }

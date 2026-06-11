@@ -6,6 +6,7 @@ import {
   initializeFreePlan,
   getPaymentHistory,
   cancelSubscription,
+  createSubscriptionManual,
   getActiveSubscription,
 } from "../../controllers/attandance/Subscriptions/Payment.js";
 import {  createUpgradeOrder, verifyUpgradePayment, getUpgradeHistory } from "../../models/Attandance/subscration/upgradeController.js";
@@ -30,6 +31,11 @@ router.post(
   "/initialize-free",
   authMiddleware,
   initializeFreePlan
+);
+router.post(
+  "/createSubscriptionManual",
+  authMiddleware,
+  createSubscriptionManual
 );
 
 // Initialize Free Plan
