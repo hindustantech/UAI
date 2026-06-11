@@ -34,6 +34,7 @@ import attendanceReportRoute from './routes/Attandance/attendanceReportRoutes.js
 import TodayAttendanceRoute from './routes/Attandance/todayAttendanceRoutes.js';
 import salesR from './routes/Attandance/Sales/salses.js';
 import onboardingRoutes from './routes/onboarding.routes.js';
+import bulkUploadSalesRoute from './routes/Attandance/bulkUploadSalesSessions.js'
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
@@ -82,7 +83,7 @@ app.use('/api/appsetting', appsettingroutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/shift', shift);
 app.use('/api/payment', payment);
-
+app.use('api/v1/bulk/upload/SalesRoute/',bulkUploadSalesRoute)
 app.use("/api/attendance/requests", attendanceRequestRoutes);
 app.use('/api/patnerProfile', patnerProfile);
 app.use('/api/subscriptionsdata', subscriptionsdata);
