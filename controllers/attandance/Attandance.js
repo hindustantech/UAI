@@ -15,6 +15,56 @@ import { resolveDateRange } from "../../utils/dateRangeResolver.js";
 import Shift from "../../models/Attandance/Shift.js";
 import logger from '../../utils/logger.js';
 
+
+
+
+export const dailyAttendanceEmp = async (req, res) => {
+    try {
+        const { fromdate } = req.query;
+        const employeeId = req.user._id;
+        if (!date) {
+            return res.status(400).json({
+                success: false,
+                message: "Date query parameter is required"
+            });
+        }
+
+        const targetDate = normalizeToUTCDate(date);
+        const nextDate = new Date(targetDate);
+        nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+    
+        const attendance = await Attendance.findOne({
+            employeeId,
+            date: {
+                $gte: targetDate,
+                $lt: nextDate
+            }
+        }).populate("employeeId", "empCode user_name").lean();
+
+        if (!attendance) {
+            return res.status(404).json({
+                success: false,
+                message: "Attendance not found for the specified date"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: attendance
+        });
+    }
+    catch (error) {
+        console.error("Error fetching daily attendance:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+
+
+
 /**
  * Convert any date to Indian timezone (IST)
  * @param {Date|string} date - Input date
@@ -2572,17 +2622,6 @@ const formatMinutes = (minutes) => {
     return `${h}h ${m}m`;
 };
 
-
-/* =================================================
-   GET: Employee Monthly Attendance (Dashboard)
-================================================= */
-
-
-/* =================================================
-   GET: Employee Attendance Summary + CSV
-================================================= */
-
-
 /* =========================
    HELPERS (PURE FUNCTIONS)
 ========================= */
@@ -2638,9 +2677,13 @@ const formatHours = (minutes) => {
 export const getEmployeeAttendanceSummary = async (req, res) => {
     try {
 
+        /* ===========================
+           PARAMS
+        ============================ */
+
         const userId = req.query.userId;
-        const month = Number(req.query.month);
-        const year = Number(req.query.year);
+        const month  = Number(req.query.month);
+        const year   = Number(req.query.year);
 
         if (!userId || !month || !year) {
             return res.status(400).json({
@@ -2674,13 +2717,13 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
         ============================ */
 
         const start = new Date(year, month - 1, 1);
-        const end = new Date(year, month, 0);
+        const end   = new Date(year, month, 0);
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
         /* ===========================
-           FETCH ONLY TILL TODAY
+           FETCH RECORDS TILL TODAY
         ============================ */
 
         const records = await Attendance.find({
@@ -2698,10 +2741,10 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
            METRICS
         ============================ */
 
-        let presentDays = 0;
-        let absentDays = 0;
+        let presentDays  = 0;
+        let absentDays   = 0;
         let totalMinutes = 0;
-        let validDays = 0;
+        let validDays    = 0;
 
         const report = [];
 
@@ -2712,7 +2755,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
         const safe = (val) => val || "-";
 
         /* ===========================
-           LOOP
+           LOOP — BUILD REPORT
         ============================ */
 
         for (let i = 1; i <= end.getDate(); i++) {
@@ -2722,7 +2765,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
             const key = date.toISOString().split("T")[0];
 
-            /* ========= FUTURE ========= */
+            /* ---- FUTURE ---- */
             if (date > today) {
                 report.push({
                     Date: key,
@@ -2733,7 +2776,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* ========= BEFORE JOINING ========= */
+            /* ---- BEFORE JOINING ---- */
             if (isBeforeJoining(date, employee)) {
                 report.push({
                     Date: key,
@@ -2746,7 +2789,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
             const rec = map.get(key);
 
-            /* ========= WEEK OFF ========= */
+            /* ---- WEEK OFF ---- */
             if (!rec && isWeekOff(date, shift, employee)) {
                 report.push({
                     Date: key,
@@ -2757,10 +2800,9 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* ========= ABSENT ========= */
+            /* ---- ABSENT ---- */
             if (!rec) {
                 absentDays++;
-
                 report.push({
                     Date: key,
                     TimeIn: "Absent",
@@ -2770,7 +2812,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* ========= HOLIDAY ========= */
+            /* ---- HOLIDAY ---- */
             if (rec.status === "holiday") {
                 report.push({
                     Date: key,
@@ -2781,7 +2823,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* ========= INVALID ========= */
+            /* ---- INVALID PUNCH ---- */
             if (!isValidPunch(rec)) {
                 report.push({
                     Date: key,
@@ -2792,11 +2834,9 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 continue;
             }
 
-            /* ========= VALID WORK ========= */
-
+            /* ---- VALID WORK ---- */
             const minutes = rec.workSummary?.totalMinutes || 0;
 
-            // ✅ FIXED PRESENT COUNT
             if (minutes > 0) {
                 presentDays++;
                 totalMinutes += minutes;
@@ -2820,6 +2860,13 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
             : 0;
 
         /* ===========================
+           TODAY ATTENDANCE
+        ============================ */
+
+        const todayKey        = today.toISOString().split("T")[0];
+        const todayAttendance = buildTodayAttendance(todayKey, map, shift, employee, today);
+
+        /* ===========================
            RESPONSE
         ============================ */
 
@@ -2831,17 +2878,126 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 validWorkingDays: validDays,
                 avgPerDay: formatHours(avgMinutes)
             },
+            todayAttendance,
             records: report
         });
 
     } catch (error) {
         console.error("Attendance Error:", error);
-
         return res.status(500).json({
             success: false,
             message: "Internal server error"
         });
     }
+};
+
+/* ============================================================
+   HELPER — BUILD TODAY ATTENDANCE
+   Returns a structured object describing the employee's
+   attendance for today specifically, including live status.
+   ============================================================ */
+
+const buildTodayAttendance = (todayKey, map, shift, employee, today) => {
+
+    /* ---- Before joining date ---- */
+    if (isBeforeJoining(today, employee)) {
+        return {
+            status: null,
+            isLive: false,
+            punchIn: null,
+            punchOut: null,
+            elapsedMinutes: null,
+            totalHours: null
+        };
+    }
+
+    const rec = map.get(todayKey);
+
+    /* ---- Week off (no record) ---- */
+    if (!rec && isWeekOff(today, shift, employee)) {
+        return {
+            status: "week_off",
+            isLive: false,
+            punchIn: null,
+            punchOut: null,
+            elapsedMinutes: null,
+            totalHours: null
+        };
+    }
+
+    /* ---- Absent (no record, not week off) ---- */
+    if (!rec) {
+        return {
+            status: "absent",
+            isLive: false,
+            punchIn: null,
+            punchOut: null,
+            elapsedMinutes: null,
+            totalHours: null
+        };
+    }
+
+    /* ---- Holiday ---- */
+    if (rec.status === "holiday") {
+        return {
+            status: "holiday",
+            isLive: false,
+            punchIn: null,
+            punchOut: null,
+            elapsedMinutes: null,
+            totalHours: null
+        };
+    }
+
+    /* ---- LIVE — punched in, not yet punched out ---- */
+    if (rec.punchIn && !rec.punchOut) {
+        const elapsedMinutes = Math.floor(
+            (Date.now() - new Date(rec.punchIn).getTime()) / 60000
+        );
+        return {
+            status: "present",
+            isLive: true,                           // 🟢 actively working right now
+            punchIn: formatTime(rec.punchIn),
+            punchOut: null,
+            elapsedMinutes,                         // live elapsed time at response moment
+            totalHours: formatHours(elapsedMinutes)
+        };
+    }
+
+    /* ---- Punched out — session complete ---- */
+    if (rec.punchIn && rec.punchOut) {
+        const workedMinutes = rec.workSummary?.totalMinutes || 0;
+        const shiftMinutes  = shift?.shiftMinutes || rec.shift?.shiftMinutes || 0;
+        const halfThreshold = shiftMinutes > 0 ? Math.floor(shiftMinutes / 2) : 0;
+
+        let status;
+        if (workedMinutes <= 0) {
+            status = "absent";
+        } else if (halfThreshold > 0 && workedMinutes < halfThreshold) {
+            status = "half_day";
+        } else {
+            status = "present";
+        }
+
+        return {
+            status,
+            isLive: false,                          // 🔴 session ended
+            punchIn: formatTime(rec.punchIn),
+            punchOut: formatTime(rec.punchOut),
+            elapsedMinutes: workedMinutes,
+            totalHours: formatHours(workedMinutes)
+        };
+    }
+
+    /* ---- Edge case: record exists but no punchIn at all ---- */
+    return {
+        status: "absent",
+        isLive: false,
+        punchIn: null,
+        punchOut: null,
+        elapsedMinutes: null,
+        totalHours: null
+    };
 };
 /**
  * @desc   Get Monthly Attendance Summary (Payroll)
