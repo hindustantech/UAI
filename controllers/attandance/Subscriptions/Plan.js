@@ -70,6 +70,8 @@ export const createPlan = async (req, res) => {
             data_see = false,
             isfree = false,
             Max_Employees = 0,
+            Max_sales = 0,
+            Max_Sales_pro = 0,
             feature_version_type = "BASIC", // NEW FIELD
         } = req.body;
 
@@ -111,6 +113,8 @@ export const createPlan = async (req, res) => {
                     data_see: Boolean(data_see),
                     isfree: Boolean(isfree),
                     Max_Employees: Number(Max_Employees),
+                    Max_sales: Number(Max_sales),
+                    Max_Sales_pro: Number(Max_Sales_pro),
                     features_version,
                 },
             ],
@@ -199,6 +203,8 @@ export const updatePlan = async (req, res) => {
             data_see,
             isfree,
             Max_Employees,
+            Max_sales,
+            Max_Sales_pro,
             feature_version_type, // NEW
             ...rest
         } = req.body;
@@ -243,6 +249,12 @@ export const updatePlan = async (req, res) => {
 
         if (Max_Employees !== undefined)
             updateData.Max_Employees = Number(Max_Employees);
+
+        if (Max_sales !== undefined)
+            updateData.Max_sales = Number(Max_sales);
+
+        if (Max_Sales_pro !== undefined)
+            updateData.Max_Sales_pro = Number(Max_Sales_pro);
 
         // ===== FEATURE VERSION TOGGLE =====
         if (feature_version_type) {

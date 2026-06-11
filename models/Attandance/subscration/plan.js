@@ -73,6 +73,14 @@ const planSchema = new mongoose.Schema({
         type: Number,
         default: 0,
     },
+    Max_sales: {
+        type: Number,
+        default: 0,
+    },
+    Max_Sales_pro:{
+       type: Number,
+       default: 0, 
+    },
     isfree: {
         type: Boolean,
         default: false,
