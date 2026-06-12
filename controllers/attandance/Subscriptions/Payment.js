@@ -22,7 +22,7 @@ const razorpay = new Razorpay({
  * Total Price = Base Plan Price + (Sales Count × ₹500) + (Pro Sales Count × ₹2000)
  */
 
-// Helper function to calculate total price
+
 const calculateTotalPrice = (basePlanPrice, salesCount, proSalesCount, validityDays) => {
     // Per month rates
     const SALES_PERSON_RATE = 100; // ₹500 per month
@@ -603,6 +603,9 @@ export const verifyPayment = async (req, res) => {
 // @desc    Initialize free plan for new company
 // @route   POST /api/payment/init-free-plan
 // @access  Private
+
+
+
 export const initializeFreePlan = async (req, res) => {
     try {
         const companyId = req.user._id;
