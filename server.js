@@ -83,7 +83,7 @@ app.use('/api/appsetting', appsettingroutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/shift', shift);
 app.use('/api/payment', payment);
-app.use('api/v1/bulkUploadSalesRoute',bulkUploadSalesRoute)
+app.use('/api/v1/bulk/upload/SalesRoute',bulkUploadSalesRoute)
 app.use("/api/attendance/requests", attendanceRequestRoutes);
 app.use('/api/patnerProfile', patnerProfile);
 app.use('/api/subscriptionsdata', subscriptionsdata);
