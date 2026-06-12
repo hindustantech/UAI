@@ -282,10 +282,19 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
                 // Use uploader's location for punch-in
                 punchInLocation: userLocation,
                 punchOutLocation: userLocation,
-            
+
                 punchOutTime: new Date(),
                 punchInTime: new Date(),
-                routePath: [userLocation]
+                routePath: [
+                    {
+                        userId: salesperson._id,
+                        location: userLocation,
+                        timestamp: new Date(),
+                        accuracy: 0,
+                        speed: 0,
+                        heading: 0
+                    }
+                ]
             };
 
             // Save to database
