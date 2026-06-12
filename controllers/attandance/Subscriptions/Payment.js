@@ -785,7 +785,7 @@ export const createSubscription = async (req, res) => {
             error: error.message,
         });
     }
-}; 
+};
 
 // @desc    Get payment history
 // @route   GET /api/payment/history
@@ -1038,7 +1038,7 @@ export const createSubscriptionManual = async (req, res) => {
         // Check plan exists
         const plan = await Plan.findById(planId);
 
-        if (!plan || !plan.isActive) {
+        if (!plan) {
             return res.status(404).json({
                 success: false,
                 message: "Plan not found or inactive",
