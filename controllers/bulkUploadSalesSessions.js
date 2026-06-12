@@ -4,6 +4,7 @@ import User from "../models/userModel.js";
 import xlsx from "xlsx";
 import csv from "csv-parser";
 import fs from "fs";
+import { generateUniqueCustomerIdWithRetry } from "../utils/nanoid.js";
 
 /* ============================================================
 BULK UPLOAD CONTROLLER (UPDATED)
@@ -23,8 +24,9 @@ export const bulkUploadSalesSessions = async (req, res) => {
             });
         }
 
+        const companyId = req.user._id || req.user.id || req.user.companyId;
         // Get the uploading user's details
-        const uploaderUser = await User.findById(req.user._id)
+        const uploaderUser = await User.findById(companyId)
             .select('_id name email type latestLocation companyId');
 
         if (!uploaderUser) {
@@ -35,7 +37,7 @@ export const bulkUploadSalesSessions = async (req, res) => {
         }
 
         // Determine company ID based on user type
-        const companyId = await getCompanyId(uploaderUser);
+
 
         if (!companyId) {
             return res.status(400).json({
@@ -122,76 +124,7 @@ export const bulkUploadSalesSessions = async (req, res) => {
     }
 };
 
-/* ============================================================
-COMPANY ID RESOLVER
-============================================================ */
 
-/**
- * Get company ID based on user type
- */
-const getCompanyId = async (user) => {
-    try {
-       
-
-        // If user is partner/agency, find their parent company
-        if (user.type === 'partner' || user.type === 'agency') {
-            // Look for company field or find parent admin
-            const parentCompany = await User.findOne({
-                _id: user.companyId || user.referredBy,
-            });
-
-            if (parentCompany) {
-                return parentCompany._id;
-            }
-
-            // If no parent found, use the user's own ID
-            return user._id;
-        }
-
-        // For regular users, find the company they belong to
-        if (user.type === 'user') {
-            // Check if user has a company reference
-            if (user.companyId) {
-                const company = await User.findById(user.companyId);
-                if (company && (company.type === 'admin' || company.type === 'super_admin')) {
-                    return company._id;
-                }
-            }
-
-            // Check referral chain
-            if (user.referredBy) {
-                const referrer = await User.findOne({
-                    referalCode: user.referredBy,
-                    type: { $in: ['admin', 'super_admin', 'agency', 'partner'] }
-                });
-
-                if (referrer) {
-                    // If referrer is admin/super_admin, they are the company
-                    if (referrer.type === 'admin' || referrer.type === 'super_admin') {
-                        return referrer._id;
-                    }
-
-                    // If referrer is partner/agency, find their parent company
-                    const parentCompany = await User.findOne({
-                        _id: referrer.referredBy,
-                        type: { $in: ['admin', 'super_admin'] }
-                    });
-
-                    if (parentCompany) {
-                        return parentCompany._id;
-                    }
-                }
-            }
-        }
-
-        // Default: return the user's own ID
-        return user._id;
-
-    } catch (error) {
-        console.error("Error resolving company ID:", error);
-        return user._id; // Fallback to user's own ID
-    }
-};
 
 /* ============================================================
 FILE PARSING FUNCTIONS
@@ -283,6 +216,7 @@ RECORD PROCESSING FUNCTIONS
 /**
  * Process bulk records with validation and error handling
  */
+
 const processBulkRecords = async (records, companyId, uploaderUser, userLocation) => {
     const successful = [];
     const failed = [];
@@ -304,8 +238,38 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
                 continue;
             }
 
-            // Prepare customer data with user's location
-            const customerData = prepareCustomerData(record, userLocation);
+            // Generate unique customer ID using the helper function
+            let customerId;
+            try {
+                // Use the provided customer_id if available, otherwise generate one
+                if (record.customer_id && record.customer_id.toString().trim() !== '') {
+                    // Check if the provided customer_id already exists
+                    const existingCustomer = await SalesSession.findOne({
+                        "customer.customerId": record.customer_id.toString().trim()
+                    });
+
+                    if (existingCustomer) {
+                        // If provided ID exists, generate a new one
+                        customerId = await generateUniqueCustomerIdWithRetry(SalesSession);
+                    } else {
+                        // Use the provided ID if it doesn't exist
+                        customerId = record.customer_id.toString().trim();
+                    }
+                } else {
+                    // Generate new customer ID if not provided
+                    customerId = await generateUniqueCustomerIdWithRetry(SalesSession);
+                }
+            } catch (genError) {
+                failed.push({
+                    row: rowNumber,
+                    error: `Failed to generate unique customer ID: ${genError.message}`,
+                    data: record
+                });
+                continue;
+            }
+
+            // Prepare customer data with generated ID and user's location
+            const customerData = prepareCustomerData(record, userLocation, customerId);
 
             // Create sales session
             const sessionData = {
@@ -329,7 +293,7 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
             successful.push({
                 row: rowNumber,
                 sessionId: salesSession.sessionId,
-                customerId: customerData.customerId,
+                customerId: customerId,
                 companyName: customerData.companyName,
                 assignedTo: {
                     id: salesperson._id,
