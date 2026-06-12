@@ -201,7 +201,7 @@ const validateRequiredColumns = (records) => {
     }
 
     // At least one of these should be present
-    const salespersonFields = ['referral_code', 'salesperson_id', 'assigned_to'];
+    const salespersonFields = ['salesperson_referral_code', 'salesperson_id', 'assigned_to'];
     const hasSalespersonField = salespersonFields.some(field => field in firstRecord);
 
     if (!hasSalespersonField) {
@@ -305,7 +305,7 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
             });
 
             // Update referral count if referral code was used
-            if (record.referral_code && salesperson.referalCode === record.referral_code) {
+            if (record.salesperson_referral_code && salesperson.referalCode === record.salesperson_referral_code) {
                 await updateReferralCount(salesperson._id);
             }
 
@@ -347,10 +347,10 @@ const findSalesperson = async (record, companyId, uploaderUser) => {
         }
 
         // Try finding by referral code first
-        if (record.referral_code) {
+        if (record.salesperson_referral_code) {
             salesperson = await User.findOne({
                 ...query,
-                referalCode: record.referral_code,
+                referalCode: record.salesperson_referral_code,
                 type: { $in: ['partner', 'agency', 'admin', 'user'] }
             }).select('_id name email uid referalCode referaluseCount type');
         }
@@ -377,7 +377,7 @@ const findSalesperson = async (record, companyId, uploaderUser) => {
         // If still not found and uploader is partner/agency, allow self-assignment
         if (!salesperson && (uploaderUser.type === 'partner' || uploaderUser.type === 'agency')) {
             // Check if any salesperson field is empty or matches uploader
-            const noSalespersonSpecified = !record.referral_code && !record.salesperson_id && !record.assigned_to;
+            const noSalespersonSpecified = !record.salesperson_referral_code && !record.salesperson_id && !record.assigned_to;
             if (noSalespersonSpecified) {
                 salesperson = uploaderUser;
             }
@@ -499,7 +499,7 @@ export const getBulkUploadTemplate = async (req, res) => {
                 phone_number: "9876543210",
                 address: "123 Main Street, Mumbai",
                 landmark: "Near Central Mall",
-                referral_code: "REF123ABC",
+                salesperson_referral_code: "REF123ABC",
                 salesperson_id: "U-A1B2C3",
                 assigned_to: "",
                 notes: `Location will be taken from uploader (${uploaderUser.name}) at [${uploaderUser.latestLocation?.coordinates || '0,0'}]`
@@ -511,7 +511,7 @@ export const getBulkUploadTemplate = async (req, res) => {
                 phone_number: "9876543211",
                 address: "456 Park Avenue, Delhi",
                 landmark: "Opposite Metro Station",
-                referral_code: "",
+                salesperson_referral_code: "",
                 salesperson_id: "",
                 assigned_to: "",
                 notes: "Will be assigned to uploader if no salesperson specified"
@@ -636,13 +636,13 @@ CSV/Excel File Required Columns:
 4. phone_number (required) - Contact phone number (10-15 digits)
 5. address (required) - Business or meeting address
 6. landmark (optional) - Nearby landmark for easy location
-7. referral_code (optional) - Salesperson's referral code
+7. salesperson_referral_code (optional) - Salesperson's referral code
 8. salesperson_id (optional) - Salesperson's UID
 9. assigned_to (optional) - Salesperson's MongoDB ID
 10. notes (optional) - Any additional notes
 
 Note: At least ONE of these must be provided:
-- referral_code
+- salesperson_referral_code
 - salesperson_id  
 - assigned_to
 
