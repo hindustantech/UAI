@@ -505,7 +505,6 @@ export const getBulkUploadTemplate = async (req, res) => {
                 notes: `Location will be taken from uploader (${uploaderUser.name}) at [${uploaderUser.latestLocation?.coordinates || '0,0'}]`
             },
             {
-                customer_id: "CUST002",
                 company_name: "XYZ Traders",
                 contact_name: "Jane Smith",
                 phone_number: "9876543211",
@@ -513,9 +512,7 @@ export const getBulkUploadTemplate = async (req, res) => {
                 landmark: "Opposite Metro Station",
                 salesperson_referral_code: "",
                 salesperson_id: "",
-                assigned_to: "",
-                notes: "Will be assigned to uploader if no salesperson specified"
-            }
+                assigned_to: "",            }
         ];
 
         // Create workbook and worksheet
@@ -524,16 +521,7 @@ export const getBulkUploadTemplate = async (req, res) => {
         // Create worksheet directly from data
         const ws = xlsx.utils.json_to_sheet(sampleData);
 
-        // Add header information rows at the top
-        xlsx.utils.sheet_add_aoa(ws, [
-            [`Uploaded By: ${uploaderUser.name} (${uploaderUser.uid})`],
-            [`Company ID: ${companyId}`],
-            [`User Type: ${uploaderUser.type}`],
-            [`Location: [${uploaderUser.latestLocation?.coordinates?.join(', ') || 'Not available'}]`],
-            [''], // Empty row
-            ['Note: Location will be automatically taken from uploader\'s current location'],
-            [''], // Empty row
-        ], { origin: "A1" });
+   
 
         // Shift the data down to accommodate headers
         // Move existing data to start after header rows
