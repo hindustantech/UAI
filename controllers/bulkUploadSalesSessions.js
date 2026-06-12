@@ -500,9 +500,8 @@ export const getBulkUploadTemplate = async (req, res) => {
                 address: "123 Main Street, Mumbai",
                 landmark: "Near Central Mall",
                 salesperson_referral_code: "REF123ABC",
-                salesperson_id: "U-A1B2C3",
-                assigned_to: "",
-                notes: `Location will be taken from uploader (${uploaderUser.name}) at [${uploaderUser.latestLocation?.coordinates || '0,0'}]`
+
+
             },
             {
                 company_name: "XYZ Traders",
@@ -511,8 +510,7 @@ export const getBulkUploadTemplate = async (req, res) => {
                 address: "456 Park Avenue, Delhi",
                 landmark: "Opposite Metro Station",
                 salesperson_referral_code: "",
-                salesperson_id: "",
-                assigned_to: "",            }
+            }
         ];
 
         // Create workbook and worksheet
@@ -521,7 +519,7 @@ export const getBulkUploadTemplate = async (req, res) => {
         // Create worksheet directly from data
         const ws = xlsx.utils.json_to_sheet(sampleData);
 
-   
+
 
         // Shift the data down to accommodate headers
         // Move existing data to start after header rows
