@@ -54,6 +54,18 @@ app.use(express.urlencoded({ limit: "50mb", extended: true })); // For
 
 
 
+app.use((req, res, next) => {
+  // Set timeout to 15 minutes (900,000 ms)
+  req.setTimeout(15 * 60 * 1000);
+  res.setTimeout(15 * 60 * 1000);
+
+  // Add keep-alive headers
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Keep-Alive', 'timeout=900'); // 15 minutes in seconds
+
+  next();
+});
+
 // Test route
 // ---------------------------
 app.get('/', (req, res) => {
@@ -83,7 +95,7 @@ app.use('/api/appsetting', appsettingroutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/shift', shift);
 app.use('/api/payment', payment);
-app.use('/api/v1/bulk/upload/SalesRoute',bulkUploadSalesRoute)
+app.use('/api/v1/bulk/upload/SalesRoute', bulkUploadSalesRoute)
 app.use("/api/attendance/requests", attendanceRequestRoutes);
 app.use('/api/patnerProfile', patnerProfile);
 app.use('/api/subscriptionsdata', subscriptionsdata);
@@ -111,9 +123,13 @@ if (!fs.existsSync('uploads/links')) {
 // Start server
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
 
-  // Start cron AFTER server is alive
   startAttendanceCron();
 });
+// Increase server-level timeouts (CRITICAL for long operations)
+server.timeout = 15 * 60 * 1000; // 15 minutes
+server.keepAliveTimeout = 16 * 60 * 1000; // 16 minutes (must be > timeout)
+server.headersTimeout = 17 * 60 * 1000; // 17 minutes (must be > keepAliveTimeout)
+// Start cron AFTER server is alive

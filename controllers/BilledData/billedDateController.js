@@ -1121,9 +1121,30 @@ const sendWhatsAppReminder = async (bill) => {
 };
 
 export const sendBulkReminder = async (req, res) => {
-    const { bills } = req.body; // Array of bill IDs or bill documents
+    const { bills } = req.body;
+
+    // Set keep-alive headers
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Keep-Alive', 'timeout=900'); // 15 minutes
+    res.setHeader('Content-Type', 'application/json');
+
+    // Enable chunked transfer encoding to keep connection alive
+    res.flushHeaders();
+
+    // Send initial progress indicator
+    let progressSent = false;
+    const progressInterval = setInterval(() => {
+        if (!res.headersSent && !progressSent) {
+            res.write(JSON.stringify({
+                status: 'processing',
+                message: 'Bulk reminders in progress...'
+            }));
+            progressSent = true;
+        }
+    }, 10000); // Send keep-alive every 10 seconds
 
     if (!bills?.length) {
+        clearInterval(progressInterval);
         return res.status(400).json({
             success: false,
             message: "No bills provided"
@@ -1140,6 +1161,7 @@ export const sendBulkReminder = async (req, res) => {
         });
 
         if (billDocuments.length === 0) {
+            clearInterval(progressInterval);
             return res.status(404).json({
                 success: false,
                 message: "No pending reminders found for the provided bill IDs"
@@ -1153,6 +1175,24 @@ export const sendBulkReminder = async (req, res) => {
     console.log(`Starting bulk send for ${billDocuments.length} customers. Rate limit: ${RATE_LIMIT}/min`);
 
     try {
+        // Send periodic progress updates to keep connection alive
+        const progressUpdateInterval = setInterval(() => {
+            const elapsedMinutes = (Date.now() - startTime) / 60000;
+            const processed = results.length;
+            const progress = ((processed / billDocuments.length) * 100).toFixed(1);
+
+            // Send status update without closing connection
+            if (res.writable) {
+                res.write(JSON.stringify({
+                    type: 'progress',
+                    processed,
+                    total: billDocuments.length,
+                    progress: `${progress}%`,
+                    elapsedMinutes: elapsedMinutes.toFixed(1)
+                }) + '\n');
+            }
+        }, 30000); // Send progress every 30 seconds
+
         // Process bills sequentially to maintain rate limit
         for (let i = 0; i < billDocuments.length; i++) {
             const bill = billDocuments[i];
@@ -1168,10 +1208,9 @@ export const sendBulkReminder = async (req, res) => {
                     index: i + 1
                 });
 
-                console.log(`✅ Sent reminder to ${bill.customerName} (${bill.phone}) - Remark: ${result.remark}`);
+                console.log(`✅ Sent reminder to ${bill.customerName} (${bill.phone})`);
 
             } catch (error) {
-                // Bill already marked as failed inside sendWhatsAppReminder
                 results.push({
                     billId: bill.bill_id,
                     phone: bill.phone,
@@ -1182,7 +1221,7 @@ export const sendBulkReminder = async (req, res) => {
                     index: i + 1
                 });
 
-                console.log(`❌ Failed reminder for ${bill.customerName} (${bill.phone}) - Error: ${error.message}`);
+                console.log(`❌ Failed reminder for ${bill.customerName} (${bill.phone})`);
             }
 
             // Progress logging
@@ -1192,14 +1231,24 @@ export const sendBulkReminder = async (req, res) => {
                 console.log(`Progress: ${i + 1}/${billDocuments.length} (${progress}%) - ${elapsedMinutes.toFixed(1)} min elapsed`);
             }
         }
+
+        clearInterval(progressUpdateInterval);
+        clearInterval(progressInterval);
+
     } catch (error) {
+        clearInterval(progressInterval);
         console.error('Bulk send interrupted:', error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 
     const sent = results.filter(r => r.success).length;
     const failed = results.filter(r => !r.success).length;
     const totalTime = ((Date.now() - startTime) / 60000).toFixed(1);
 
+    // Send final response
     return res.status(200).json({
         success: true,
         total: billDocuments.length,
@@ -1207,12 +1256,11 @@ export const sendBulkReminder = async (req, res) => {
         failed,
         timeMinutes: totalTime,
         estimatedTimeMinutes: Math.ceil(billDocuments.length / RATE_LIMIT),
-        results: results.slice(0, 100), // Return first 100 results to avoid huge response
+        results: results.slice(0, 100),
         hasMoreResults: results.length > 100,
         summaryRemark: `Bulk reminder completed: ${sent} sent, ${failed} failed in ${totalTime} minutes`
     });
 };
-
 
 
 
