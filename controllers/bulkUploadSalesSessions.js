@@ -132,6 +132,17 @@ FILE PARSING FUNCTIONS
 ============================================================ */
 
 /**
+ * Drop rows that are effectively blank (ghost rows from Excel's used-range)
+ */
+const isBlankRecord = (record) => {
+    const requiredFields = ['company_name', 'contact_name', 'phone_number', 'address', 'landmark'];
+    return requiredFields.every(field => {
+        const val = record[field];
+        return val === undefined || val === null || val.toString().trim() === '';
+    });
+};
+
+/**
  * Parse Excel file
  */
 const parseExcelFile = (filePath) => {
@@ -139,9 +150,11 @@ const parseExcelFile = (filePath) => {
         const workbook = xlsx.readFile(filePath);
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const records = xlsx.utils.sheet_to_json(worksheet, { defval: "" });
+        let records = xlsx.utils.sheet_to_json(worksheet, { defval: "" });
 
-        // Validate required columns
+        // Remove ghost/blank rows before validation
+        records = records.filter(record => !isBlankRecord(record));
+
         validateRequiredColumns(records);
 
         return records;
@@ -316,7 +329,7 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
             });
 
             // Update referral count if referral code was used
-           
+
 
         } catch (error) {
             console.error(`Error processing row ${i + 2}:`, error);
