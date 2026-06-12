@@ -188,7 +188,7 @@ const validateRequiredColumns = (records) => {
 
     const firstRecord = records[0];
     const requiredFields = [
-        'customer_id',
+  
         'company_name',
         'contact_name',
         'phone_number',
@@ -198,7 +198,7 @@ const validateRequiredColumns = (records) => {
     const missingFields = requiredFields.filter(field => !(field in firstRecord));
 
     if (missingFields.length > 0) {
-        throw new Error(`Missing required columns: ${missingFields.join(', ')}. Required columns are: customer_id, company_name, contact_name, phone_number, address`);
+        throw new Error(`Missing required columns: ${missingFields.join(', ')}. Required columns are: company_name, contact_name, phone_number, address`);
     }
 
     // At least one of these should be present
