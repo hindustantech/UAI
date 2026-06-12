@@ -285,7 +285,7 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
             
                 punchOutTime: new Date(),
                 punchInTime: new Date(),
-                routePath: userLocation
+                routePath: [userLocation]
             };
 
             // Save to database
