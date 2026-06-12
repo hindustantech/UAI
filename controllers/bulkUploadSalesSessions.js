@@ -489,8 +489,7 @@ export const getBulkUploadTemplate = async (req, res) => {
             });
         }
 
-        const companyId = await getCompanyId(uploaderUser);
-
+        const companyId = req.user._id || req.user.id || req.user.companyId
         // Create sample data with uploader's info in notes
         const sampleData = [
             {
