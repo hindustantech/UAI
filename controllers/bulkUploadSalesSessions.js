@@ -482,6 +482,13 @@ export const getBulkUploadTemplate = async (req, res) => {
         const uploaderUser = await User.findById(req.user._id)
             .select('name uid referalCode type latestLocation');
 
+        if (!uploaderUser) {
+            return res.status(404).json({
+                success: false,
+                message: "Uploader user not found"
+            });
+        }
+
         const companyId = await getCompanyId(uploaderUser);
 
         // Create sample data with uploader's info in notes
@@ -512,12 +519,14 @@ export const getBulkUploadTemplate = async (req, res) => {
             }
         ];
 
-        // Create workbook
+        // Create workbook and worksheet
         const workbook = xlsx.utils.book_new();
-        const worksheet = xlsx.utils.sheet_to_json(sampleData);
 
-        // Add header information
-        const headerInfo = [
+        // Create worksheet directly from data
+        const ws = xlsx.utils.json_to_sheet(sampleData);
+
+        // Add header information rows at the top
+        xlsx.utils.sheet_add_aoa(ws, [
             [`Uploaded By: ${uploaderUser.name} (${uploaderUser.uid})`],
             [`Company ID: ${companyId}`],
             [`User Type: ${uploaderUser.type}`],
@@ -525,13 +534,11 @@ export const getBulkUploadTemplate = async (req, res) => {
             [''], // Empty row
             ['Note: Location will be automatically taken from uploader\'s current location'],
             [''], // Empty row
-        ];
+        ], { origin: "A1" });
 
-        // Create worksheet with headers
-        const ws = xlsx.utils.json_to_sheet(sampleData, {
-            header: Object.keys(sampleData[0]),
-            skipHeader: false
-        });
+        // Shift the data down to accommodate headers
+        // Move existing data to start after header rows
+        const headerRows = 7; // Number of rows used by headers
 
         // Set column widths
         const colWidths = Object.keys(sampleData[0]).map(key => ({
@@ -542,7 +549,10 @@ export const getBulkUploadTemplate = async (req, res) => {
         xlsx.utils.book_append_sheet(workbook, ws, "Sales Sessions");
 
         // Generate buffer
-        const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        const buffer = xlsx.write(workbook, {
+            type: 'buffer',
+            bookType: 'xlsx'
+        });
 
         // Set headers
         res.setHeader(
@@ -558,9 +568,17 @@ export const getBulkUploadTemplate = async (req, res) => {
 
     } catch (error) {
         console.error("Template generation error:", error);
+        // Log more details for debugging
+        console.error("Error details:", {
+            message: error.message,
+            stack: error.stack,
+            user: req.user?._id
+        });
+
         return res.status(500).json({
             success: false,
-            message: "Error generating template"
+            message: "Error generating template",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
