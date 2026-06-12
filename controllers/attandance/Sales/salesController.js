@@ -2,6 +2,9 @@
 
 import mongoose from "mongoose";
 import { SalesSession } from '../../../models/Attandance/Salses/Salses.js';
+import Employee from "../../../models/Attandance/Employee.js";
+import mongoose from "mongoose";
+import User from '../../../models/userModel.js'
 
 
 /**
@@ -448,3 +451,203 @@ export const getSalesBySalesPerson = async (req, res) => {
     }
 };
 
+
+/* ============================================================
+BULK ASSIGN SALES SESSIONS TO A SALESPERSON
+============================================================ */
+
+/**
+ * Bulk assign multiple sales sessions (by sessionId or _id) to one salesperson
+ * Body: { ids: [String], salespersonId: String, mode: "replace" | "append" }
+ *  - ids: array of SalesSession _id or sessionId values
+ *  - salespersonId: User _id of the salesperson to assign
+ *  - mode: "replace" (default) overwrites assignedTo, "append" adds without duplicating
+ */
+export const BulkAssignSales = async (req, res) => {
+    const session = await mongoose.startSession();
+
+    try {
+        const { ids, salespersonId, mode = "replace" } = req.body;
+        const companyId = req.user._id || req.user.id || req.user.companyId;
+
+        /* ---------------- INPUT VALIDATION ---------------- */
+        if (!companyId) {
+            return res.status(400).json({
+                success: false,
+                message: "Could not determine company for this user"
+            });
+        }
+
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "`ids` must be a non-empty array of session IDs"
+            });
+        }
+
+        if (ids.length > 1000) {
+            return res.status(400).json({
+                success: false,
+                message: "Cannot assign more than 1000 sessions in a single request"
+            });
+        }
+
+        if (!salespersonId || !mongoose.Types.ObjectId.isValid(salespersonId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid `salespersonId` is required"
+            });
+        }
+
+        if (!["replace", "append"].includes(mode)) {
+            return res.status(400).json({
+                success: false,
+                message: "`mode` must be either 'replace' or 'append'"
+            });
+        }
+
+        /* ---------------- VALIDATE SALESPERSON ---------------- */
+        const salesperson = await User.findOne({
+            _id: salespersonId,
+            accountStatus: "ACTIVE",
+            suspend: false
+        }).select("_id name email uid referalCode type");
+
+        if (!salesperson) {
+            return res.status(404).json({
+                success: false,
+                message: "Salesperson not found or is inactive/suspended"
+            });
+        }
+
+        const employee = await Employee.findOne({
+            userId: salesperson._id,
+            companyId: companyId,
+            employmentStatus: "active"
+        });
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "Salesperson is not an active employee of this company"
+            });
+        }
+
+        if (!["sales", "pro_sales"].includes(employee.employeeType)) {
+            return res.status(400).json({
+                success: false,
+                message: "Selected user is not a sales employee"
+            });
+        }
+
+        /* ---------------- SPLIT IDS: ObjectId vs sessionId string ---------------- */
+        const objectIdList = [];
+        const sessionIdList = [];
+
+        for (const rawId of ids) {
+            const id = String(rawId).trim();
+            if (!id) continue;
+
+            if (mongoose.Types.ObjectId.isValid(id)) {
+                objectIdList.push(new mongoose.Types.ObjectId(id));
+            } else {
+                sessionIdList.push(id);
+            }
+        }
+
+        if (objectIdList.length === 0 && sessionIdList.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "No valid session identifiers provided"
+            });
+        }
+
+        /* ---------------- FETCH MATCHING SESSIONS (scoped to company) ---------------- */
+        const matchQuery = {
+            companyId: companyId,
+            $or: [
+                ...(objectIdList.length ? [{ _id: { $in: objectIdList } }] : []),
+                ...(sessionIdList.length ? [{ sessionId: { $in: sessionIdList } }] : [])
+            ]
+        };
+
+        const existingSessions = await SalesSession.find(matchQuery)
+            .select("_id sessionId assignedTo employeeId");
+
+        if (existingSessions.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "No matching sales sessions found for this company"
+            });
+        }
+
+        const foundIdsSet = new Set([
+            ...existingSessions.map(s => s._id.toString()),
+            ...existingSessions.map(s => s.sessionId)
+        ]);
+
+        const notFound = ids.filter(rawId => {
+            const id = String(rawId).trim();
+            return !foundIdsSet.has(id);
+        });
+
+        /* ---------------- BUILD BULK OPERATIONS ---------------- */
+        const bulkOps = existingSessions.map(s => {
+            const update = mode === "append"
+                ? {
+                    $addToSet: { assignedTo: salesperson._id },
+                    $set: { employeeId: salesperson._id }
+                }
+                : {
+                    $set: {
+                        assignedTo: [salesperson._id],
+                        employeeId: salesperson._id
+                    }
+                };
+
+            return {
+                updateOne: {
+                    filter: { _id: s._id, companyId: companyId },
+                    update
+                }
+            };
+        });
+
+        /* ---------------- EXECUTE BATCH WRITE (transactional) ---------------- */
+        let bulkResult;
+        await session.withTransaction(async () => {
+            bulkResult = await SalesSession.bulkWrite(bulkOps, { session, ordered: false });
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Bulk assignment completed",
+            data: {
+                assignedTo: {
+                    id: salesperson._id,
+                    name: salesperson.name,
+                    uid: salesperson.uid,
+                    referralCode: salesperson.referalCode
+                },
+                mode,
+                summary: {
+                    requested: ids.length,
+                    matched: bulkResult.matchedCount,
+                    modified: bulkResult.modifiedCount,
+                    notFound: notFound.length
+                },
+                notFoundIds: notFound
+            }
+        });
+
+    } catch (error) {
+        console.error("Bulk assign error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error during bulk assignment",
+            error: error.message
+        });
+    } finally {
+        session.endSession();
+    }
+};
