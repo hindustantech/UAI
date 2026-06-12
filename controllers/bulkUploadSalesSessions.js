@@ -188,7 +188,7 @@ const validateRequiredColumns = (records) => {
 
     const firstRecord = records[0];
     const requiredFields = [
-  
+
         'company_name',
         'contact_name',
         'phone_number',
@@ -210,9 +210,6 @@ const validateRequiredColumns = (records) => {
     }
 };
 
-/* ============================================================
-RECORD PROCESSING FUNCTIONS
-============================================================ */
 
 /**
  * Process bulk records with validation and error handling
@@ -284,7 +281,11 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
                 SalesStatus: "open",
                 // Use uploader's location for punch-in
                 punchInLocation: userLocation,
-                punchInTime: new Date()
+                punchOutLocation: userLocation,
+            
+                punchOutTime: new Date(),
+                punchInTime: new Date(),
+                routePath: userLocation
             };
 
             // Save to database
@@ -323,9 +324,6 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
     return { successful, failed };
 };
 
-/* ============================================================
-SALESPERSON FINDER (WITH COMPANY SCOPE)
-============================================================ */
 
 /**
  * Find salesperson by referral code or UID within company scope
@@ -409,9 +407,6 @@ const getCompanyReferralCodes = async (companyId) => {
     }
 };
 
-/* ============================================================
-DATA PREPARATION (WITH USER'S LOCATION)
-============================================================ */
 
 /**
  * Prepare customer data with uploader's location
