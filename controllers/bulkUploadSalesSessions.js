@@ -493,7 +493,6 @@ export const getBulkUploadTemplate = async (req, res) => {
         // Create sample data with uploader's info in notes
         const sampleData = [
             {
-                customer_id: "CUST001",
                 company_name: "ABC Electronics",
                 contact_name: "John Doe",
                 phone_number: "9876543210",
