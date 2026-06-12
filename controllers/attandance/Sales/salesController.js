@@ -3,7 +3,6 @@
 import mongoose from "mongoose";
 import { SalesSession } from '../../../models/Attandance/Salses/Salses.js';
 import Employee from "../../../models/Attandance/Employee.js";
-import mongoose from "mongoose";
 import User from '../../../models/userModel.js'
 
 
