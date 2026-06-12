@@ -316,9 +316,7 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
             });
 
             // Update referral count if referral code was used
-            if (record.salesperson_referral_code && salesperson.referalCode === record.salesperson_referral_code) {
-                await updateReferralCount(salesperson._id);
-            }
+           
 
         } catch (error) {
             console.error(`Error processing row ${i + 2}:`, error);
@@ -462,21 +460,7 @@ const generateSessionId = async () => {
     return sessionId;
 };
 
-/**
- * Update referral count for salesperson
- */
-const updateReferralCount = async (userId) => {
-    try {
-        await User.findByIdAndUpdate(
-            userId,
-            { $inc: { referaluseCount: 1 } },
-            { new: true }
-        );
-    } catch (error) {
-        console.error("Error updating referral count:", error);
-        // Don't throw error as this is not critical
-    }
-};
+
 
 /* ============================================================
 ADDITIONAL CONTROLLERS
