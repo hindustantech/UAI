@@ -403,6 +403,48 @@ export const getAllPlans = async (req, res) => {
         });
     }
 };
+export const getAlladminPlans = async (req, res) => {
+    try {
+        let { page = 1, limit = 15, search, isActive, planType } = req.query;
+
+        page = parseInt(page);
+        limit = parseInt(limit);
+
+        const query = {};
+
+        if (search) {
+            query.name = { $regex: search, $options: "i" };
+        }
+ 
+        if (planType) {
+            query.planType = planType.toUpperCase();
+        }
+
+        const plans = await Plan.find(query)
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit);
+
+        const total = await Plan.countDocuments(query);
+
+        return res.status(200).json({
+            success: true,
+            data: plans,
+            pagination: {
+                total,
+                page,
+                pages: Math.ceil(total / limit)
+            }
+        });
+
+    } catch (error) {
+        console.error("Get All Plans Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        });
+    }
+};
 
 
 export const toggleAutoCheckout = async (req, res) => {

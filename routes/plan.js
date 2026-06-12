@@ -7,6 +7,7 @@ import {
     togglePlanStatus,
     getAllPlans,
     getPlanById,
+    getAlladminPlans,
     toggleAutoCheckout
 } from '../controllers/attandance/Subscriptions/Plan.js';
 import { checkPermission } from '../middlewares/checkPermission.js'
@@ -16,6 +17,7 @@ const router = express.Router();
 // Plan Routes
 router.post('/', authMiddleware, checkPermission('plans.create'), createPlan);                    // Create Plan
 router.get('/', getAllPlans);                    // Get All Plans (with pagination & filters)
+router.get('/getAlladminPlans', getAlladminPlans);                    // Get All Plans (with pagination & filters)
 router.get('/:id', getPlanById);                 // Get Single Plan
 router.put('/:id', authMiddleware, checkPermission('plans.update'), updatePlan);                  // Update Plan
 router.delete('/:id', authMiddleware, checkPermission('plans.delete'), deletePlan);               // Delete Plan
