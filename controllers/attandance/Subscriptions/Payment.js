@@ -1104,16 +1104,16 @@ export const createSubscriptionManual = async (req, res) => {
 
             usage: {
                 employeesUsed: 0,
-                maxEmployees: plan.no_of_employees || 0,
+                maxEmployees: plan.Max_Employees || 0,
 
                 no_of_sales_person_employeesUsed: 0,
                 no_of_pro_sales_person_employeesUsed: 0,
 
                 no_of_sales_person_maxEmployees:
-                    plan.no_of_sales_person || 0,
+                    plan.Max_sales || 0,
 
                 no_of_pro_sales_person_maxEmployees:
-                    plan.no_of_pro_sales_person || 0,
+                    plan.Max_Sales_pro || 0,
 
                 DATA_SEE: false,
                 DATA_EXPORT: false,

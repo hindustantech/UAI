@@ -128,7 +128,7 @@ const server = app.listen(PORT, () => {
 
   startAttendanceCron();
 });
-// Increase server-level timeouts (CRITICAL for long operations)
+// Increase server-level timeouts (CRITICAL for /uploader-infoong operations)
 server.timeout = 15 * 60 * 1000; // 15 minutes
 server.keepAliveTimeout = 16 * 60 * 1000; // 16 minutes (must be > timeout)
 server.headersTimeout = 17 * 60 * 1000; // 17 minutes (must be > keepAliveTimeout)
