@@ -590,7 +590,7 @@ export const getUploaderInfo = async (req, res) => {
         const uploaderUser = await User.findById(req.user._id)
             .select('name email uid referalCode type latestLocation');
 
-        const companyId = await getCompanyId(uploaderUser);
+        const companyId = req.user._id || req.user.id || req.user.companyId
 
         const company = await User.findById(companyId)
             .select('name email uid type');
