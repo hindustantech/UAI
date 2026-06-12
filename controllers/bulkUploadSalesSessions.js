@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { SalesSession } from "../models/Attandance/Salses/Salses.js";
+import Employee from "../models/Attandance/Employee.js";
 import User from "../models/userModel.js";
 import xlsx from "xlsx";
 import csv from "csv-parser";
@@ -337,49 +338,53 @@ const findSalesperson = async (record, companyId, uploaderUser) => {
             suspend: false
         };
 
-        // Add company scope for non-admin users
-        if (uploaderUser.type !== 'super_admin') {
-            query.$or = [
-                { _id: companyId }, // The company itself
-                { companyId: companyId }, // Users belonging to this company
-                { referredBy: { $in: await getCompanyReferralCodes(companyId) } }
-            ];
-        }
-
         // Try finding by referral code first
         if (record.salesperson_referral_code) {
             salesperson = await User.findOne({
                 ...query,
-                referalCode: record.salesperson_referral_code,
-                type: { $in: ['partner', 'agency', 'admin', 'user'] }
-            }).select('_id name email uid referalCode referaluseCount type');
+                referalCode: record.salesperson_referral_code
+            }).select('_id name email uid referalCode type');
         }
 
-        // If not found by referral code, try by salesperson ID (UID)
+        // If not found, try by salesperson ID (UID)
         if (!salesperson && record.salesperson_id) {
             salesperson = await User.findOne({
                 ...query,
-                uid: record.salesperson_id,
-                type: { $in: ['partner', 'agency', 'admin', 'user'] }
-            }).select('_id name email uid referalCode referaluseCount type');
+                uid: record.salesperson_id
+            }).select('_id name email uid referalCode type');
         }
 
-        // If not found by UID, try by user ID directly
+        // If not found, try by user ID directly
         if (!salesperson && record.assigned_to) {
             if (mongoose.Types.ObjectId.isValid(record.assigned_to)) {
-                salesperson = await User.findOne({
-                    ...query,
-                    _id: record.assigned_to
-                }).select('_id name email uid referalCode referaluseCount type');
+                salesperson = await User.findById(record.assigned_to)
+                    .select('_id name email uid referalCode type');
             }
         }
 
-        // If still not found and uploader is partner/agency, allow self-assignment
+        // Self-assignment for partner/agency
         if (!salesperson && (uploaderUser.type === 'partner' || uploaderUser.type === 'agency')) {
-            // Check if any salesperson field is empty or matches uploader
-            const noSalespersonSpecified = !record.salesperson_referral_code && !record.salesperson_id && !record.assigned_to;
+            const noSalespersonSpecified = !record.salesperson_referral_code &&
+                !record.salesperson_id &&
+                !record.assigned_to;
             if (noSalespersonSpecified) {
                 salesperson = uploaderUser;
+            }
+        }
+
+        // Check in Employee table
+        if (salesperson) {
+            const employee = await Employee.findOne({
+                userId: salesperson._id,
+                companyId: companyId,
+                employmentStatus: 'active'
+            });
+
+            if (!employee) return null;
+
+            // Check employee type
+            if (employee.employeeType !== 'sales' && employee.employeeType !== 'pro_sales') {
+                return null;
             }
         }
 
