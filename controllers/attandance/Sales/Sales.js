@@ -1967,8 +1967,8 @@ export const getTodaySessions = async (req, res) => {
 
     // ================= ADD COMPANY ISOLATION =================
     // IMPORTANT: Always filter by company for security
-    if (req.user?.companyId) {
-      query.companyId = req.user.companyId;
+    if (req.user?.companyId || req.user._id) {
+      query.companyId = req.user.companyId || req.user._id;
     }
 
     // ================= OPTIMIZE WITH LEAN & SELECT =================
