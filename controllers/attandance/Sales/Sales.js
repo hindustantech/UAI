@@ -3089,7 +3089,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
     // ===== BUILD MATCH FILTER =====
     const matchFilter = {
       sessionId: { $ne: sessionId }, // Exclude current session
-      SalesStatus: "open", // Only open sales
       companyId: companyId, // Same company
       punchInLocation: {
         $exists: true, // Must have punch-in location
