@@ -2596,6 +2596,7 @@ export const getNearbyFilteredSessions = async (req, res) => {
     const companyId = req.user?.companyId || req.user?._id;
 
     if (!companyId) {
+      console.log("companyId",companyId)
       return res.status(400).json({
         success: false,
         message: "Company ID not found"

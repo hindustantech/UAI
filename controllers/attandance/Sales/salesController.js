@@ -23,6 +23,7 @@ import User from '../../../models/userModel.js'
  * - paymentCollected: boolean
  * - search: search in customer name, phone, company name
  */
+
 export const getCompanySalesRecords = async (req, res) => {
     try {
         const { companyId } = req.params;
