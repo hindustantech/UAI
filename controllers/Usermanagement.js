@@ -23,7 +23,6 @@ const getUserQuery = (search, role, isAgency) => {
   return query;
 };
 
-import User from "../models/User.js";
 
 export const updatePhone = async (req, res) => {
   try {
