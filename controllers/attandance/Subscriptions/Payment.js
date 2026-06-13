@@ -293,8 +293,8 @@ async function activateFreeSubscription(companyId, plan, salesCount = 0, proSale
 
         // Update usage limits based on new plan
         existingSubscription.usage.maxEmployees = plan.Max_Employees;
-        existingSubscription.usage.no_of_sales_person_maxEmployees = salesCount;
-        existingSubscription.usage.no_of_pro_sales_person_maxEmployees = proSalesCount;
+        existingSubscription.usage.no_of_sales_person_maxEmployees = salesCount || plan.Max_sales;
+        existingSubscription.usage.no_of_pro_sales_person_maxEmployees = proSalesCount || plan.Max_Sales_pro;
         existingSubscription.usage.DATA_SEE = plan.data_see;
         existingSubscription.usage.DATA_EXPORT = plan.data_export;
 
@@ -334,8 +334,8 @@ async function activateFreeSubscription(companyId, plan, salesCount = 0, proSale
             maxEmployees: plan.Max_Employees,
             no_of_sales_person_employeesUsed: 0,
             no_of_pro_sales_person_employeesUsed: 0,
-            no_of_sales_person_maxEmployees: salesCount,
-            no_of_pro_sales_person_maxEmployees: proSalesCount,
+            no_of_sales_person_maxEmployees: salesCount || plan.Max_sales ,
+            no_of_pro_sales_person_maxEmployees: proSalesCount || plan.Max_Sales_pro,
             DATA_SEE: plan.data_see,
             DATA_EXPORT: plan.data_export,
             upgradeHistory: [],
