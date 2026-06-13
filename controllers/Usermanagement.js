@@ -23,6 +23,69 @@ const getUserQuery = (search, role, isAgency) => {
   return query;
 };
 
+import User from "../models/User.js";
+
+export const updatePhone = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { phone } = req.body;
+
+    // Validation
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is required",
+      });
+    }
+
+    // Optional: Indian mobile validation
+    const phoneRegex = /^[6-9]\d{9}$/;
+    if (!phoneRegex.test(phone)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid phone number",
+      });
+    }
+
+    // Check if phone already exists
+    const existingUser = await User.findOne({
+      phone
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number already registered",
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        phone,
+        isProfileCompleted: true,
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    ).select("-password");
+
+    return res.status(200).json({
+      success: true,
+      message: "Phone number updated successfully",
+      data: user,
+    });
+  } catch (error) {
+    console.error("Update Phone Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
 // GET /api/users - Fetch all users with pagination, search, filters
 export const getAllUsers = async (req, res) => {
   try {
@@ -384,4 +447,3 @@ export const createUser = async (req, res) => {
     });
   }
 };
- 

@@ -349,7 +349,7 @@ export const validateLocation = (location) => {
 
   // 🔥 CASE 2: string → try JSON.parse
   if (typeof location === "string") {
-    try { 
+    try {
       const parsed = JSON.parse(location);
       return normalizeLocation(parsed);
     } catch (e) {
@@ -2593,7 +2593,7 @@ export const getNearbyFilteredSessions = async (req, res) => {
     let { page = 1, limit = 10, radius = 500 } = req.query;
 
     const userId = req.user?.id || req.user?._id;
-    const companyId = req.user?.companyId;
+    const companyId = req.user?.companyId || req.user?._id;
 
     if (!companyId) {
       return res.status(400).json({
