@@ -2596,7 +2596,7 @@ export const getNearbyFilteredSessions = async (req, res) => {
     const companyId = req.user?.companyId || req.user?._id;
 
     if (!companyId) {
-      console.log("companyId",companyId)
+      console.log("companyId", companyId)
       return res.status(400).json({
         success: false,
         message: "Company ID not found"
@@ -3009,7 +3009,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
       });
     }
 
-    // Validate sessionId format
     if (typeof sessionId !== "string") {
       return res.status(400).json({
         success: false,
@@ -3023,7 +3022,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
     let radius = parseInt(req.query.radius) || 1000;
     const { userFilterId } = req.query;
 
-    // Validate and constrain parameters
     page = Math.max(1, page);
     limit = Math.max(1, Math.min(100, limit));
     radius = Math.max(1, Math.min(10000, radius));
@@ -3031,9 +3029,21 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ===== GET COMPANY ID =====
+    // For company accounts: req.user._id IS the companyId (no separate companyId field)
+    // For employee accounts: req.user.companyId points to the parent company
+    const rawCompanyId =
+      req.user?.companyId || req.user?._id || req.user?.id;
+
+    if (!rawCompanyId) {
+      return res.status(400).json({
+        success: false,
+        message: "Company ID not found"
+      });
+    }
+
     let companyId;
     try {
-      companyId = new mongoose.Types.ObjectId(req.user?.companyId || req.user?.id);
+      companyId = new mongoose.Types.ObjectId(rawCompanyId);
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -3046,10 +3056,15 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
       { sessionId: String(sessionId) },
       {
         punchInLocation: 1,
+        companyId: 1,
         _id: 0
       }
     ).lean();
+
     console.log("Base session punchInLocation:", baseSession?.punchInLocation);
+    console.log("Base session companyId:", baseSession?.companyId?.toString());
+    console.log("Resolved request companyId:", companyId.toString());
+
     if (!baseSession) {
       return res.status(404).json({
         success: false,
@@ -3090,14 +3105,7 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
     const matchFilter = {
       sessionId: { $ne: sessionId }, // Exclude current session
       companyId: companyId, // Same company
-      punchInLocation: {
-        $exists: true, // Must have punch-in location
-        $ne: null
-      },
-      "punchInLocation.coordinates": {
-        $exists: true,
-        $type: "array"
-      }
+      "punchInLocation.coordinates": { $exists: true } // Must have a location
     };
 
     // Optional user filter
@@ -3106,8 +3114,8 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
         const userId = new mongoose.Types.ObjectId(userFilterId);
 
         matchFilter.$or = [
-          { employeeId: userId }, // Current employee's sessions
-          { assignedTo: { $in: [userId] } } // Sessions assigned to user
+          { employeeId: userId },
+          { assignedTo: { $in: [userId] } }
         ];
       } else {
         return res.status(400).json({
@@ -3117,52 +3125,52 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
       }
     }
 
+    console.log("matchFilter:", JSON.stringify(matchFilter, null, 2));
+    console.log("coordinates:", coordinates, "radius:", radius);
+
+    // ===== DEBUG: check how many sessions exist for this company at all =====
+    const debugCount = await SalesSession.countDocuments({
+      companyId,
+      sessionId: { $ne: sessionId }
+    });
+    console.log("Other sessions for this company (any location):", debugCount);
+
+    const debugGeoCount = await SalesSession.countDocuments({
+      companyId,
+      sessionId: { $ne: sessionId },
+      "punchInLocation.coordinates": { $exists: true }
+    });
+    console.log("Other sessions for this company WITH punchInLocation:", debugGeoCount);
+
     // ===== BUILD AGGREGATION PIPELINE =====
     const pipeline = [
-      // Stage 1: Geospatial query
       {
         $geoNear: {
           near: {
             type: "Point",
-            coordinates: coordinates // [longitude, latitude]
+            coordinates: coordinates
           },
-          distanceField: "distance", // Add distance to results
-          maxDistance: radius, // Radius in meters
+          distanceField: "distance",
+          maxDistance: radius,
           minDistance: 0,
-          spherical: true, // Use spherical geometry
-          key: "punchInLocation", // Field to search
-          query: matchFilter // Additional filters
+          spherical: true,
+          key: "punchInLocation",
+          query: matchFilter
         }
       },
 
-      // Stage 2: Sort by distance
-      {
-        $sort: {
-          distance: 1
-        }
-      },
+      { $sort: { distance: 1 } },
 
-      // Stage 3: Facet for total count and paginated data
       {
         $facet: {
-          metadata: [
-            {
-              $count: "total"
-            }
-          ],
-          data: [
-            { $skip: skip },
-            { $limit: limit }
-          ]
+          metadata: [{ $count: "total" }],
+          data: [{ $skip: skip }, { $limit: limit }]
         }
       },
 
-      // Stage 4: Project final output
       {
         $project: {
-          total: {
-            $arrayElemAt: ["$metadata.total", 0]
-          },
+          total: { $arrayElemAt: ["$metadata.total", 0] },
           data: 1
         }
       }
@@ -3189,7 +3197,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
 
     const { total = 0, data = [] } = results[0];
 
-    // ===== RESPONSE =====
     return res.status(200).json({
       success: true,
       pagination: {
@@ -3202,7 +3209,7 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
       },
       data: data.map(session => ({
         sessionId: session.sessionId,
-        distance: Math.round(session.distance), // Distance in meters
+        distance: Math.round(session.distance),
         customer: session.customer || {},
         punchInLocation: session.punchInLocation,
         punchOutLocation: session.punchOutLocation,
@@ -3223,7 +3230,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
       code: error.code
     });
 
-    // Handle specific MongoDB errors
     if (error.name === "MongoError" || error.name === "MongoServerError") {
       return res.status(500).json({
         success: false,
@@ -3240,7 +3246,6 @@ export const getNearbyOpenSalesAdminOptimized = async (req, res) => {
     });
   }
 };
-
 
 
 export const getTodayMeetings = async (req, res) => {
