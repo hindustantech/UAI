@@ -47,6 +47,11 @@ export const createSalaryRule = async (req, res) => {
     }
 };
 
+export const getSalaryRuleById = async (req, res) => {
+    const companyId = req.user.companyId || req.user._id;
+
+    
+}
 /**
  * Get Company Salary Rule
  */
