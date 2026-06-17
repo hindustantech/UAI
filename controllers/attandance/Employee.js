@@ -1,4 +1,6 @@
 import User from "../../models/userModel.js";
+import csv from "csv-parser";
+import fs from "fs";
 import Employee from "../../models/Attandance/Employee.js";
 import Attendance from "../../models/Attandance/Attendance.js";
 import Holiday from "../../models/Attandance/Holiday.js";
@@ -19,6 +21,133 @@ import {
 // controllers/companyController.js
 import { hasPlanType } from "../../services/featureAccess.service.js";
 
+
+export const uploadEmployeeDeductions = async (req, res) => {
+    try {
+        const companyId = req.user.companyId || req.user._id;
+
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "CSV file is required"
+            });
+        }
+
+        const rows = [];
+
+        await new Promise((resolve, reject) => {
+            fs.createReadStream(req.file.path)
+                .pipe(csv())
+                .on("data", (data) => rows.push(data))
+                .on("end", resolve)
+                .on("error", reject);
+        });
+
+        let successCount = 0;
+        let failedCount = 0;
+        const failedRecords = [];
+
+        for (const row of rows) {
+            try {
+                const phone = row.phone?.trim();
+
+                if (!phone) {
+                    failedCount++;
+                    failedRecords.push({
+                        phone,
+                        reason: "Phone missing"
+                    });
+                    continue;
+                }
+
+                const user = await User.findOne({
+                    phone
+                });
+
+                if (!user) {
+                    failedCount++;
+                    failedRecords.push({
+                        phone,
+                        reason: "User not found"
+                    });
+                    continue;
+                }
+
+                const employee = await Employee.findOne({
+                    companyId,
+                    userId: user._id
+                });
+
+                if (!employee) {
+                    failedCount++;
+                    failedRecords.push({
+                        phone,
+                        reason: "Employee not found"
+                    });
+                    continue;
+                }
+
+                employee.deductions = {
+                    incomeTax: Number(row.incomeTax || 0),
+                    professionalTax: Number(row.professionalTax || 0),
+                    otherDeduction: [
+                        {
+                            name: row.otherDeductionName || "Other Deduction",
+                            amount: Number(row.otherDeduction || 0)
+                        }
+                    ]
+                };
+
+                await employee.save();
+
+                successCount++;
+            } catch (err) {
+                failedCount++;
+
+                failedRecords.push({
+                    phone: row.phone,
+                    reason: err.message
+                });
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            totalRecords: rows.length,
+            successCount,
+            failedCount,
+            failedRecords
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+export const downloadDeductionTemplate = async (req, res) => {
+    try {
+        const csvTemplate =
+            `phone,incomeTax,professionalTax,otherDeductionName,otherDeduction
+9876543210,500,200,Loan EMI,1000`;
+
+        res.setHeader(
+            "Content-Disposition",
+            "attachment; filename=employee-deduction-template.csv"
+        );
+
+        res.setHeader("Content-Type", "text/csv");
+
+        return res.status(200).send(csvTemplate);
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
 
 export const activateEmployee = async (req, res) => {
     const session = await mongoose.startSession();

@@ -35,6 +35,9 @@ import TodayAttendanceRoute from './routes/Attandance/todayAttendanceRoutes.js';
 import salesR from './routes/Attandance/Sales/salses.js';
 import onboardingRoutes from './routes/onboarding.routes.js';
 import bulkUploadSalesRoute from './routes/Attandance/bulkUploadSalesSessions.js'
+import payrollrule from './routes/PayrollRule.js'
+import salaryRules from './routes/salaryRuleRoutes.js'
+import payrollroutes from './routes/Attandance/payrollRoutes.js'
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
@@ -79,7 +82,7 @@ app.use(
 
 app.use('/api/usermanagement', usermanagement);
 app.use('/api/permissionRoutes', permissionRoutes);
-
+app.use('/payrollrule', payrollrule)
 app.use('/api/holiday', holiday);
 app.use('/api/v1/SalesRoute', SalesRoute);
 app.use('/api/attendance', attandance);
@@ -89,6 +92,8 @@ app.use('/api/advertisements', advertisment);
 app.use('/api/ExportRoutes', ExportRoutes);
 app.use('/api/v1/sales/reports', SalesReoprts);
 app.use('/api/break', lunchRoute);
+app.use('/api/v1/payrollroutes', payrollroutes)
+app.use('/api/v1/salaryrules', salaryRules);
 // API routes
 app.use('/api/plan', planRoutes);
 app.use('/api/appsetting', appsettingroutes);

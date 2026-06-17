@@ -51,7 +51,7 @@ const employeeSchema = new mongoose.Schema({
     },
     employeeType: {
         type: String,
-        enum: ['non_sales', 'sales','pro_sales'],
+        enum: ['non_sales', 'sales', 'pro_sales'],
         default: "non_sales"
     },
     role: {
@@ -65,6 +65,17 @@ const employeeSchema = new mongoose.Schema({
         hra: Number,
         da: Number,
         bonus: Number,
+        otherAllowence: [{
+            name: {
+                type: String,
+                required: true
+            },
+            amount: {
+                type: Number,
+                required: true,
+                default: 0
+            }
+        }],
 
         perDay: Number,
         perHour: Number,
@@ -72,6 +83,22 @@ const employeeSchema = new mongoose.Schema({
         overtimeRate: Number
     },
 
+    deductions: {
+        incomeTax: Number,
+        professionalTax: Number,
+
+        otherDeduction: [{
+            name: {
+                type: String,
+                required: true
+            },
+            amount: {
+                type: Number,
+                required: true,
+                default: 0
+            }
+        }]
+    },
     bankDetails: {
         accountNo: String,
         ifsc: String,

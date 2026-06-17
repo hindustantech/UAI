@@ -1,9 +1,5 @@
 import express from "express";
-
-/* ===============================
-   Controllers
-================================ */
-
+import multer from "multer";
 import {
     getCompanyByUser,
     createEmployee,
@@ -19,7 +15,9 @@ import {
     changeEmployeeRole,
     activateEmployee,
     getEmployees,
-    getSalesEmployeesByCompanyPaginated
+    getSalesEmployeesByCompanyPaginated,
+    uploadEmployeeDeductions,
+    downloadDeductionTemplate
 } from "../../controllers/attandance/Employee.js";
 
 /* ===============================
@@ -38,6 +36,25 @@ const router = express.Router();
 /* ===============================
    ADMIN / HR ROUTES
 ================================ */
+
+
+
+const upload = multer({
+    dest: "uploads/"
+});
+
+router.post(
+    "/upload-deductions",
+    authMiddleware,
+    upload.single("file"),
+    uploadEmployeeDeductions
+);
+
+router.get(
+    "/download-deduction-template",
+    authMiddleware,
+    downloadDeductionTemplate
+);
 
 /**
  * Create Employee
