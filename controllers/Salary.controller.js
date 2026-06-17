@@ -13,15 +13,15 @@ const ESI_GROSS_LIMIT = 21000;
  */
 const getActivePayrollRules = async (companyId) => {
   try {
-    const payrollRule = await PayrollRule.findOne({ 
-      companyId, 
-      isActive: true 
+    const payrollRule = await PayrollRule.findOne({
+      companyId,
+      isActive: true
     }).lean();
-    
+
     if (!payrollRule) {
       throw new Error('No active payroll rules found. Please configure payroll rules first.');
     }
-    
+
     return payrollRule;
   } catch (error) {
     console.error('Error fetching payroll rules:', error);
@@ -32,10 +32,12 @@ const getActivePayrollRules = async (companyId) => {
 /**
  * Helper: Get salary rules from database
  */
-const getSalaryRules = async () => {
+const getSalaryRules = async (companyId) => {
   try {
-    const salaryRule = await SalaryRule.findOne().lean();
-    
+    const salaryRule = await SalaryRule.findOne({
+      companyId,
+    }).lean();
+
     if (!salaryRule) {
       // Return default rules if not found
       return {
@@ -43,7 +45,7 @@ const getSalaryRules = async () => {
         halfDay: { ruleName: "2 Half Days = 1 Day Cut", count: 2, deductionDays: 1 }
       };
     }
-    
+
     return salaryRule;
   } catch (error) {
     console.error('Error fetching salary rules:', error);
@@ -70,7 +72,7 @@ const getEmployeeAttendance = async (employeeId, empCode, month, year) => {
     // Option 2: Calculate from attendance records
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0);
-    
+
     // This is a placeholder - implement based on your Attendance model structure
     const attendanceRecords = await Attendance.find({
       employeeId,
@@ -116,7 +118,7 @@ const getEmployeeAttendance = async (employeeId, empCode, month, year) => {
  */
 const buildAttendanceMap = async (employees, month, year) => {
   const attendanceMap = {};
-  
+
   for (const employee of employees) {
     const attendance = await getEmployeeAttendance(
       employee.userId,
@@ -124,12 +126,12 @@ const buildAttendanceMap = async (employees, month, year) => {
       month,
       year
     );
-    
+
     // Use empCode as key (fallback to _id)
     const key = employee.empCode || employee._id.toString();
     attendanceMap[key] = attendance;
   }
-  
+
   return attendanceMap;
 };
 
@@ -140,12 +142,12 @@ const buildAttendanceMap = async (employees, month, year) => {
  */
 export const calculateAll = async (req, res) => {
   try {
-    const { 
-      month = new Date().getMonth() + 1, 
+    const {
+      month = new Date().getMonth() + 1,
       year = new Date().getFullYear(),
       companyId,
       department,
-      employeeType 
+      employeeType
     } = req.query;
 
     // Build filter for employees
@@ -180,7 +182,7 @@ export const calculateAll = async (req, res) => {
     // Get payroll rules (use first employee's companyId if not provided)
     const targetCompanyId = companyId || employees[0].companyId;
     const payrollRule = await getActivePayrollRules(targetCompanyId);
-    const salaryRule = await getSalaryRules();
+    const salaryRule = await getSalaryRules(targetCompanyId);
 
     // Build attendance data
     const attendanceMap = await buildAttendanceMap(employees, month, year);
@@ -221,9 +223,9 @@ export const calculateAll = async (req, res) => {
     results.forEach(r => {
       const dept = r.employeeInfo.department;
       if (!summary.departmentWise[dept]) {
-        summary.departmentWise[dept] = { 
-          count: 0, 
-          totalGrossSalary: 0, 
+        summary.departmentWise[dept] = {
+          count: 0,
+          totalGrossSalary: 0,
           totalNetSalary: 0,
           employees: []
         };
@@ -240,9 +242,9 @@ export const calculateAll = async (req, res) => {
 
     // Round department values
     Object.keys(summary.departmentWise).forEach(dept => {
-      summary.departmentWise[dept].totalGrossSalary = 
+      summary.departmentWise[dept].totalGrossSalary =
         parseFloat(summary.departmentWise[dept].totalGrossSalary.toFixed(2));
-      summary.departmentWise[dept].totalNetSalary = 
+      summary.departmentWise[dept].totalNetSalary =
         parseFloat(summary.departmentWise[dept].totalNetSalary.toFixed(2));
     });
 
@@ -290,12 +292,12 @@ export const calculateOne = async (req, res) => {
     } = req.body;
 
     // Find employee by empCode
-    const employee = await Employee.findOne({ 
+    const employee = await Employee.findOne({
       empCode,
       employmentStatus: 'active'
     })
-    .populate('userId', 'name email')
-    .lean();
+      .populate('userId', 'name email')
+      .lean();
 
     if (!employee) {
       return res.status(404).json({
@@ -306,7 +308,7 @@ export const calculateOne = async (req, res) => {
 
     // Get payroll rules
     const payrollRule = await getActivePayrollRules(employee.companyId);
-    const salaryRule = await getSalaryRules();
+    const salaryRule = await getSalaryRules(employee.companyId);
 
     // Get or override attendance
     let attendance;
@@ -370,18 +372,18 @@ export const calculateOne = async (req, res) => {
 export const calculateByEmployee = async (req, res) => {
   try {
     const { empCode } = req.params;
-    const { 
-      month = new Date().getMonth() + 1, 
-      year = new Date().getFullYear() 
+    const {
+      month = new Date().getMonth() + 1,
+      year = new Date().getFullYear()
     } = req.query;
 
     // Find employee
-    const employee = await Employee.findOne({ 
+    const employee = await Employee.findOne({
       empCode,
       employmentStatus: 'active'
     })
-    .populate('userId', 'name email')
-    .lean();
+      .populate('userId', 'name email')
+      .lean();
 
     if (!employee) {
       return res.status(404).json({
@@ -392,7 +394,7 @@ export const calculateByEmployee = async (req, res) => {
 
     // Get rules
     const payrollRule = await getActivePayrollRules(employee.companyId);
-    const salaryRule = await getSalaryRules();
+    const salaryRule = await getSalaryRules(employee.companyId);
 
     // Get attendance
     const attendance = await getEmployeeAttendance(employee.userId, empCode, month, year);
@@ -421,10 +423,10 @@ export const calculateByEmployee = async (req, res) => {
 export const calculateByDepartment = async (req, res) => {
   try {
     const { department } = req.params;
-    const { 
-      month = new Date().getMonth() + 1, 
+    const {
+      month = new Date().getMonth() + 1,
       year = new Date().getFullYear(),
-      companyId 
+      companyId
     } = req.query;
 
     // Build filter
@@ -452,7 +454,7 @@ export const calculateByDepartment = async (req, res) => {
     // Get rules (use first employee's companyId)
     const targetCompanyId = companyId || employees[0].companyId;
     const payrollRule = await getActivePayrollRules(targetCompanyId);
-    const salaryRule = await getSalaryRules();
+    const salaryRule = await getSalaryRules(employee.companyId);
 
     // Get attendance
     const attendanceMap = await buildAttendanceMap(employees, month, year);
@@ -491,11 +493,11 @@ export const calculateByDepartment = async (req, res) => {
  */
 export const exportExcel = async (req, res) => {
   try {
-    const { 
-      month = new Date().getMonth() + 1, 
+    const {
+      month = new Date().getMonth() + 1,
       year = new Date().getFullYear(),
       companyId,
-      department 
+      department
     } = req.query;
 
     // Build filter
@@ -518,7 +520,7 @@ export const exportExcel = async (req, res) => {
     // Get rules
     const targetCompanyId = companyId || employees[0].companyId;
     const payrollRule = await getActivePayrollRules(targetCompanyId);
-    const salaryRule = await getSalaryRules();
+    const salaryRule = await getSalaryRules(employee.companyId);
 
     // Get attendance
     const attendanceMap = await buildAttendanceMap(employees, month, year);
@@ -529,12 +531,12 @@ export const exportExcel = async (req, res) => {
     // Generate Excel
     const generator = new SalaryExcelGenerator(results);
     await generator.generate();
-    
+
     const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
     const filename = `Salary_Register_${monthName}_${year}.xlsx`;
-    
+
     await generator.writeToResponse(res, filename);
-    
+
   } catch (error) {
     console.error('Excel export error:', error);
     res.status(500).json({
@@ -551,18 +553,18 @@ export const exportExcel = async (req, res) => {
 export const exportSalarySlip = async (req, res) => {
   try {
     const { empCode } = req.params;
-    const { 
-      month = new Date().getMonth() + 1, 
-      year = new Date().getFullYear() 
+    const {
+      month = new Date().getMonth() + 1,
+      year = new Date().getFullYear()
     } = req.query;
 
     // Find employee
-    const employee = await Employee.findOne({ 
+    const employee = await Employee.findOne({
       empCode,
       employmentStatus: 'active'
     })
-    .populate('userId', 'name email')
-    .lean();
+      .populate('userId', 'name email')
+      .lean();
 
     if (!employee) {
       return res.status(404).json({
@@ -573,7 +575,7 @@ export const exportSalarySlip = async (req, res) => {
 
     // Get rules
     const payrollRule = await getActivePayrollRules(employee.companyId);
-    const salaryRule = await getSalaryRules();
+    const salaryRule = await getSalaryRules(employee.companyId);
 
     // Get attendance
     const attendance = await getEmployeeAttendance(employee.userId, empCode, month, year);
@@ -584,12 +586,12 @@ export const exportSalarySlip = async (req, res) => {
     // Generate single employee slip
     const generator = new SalaryExcelGenerator([result]);
     await generator.generate();
-    
+
     const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
     const filename = `Salary_Slip_${empCode}_${monthName}_${year}.xlsx`;
-    
+
     await generator.writeToResponse(res, filename);
-    
+
   } catch (error) {
     console.error('Salary slip export error:', error);
     res.status(500).json({
@@ -609,9 +611,9 @@ export const getRules = async (req, res) => {
 
     let payrollRule;
     if (companyId) {
-      payrollRule = await PayrollRule.findOne({ 
-        companyId, 
-        isActive: true 
+      payrollRule = await PayrollRule.findOne({
+        companyId,
+        isActive: true
       }).lean();
     } else {
       // Get the first active rule
@@ -690,10 +692,10 @@ export const getRules = async (req, res) => {
  */
 export const getSummary = async (req, res) => {
   try {
-    const { 
-      month = new Date().getMonth() + 1, 
+    const {
+      month = new Date().getMonth() + 1,
       year = new Date().getFullYear(),
-      companyId 
+      companyId
     } = req.query;
 
     // Build filter
@@ -715,7 +717,7 @@ export const getSummary = async (req, res) => {
     // Get rules
     const targetCompanyId = companyId || employees[0].companyId;
     const payrollRule = await getActivePayrollRules(targetCompanyId);
-    const salaryRule = await getSalaryRules();
+    const salaryRule = await getSalaryRules(employee.companyId);
 
     // Get attendance
     const attendanceMap = await buildAttendanceMap(employees, month, year);
@@ -761,9 +763,9 @@ export const getSummary = async (req, res) => {
     results.forEach(r => {
       const dept = r.employeeInfo.department || 'Unassigned';
       if (!summary.byDepartment[dept]) {
-        summary.byDepartment[dept] = { 
-          count: 0, 
-          totalGrossSalary: 0, 
+        summary.byDepartment[dept] = {
+          count: 0,
+          totalGrossSalary: 0,
           totalNetSalary: 0,
           totalDeductions: 0
         };
@@ -786,10 +788,10 @@ export const getSummary = async (req, res) => {
     results.forEach(r => {
       const type = r.employeeInfo.employeeType || 'non_sales';
       if (!summary.byEmployeeType[type]) {
-        summary.byEmployeeType[type] = { 
-          count: 0, 
-          totalGrossSalary: 0, 
-          totalNetSalary: 0 
+        summary.byEmployeeType[type] = {
+          count: 0,
+          totalGrossSalary: 0,
+          totalNetSalary: 0
         };
       }
       summary.byEmployeeType[type].count++;

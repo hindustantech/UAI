@@ -2,6 +2,10 @@ import mongoose from "mongoose";
 
 const SalaryRuleSchema = new mongoose.Schema(
     {
+        companyId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+        },
         late: {
             ruleName: {
                 type: String,

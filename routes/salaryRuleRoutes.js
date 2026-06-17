@@ -5,9 +5,10 @@ import {
     getSalaryRuleById,
     updateSalaryRule,
     deleteSalaryRule,
+    getCompanySalaryRule
 } from "../controllers/salaryRules.js";
 
-
+import authMiddleware from "../middlewares/authMiddleware.js";
 const router = express.Router();
 
 router.post("/", createSalaryRule);
@@ -15,6 +16,7 @@ router.post("/", createSalaryRule);
 router.get("/", getAllSalaryRules);
 
 router.get("/:id", getSalaryRuleById);
+router.get('/getCompanySalaryRule', authMiddleware, getCompanySalaryRule)
 
 router.put("/:id", updateSalaryRule);
 

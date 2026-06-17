@@ -87,4 +87,4 @@ export const QuicksendWhatsAppOtp = async (number, code) => {
             error: error?.response?.data || error.message,
         };
     }
-};
+}

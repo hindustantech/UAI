@@ -171,7 +171,7 @@ const attendanceSchema = new mongoose.Schema({
 
             source: {
                 type: String,
-                enum: ["mobile", "web", "biometric", "admin"],
+                enum: ["mobile", "web", "biometric", "admin",'system_auto'],
                 default: "mobile"
             },
 
@@ -237,7 +237,8 @@ const attendanceSchema = new mongoose.Schema({
             "half_day",
             "week_off",
             "pending_approval",
-            "rejected"
+            "rejected",
+            "system_auto"
         ],
         default: "present"
     },

@@ -7,7 +7,7 @@ import mongoose from "mongoose";
 
 import Payroll from "../models/Attandance/Payroll.js";
 import Employee from "../models/Attandance/Employee.js";
-import salaryRules from "../models/salaryRules.js";
+import SalaryRule from "../models/salaryRules.js";
 import PayrollRule from "../models/PayrollRuleSchema.js";
 import Attendance from "../models/Attandance/Attendance.js";
 import { calculateSalary } from "../services/salaryCalculator.js";
@@ -111,7 +111,7 @@ export const generatePayroll = async (req, res) => {
 
         /* ── Fetch rules ── */
         const [salaryRule, payrollRule] = await Promise.all([
-            SalaryRule.findOne().lean(),
+            SalaryRule.findOne({ companyId }).lean(),
             PayrollRule.findOne({ companyId, isActive: true }).lean()
         ]);
         if (!salaryRule) return res.status(400).json({ success: false, message: "SalaryRule is not configured." });
@@ -174,7 +174,7 @@ export const generateBulkPayroll = async (req, res) => {
 
         /* ── Fetch rules once ── */
         const [salaryRule, payrollRule] = await Promise.all([
-            SalaryRule.findOne().lean(),
+            SalaryRule.findOne({companyId}).lean(),
             PayrollRule.findOne({ companyId, isActive: true }).lean()
         ]);
         if (!salaryRule) return res.status(400).json({ success: false, message: "SalaryRule not configured." });
