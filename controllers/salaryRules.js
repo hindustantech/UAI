@@ -1,6 +1,7 @@
 // controllers/salaryRule.controller.js
 
 import SalaryRule from "../models/salaryRules.js";
+import mongoose from "mongoose";
 
 /**
  * Create or Update Company Salary Rule
@@ -47,11 +48,44 @@ export const createSalaryRule = async (req, res) => {
     }
 };
 
-export const getSalaryRuleById = async (req, res) => {
-    const companyId = req.user.companyId || req.user._id;
 
-    
-}
+
+export const getSalaryRuleById = async (req, res) => {
+    try {
+        const companyId = req.user.companyId || req.user._id;
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid salary rule ID"
+            });
+        }
+
+        const salaryRule = await SalaryRule.findOne({
+            _id: id,
+            companyId
+        });
+
+        if (!salaryRule) {
+            return res.status(404).json({
+                success: false,
+                message: "Salary rule not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: salaryRule
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
 /**
  * Get Company Salary Rule
  */
