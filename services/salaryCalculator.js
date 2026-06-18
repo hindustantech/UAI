@@ -66,12 +66,12 @@ export function calculateSalary({
     const perHourRate = sal.perHour ?? (perDayRate / 8);
 
     /* ── 5. Prorate earnings by payable days ── */
-    const ratio = STANDARD_MONTH_DAYS;
 
-    const basicEarned = roundTo2(sal.basic * ratio);
-    const hraEarned = roundTo2((sal.hra ?? 0) * ratio);
-    const daEarned = roundTo2((sal.da ?? 0) * ratio);
-    const bonusEarned = roundTo2((sal.bonus ?? 0) * ratio);
+
+    const basicEarned = sal.basic;
+    const hraEarned = sal.hra
+    const daEarned = sal.da
+    const bonusEarned = sal.bonus
 
     // Other allowances (prorated)
     const otherAllowancesEarned = (sal.otherAllowence ?? []).map(a => ({

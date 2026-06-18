@@ -110,7 +110,10 @@ const PayrollSchema = new mongoose.Schema(
 
         /* ── Net Salary ── */
         netSalary: { type: Number, default: 0 },   // grossSalary - totalDeductions
-
+        lossOfPay: {
+            lopDays: { type: Number, default: 0 },
+            lopAmount: { type: Number, default: 0 }
+        },
         /* ── Per-unit rates used (for transparency) ── */
         ratesUsed: {
             perDayRate: { type: Number, default: 0 },
