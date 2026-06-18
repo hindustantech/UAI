@@ -188,9 +188,9 @@ export const startBreakController = async (req, res) => {
         /**
          * BREAK VALIDATION
          */
- 
 
-        
+
+
         /**
          * FIND TODAY ATTENDANCE
          */
@@ -264,18 +264,8 @@ export const startBreakController = async (req, res) => {
 
             if (distance > allowedRadius) {
 
-                return abortAndRespond(
-                    session,
-                    res,
-                    403,
-                    "OUTSIDE_OFFICE_RADIUS",
-                    `You are outside the allowed office location range (${Math.round(distance)}m from office).`,
-                    {
-                        allowedRadius,
-                        currentDistance: Math.round(distance),
-                        unit: "meters"
-                    }
-                );
+                geoVerified = false;
+
             }
 
             geoVerified = true;
@@ -484,18 +474,7 @@ export const endBreakController = async (req, res) => {
 
             if (distance > allowedRadius) {
 
-                return abortAndRespond(
-                    session,
-                    res,
-                    403,
-                    "OUTSIDE_OFFICE_RADIUS",
-                    `You are outside the allowed office location range (${Math.round(distance)}m from office).`,
-                    {
-                        allowedRadius,
-                        currentDistance: Math.round(distance),
-                        unit: "meters"
-                    }
-                );
+                geoVerified = false
             }
 
             geoVerified = true;
