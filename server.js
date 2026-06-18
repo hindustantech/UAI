@@ -82,7 +82,7 @@ app.use(
 
 app.use('/api/usermanagement', usermanagement);
 app.use('/api/permissionRoutes', permissionRoutes);
-app.use('/payrollrule', payrollrule)
+app.use('/api/v1/payrollrule', payrollrule)
 app.use('/api/holiday', holiday);
 app.use('/api/v1/SalesRoute', SalesRoute);
 app.use('/api/attendance', attandance);
