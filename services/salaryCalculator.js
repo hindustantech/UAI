@@ -5,6 +5,7 @@
  * Both SalaryRule and PayrollRule are OPTIONAL — if not found, their deductions are skipped.
  *
  * Standard month = 30 days (as specified)
+ * Full salary is paid, LOP is deducted for absent days
  */
 
 const STANDARD_MONTH_DAYS = 30;
@@ -43,43 +44,58 @@ export function calculateSalary({
         lateDays = 0
     } = attendance;
 
-    /* ── 2. Salary Rule cuts (optional) ── */
+    /* ── 2. Calculate per-day rate based on standard 30-day month ── */
+    const sal = employee.salaryStructure;
+    
+    // Calculate total monthly gross to determine per-day LOP rate
+    const monthlyBasic = sal.basic ?? 0;
+    const monthlyHra = sal.hra ?? 0;
+    const monthlyDa = sal.da ?? 0;
+    const monthlyBonus = sal.bonus ?? 0;
+    
+    // Calculate total monthly other allowances
+    const monthlyOtherAllowances = (sal.otherAllowence ?? []).map(a => ({
+        name: a.name,
+        amount: a.amount ?? 0
+    }));
+    const monthlyOtherAllowTotal = monthlyOtherAllowances.reduce((s, a) => s + a.amount, 0);
+
+    // Total monthly gross salary
+    const totalMonthlyGross = monthlyBasic + monthlyHra + monthlyDa + 
+                              monthlyBonus + monthlyOtherAllowTotal;
+
+    // Per-day rate for LOP calculation (based on total gross salary)
+    const perDayRate = roundTo2(totalMonthlyGross / STANDARD_MONTH_DAYS);
+
+    /* ── 3. Salary Rule cuts (optional) ── */
     let lateCutDays = 0;
     let halfDayCutDays = 0;
 
     if (salaryRule?.late && salaryRule?.halfDay) {
         // e.g. every 3 lates → 0.5 day cut
-        lateCutDays = Math.floor(lateDays / salaryRule.late.count) * salaryRule.late.deductionDays;
+        if (salaryRule.late.count > 0) {
+            lateCutDays = Math.floor(lateDays / salaryRule.late.count) * salaryRule.late.deductionDays;
+        }
         // e.g. every 2 half-days → 1 day cut
-        halfDayCutDays = Math.floor(halfDays / salaryRule.halfDay.count) * salaryRule.halfDay.deductionDays;
+        if (salaryRule.halfDay.count > 0) {
+            halfDayCutDays = Math.floor(halfDays / salaryRule.halfDay.count) * salaryRule.halfDay.deductionDays;
+        }
     }
 
-    const totalCutDays = lateCutDays + halfDayCutDays;
+    const totalSalaryRuleCutDays = lateCutDays + halfDayCutDays;
 
-    /* ── 3. Payable days ── */
-    // payable = presentDays − salary-rule cuts  (can't go below 0)
-    const payableDays = Math.max(0, presentDays - totalCutDays);
+    /* ── 4. Full earnings (no proration, full salary) ── */
+    const basicEarned = monthlyBasic;
+    const hraEarned = monthlyHra;
+    const daEarned = monthlyDa;
+    const bonusEarned = monthlyBonus;
 
-    /* ── 4. Per-day rate (based on standard 30-day month) ── */
-    const sal = employee.salaryStructure;
-    const perDayRate = sal.perDay ?? (sal.basic / STANDARD_MONTH_DAYS);
-    const perHourRate = sal.perHour ?? (perDayRate / 8);
-
-    /* ── 5. Prorate earnings by payable days ── */
-
-
-    const basicEarned = sal.basic;
-    const hraEarned = sal.hra
-    const daEarned = sal.da
-    const bonusEarned = sal.bonus
-
-    // Other allowances (prorated)
-    const otherAllowancesEarned = (sal.otherAllowence ?? []).map(a => ({
+    // Full other allowances
+    const otherAllowancesEarned = monthlyOtherAllowances.map(a => ({
         name: a.name,
-        amount: roundTo2(a.amount * ratio)
+        amount: a.amount
     }));
-
-    const otherAllowTotal = otherAllowancesEarned.reduce((s, a) => s + a.amount, 0);
+    const otherAllowTotal = monthlyOtherAllowTotal;
 
     // Overtime (flat, not prorated)
     const overtimeEarned = roundTo2(sal.overtimeRate ?? 0);
@@ -88,10 +104,16 @@ export function calculateSalary({
         basicEarned + hraEarned + daEarned + bonusEarned + otherAllowTotal + overtimeEarned
     );
 
-    /* ── 6. Loss of Pay (LOP) — absent days deduction ── */
-    // Full per-day salary * number of absent days
-    const lopDays = absentDays;
+    /* ── 5. Loss of Pay (LOP) — absent days deduction ── */
+    // LOP applies to absent days
+    const lopDays = Math.max(0, absentDays);
     const lopAmount = roundTo2(perDayRate * lopDays);
+
+    // Also deduct for salary rule cuts (late/half-day penalties)
+    const salaryRuleCutAmount = roundTo2(perDayRate * totalSalaryRuleCutDays);
+
+    /* ── 6. Payable days for reporting ── */
+    const payableDays = Math.max(0, presentDays - totalSalaryRuleCutDays);
 
     /* ── 7. Statutory deductions (PayrollRule — optional) ── */
     let pf = 0;
@@ -123,14 +145,15 @@ export function calculateSalary({
     }));
     const additionalTotal = additionalLines.reduce((s, d) => s + d.amount, 0);
 
+    /* ── 9. Total deductions (includes LOP + salary rule penalties) ── */
     const totalDeductions = roundTo2(
-        pf + esi + gratuity + incomeTax + professionalTax + additionalTotal + lopAmount
+        pf + esi + gratuity + incomeTax + professionalTax + additionalTotal + lopAmount + salaryRuleCutAmount
     );
 
-    /* ── 9. Net salary ── */
+    /* ── 10. Net salary = Full gross - All deductions ── */
     const netSalary = roundTo2(grossSalary - totalDeductions);
 
-    /* ── 10. Build payroll object ── */
+    /* ── 11. Build payroll object ── */
     const jobInfo = employee.jobInfo ?? {};
     const bank = employee.bankDetails ?? {};
 
@@ -167,7 +190,8 @@ export function calculateSalary({
         salaryRuleDeductions: {
             lateCutDays,
             halfDayCutDays,
-            totalCutDays
+            totalCutDays: totalSalaryRuleCutDays,
+            salaryRuleCutAmount
         },
 
         payableDays,
@@ -199,7 +223,7 @@ export function calculateSalary({
         totalDeductions,
         netSalary,
 
-        ratesUsed: { perDayRate, perHourRate },
+        ratesUsed: { perDayRate },
 
         generatedBy
     };
