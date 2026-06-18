@@ -11,15 +11,15 @@ import {
 import authMiddleware from "../middlewares/authMiddleware.js";
 const router = express.Router();
 
-router.post("/",authMiddleware, createSalaryRule);
+router.post("/", authMiddleware, createSalaryRule);
 
-router.get("/",authMiddleware, getAllSalaryRules);
+router.get("/", authMiddleware, getAllSalaryRules);
 
-router.get("/:id", getSalaryRuleById);
+router.get("/:id", authMiddleware, getSalaryRuleById);
 router.get('/getCompanySalaryRule', authMiddleware, getCompanySalaryRule)
 
-router.put("/:id", updateSalaryRule);
+router.put("/:id", authMiddleware, updateSalaryRule);
 
-router.delete("/:id", deleteSalaryRule);
+router.delete("/:id", authMiddleware, deleteSalaryRule);
 
 export default router;

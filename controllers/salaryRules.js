@@ -113,7 +113,7 @@ export const getCompanySalaryRule = async (req, res) => {
  */
 export const updateSalaryRule = async (req, res) => {
     try {
-        const companyId = req.user.companyId || req.user._id;
+        const companyId = req.user.companyId || req.user._id || req.user.id;
 
         const salaryRule = await SalaryRule.findOneAndUpdate(
             { companyId },

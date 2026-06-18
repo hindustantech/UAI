@@ -69,7 +69,7 @@ async function getAttendanceSummary(employeeId, month, year) {
 export const generatePayroll = async (req, res) => {
     try {
         const { employeeId, month, year, payDate, overrideAttendance } = req.body;
-        const companyId = req.user.companyId;                 // from auth middleware
+        const companyId = req.user.companyId || req.user.id;                 // from auth middleware
 
         /* ── Validate required fields ── */
         if (!employeeId || !month || !year) {
@@ -160,7 +160,7 @@ export const generatePayroll = async (req, res) => {
 export const generateBulkPayroll = async (req, res) => {
     try {
         const { month, year, payDate } = req.body;
-        const companyId = req.user.companyId;
+        const companyId = req.user.companyId || req.user.id;
 
         if (!month || !year) {
             return res.status(400).json({ success: false, message: "month and year are required." });
@@ -174,7 +174,7 @@ export const generateBulkPayroll = async (req, res) => {
 
         /* ── Fetch rules once ── */
         const [salaryRule, payrollRule] = await Promise.all([
-            SalaryRule.findOne({companyId}).lean(),
+            SalaryRule.findOne({ companyId }).lean(),
             PayrollRule.findOne({ companyId, isActive: true }).lean()
         ]);
         if (!salaryRule) return res.status(400).json({ success: false, message: "SalaryRule not configured." });
@@ -246,7 +246,7 @@ export const getEmployeePayroll = async (req, res) => {
     try {
         const { employeeId } = req.params;
         const { month, year, page = 1, limit = 12 } = req.query;
-        const companyId = req.user.companyId;
+        const companyId = req.user.companyId || req.user.id;
 
         if (!mongoose.Types.ObjectId.isValid(employeeId)) {
             return res.status(400).json({ success: false, message: "Invalid employeeId." });
@@ -306,7 +306,7 @@ export const getEmployeePayroll = async (req, res) => {
 ═══════════════════════════════════════════════════════════════ */
 export const getCompanyPayroll = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+        const companyId = req.user.companyId || req.user.id;
         const { month, year, department, status, page = 1, limit = 50 } = req.query;
 
         if (!month || !year) {
@@ -412,7 +412,7 @@ export const updatePayrollStatus = async (req, res) => {
 ═══════════════════════════════════════════════════════════════ */
 export const downloadCompanyExcel = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+        const companyId = req.user.companyId || req.user.id;
         const { month, year } = req.query;
 
         if (!month || !year) {
@@ -455,7 +455,7 @@ export const downloadCompanyExcel = async (req, res) => {
 export const downloadSalarySlipPDF = async (req, res) => {
     try {
         const { payrollId } = req.params;
-        const companyId = req.user.companyId;
+        const companyId = req.user.companyId || req.user.id;
 
         if (!mongoose.Types.ObjectId.isValid(payrollId)) {
             return res.status(400).json({ success: false, message: "Invalid payrollId." });
