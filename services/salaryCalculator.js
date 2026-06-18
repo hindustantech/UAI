@@ -34,24 +34,24 @@ export function calculateSalary({
     }
 
     const {
-        presentDays   = 0,
-        absentDays    = 0,
-        leaveDays     = 0,
-        holidays      = 0,
+        presentDays = 0,
+        absentDays = 0,
+        leaveDays = 0,
+        holidays = 0,
         weeklyOffDays = 0,
-        halfDays      = 0,
-        lateDays      = 0
+        halfDays = 0,
+        lateDays = 0
     } = attendance;
 
     /* ── 2. Salary Rule cuts (optional) ── */
-    let lateCutDays    = 0;
+    let lateCutDays = 0;
     let halfDayCutDays = 0;
 
     if (salaryRule?.late && salaryRule?.halfDay) {
         // e.g. every 3 lates → 0.5 day cut
-        lateCutDays    = Math.floor(lateDays  / salaryRule.late.count)    * salaryRule.late.deductionDays;
+        lateCutDays = Math.floor(lateDays / salaryRule.late.count) * salaryRule.late.deductionDays;
         // e.g. every 2 half-days → 1 day cut
-        halfDayCutDays = Math.floor(halfDays  / salaryRule.halfDay.count) * salaryRule.halfDay.deductionDays;
+        halfDayCutDays = Math.floor(halfDays / salaryRule.halfDay.count) * salaryRule.halfDay.deductionDays;
     }
 
     const totalCutDays = lateCutDays + halfDayCutDays;
@@ -61,21 +61,21 @@ export function calculateSalary({
     const payableDays = Math.max(0, presentDays - totalCutDays);
 
     /* ── 4. Per-day rate (based on standard 30-day month) ── */
-    const sal        = employee.salaryStructure;
-    const perDayRate  = sal.perDay  ?? (sal.basic / STANDARD_MONTH_DAYS);
+    const sal = employee.salaryStructure;
+    const perDayRate = sal.perDay ?? (sal.basic / STANDARD_MONTH_DAYS);
     const perHourRate = sal.perHour ?? (perDayRate / 8);
 
     /* ── 5. Prorate earnings by payable days ── */
-    const ratio = payableDays / STANDARD_MONTH_DAYS;
+    const ratio = STANDARD_MONTH_DAYS;
 
-    const basicEarned = roundTo2(sal.basic  * ratio);
-    const hraEarned   = roundTo2((sal.hra   ?? 0) * ratio);
-    const daEarned    = roundTo2((sal.da    ?? 0) * ratio);
+    const basicEarned = roundTo2(sal.basic * ratio);
+    const hraEarned = roundTo2((sal.hra ?? 0) * ratio);
+    const daEarned = roundTo2((sal.da ?? 0) * ratio);
     const bonusEarned = roundTo2((sal.bonus ?? 0) * ratio);
 
     // Other allowances (prorated)
     const otherAllowancesEarned = (sal.otherAllowence ?? []).map(a => ({
-        name:   a.name,
+        name: a.name,
         amount: roundTo2(a.amount * ratio)
     }));
 
@@ -90,12 +90,12 @@ export function calculateSalary({
 
     /* ── 6. Loss of Pay (LOP) — absent days deduction ── */
     // Full per-day salary * number of absent days
-    const lopDays   = absentDays;
+    const lopDays = absentDays;
     const lopAmount = roundTo2(perDayRate * lopDays);
 
     /* ── 7. Statutory deductions (PayrollRule — optional) ── */
-    let pf       = 0;
-    let esi      = 0;
+    let pf = 0;
+    let esi = 0;
     let gratuity = 0;
 
     if (payrollRule?.deductions) {
@@ -115,10 +115,10 @@ export function calculateSalary({
     }
 
     /* ── 8. Other deductions (from employee) ── */
-    const incomeTax       = roundTo2(employee.deductions?.incomeTax ?? 0);
+    const incomeTax = roundTo2(employee.deductions?.incomeTax ?? 0);
     const professionalTax = roundTo2(employee.deductions?.professionalTax ?? 0);
     const additionalLines = (employee.deductions?.otherDeduction ?? []).map(d => ({
-        name:   d.name,
+        name: d.name,
         amount: roundTo2(d.amount)
     }));
     const additionalTotal = additionalLines.reduce((s, d) => s + d.amount, 0);
@@ -131,25 +131,25 @@ export function calculateSalary({
     const netSalary = roundTo2(grossSalary - totalDeductions);
 
     /* ── 10. Build payroll object ── */
-    const jobInfo = employee.jobInfo    ?? {};
-    const bank    = employee.bankDetails ?? {};
+    const jobInfo = employee.jobInfo ?? {};
+    const bank = employee.bankDetails ?? {};
 
     return {
-        companyId:  employee.companyId,
+        companyId: employee.companyId,
         employeeId: employee._id,
 
         payPeriod,
         payDate,
 
         employeeSnapshot: {
-            empCode:     employee.empCode,
-            name:        employee.user_name,
+            empCode: employee.empCode,
+            name: employee.user_name,
             designation: jobInfo.designation,
-            department:  jobInfo.department,
-            grade:       jobInfo.grade,
+            department: jobInfo.department,
+            grade: jobInfo.grade,
             bankAccount: bank.accountNo,
-            bankName:    bank.bankName,
-            ifsc:        bank.ifsc,
+            bankName: bank.bankName,
+            ifsc: bank.ifsc,
             joiningDate: jobInfo.joiningDate
         },
 
@@ -173,11 +173,11 @@ export function calculateSalary({
         payableDays,
 
         earnings: {
-            basic:           basicEarned,
-            hra:             hraEarned,
-            da:              daEarned,
-            bonus:           bonusEarned,
-            overtime:        overtimeEarned,
+            basic: basicEarned,
+            hra: hraEarned,
+            da: daEarned,
+            bonus: bonusEarned,
+            overtime: overtimeEarned,
             otherAllowances: otherAllowancesEarned
         },
 
