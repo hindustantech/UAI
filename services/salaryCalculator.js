@@ -174,7 +174,7 @@ export function calculateSalary({
             bankName: bank.bankName,
             ifsc: bank.ifsc,
             joiningDate: jobInfo.joiningDate
-        },
+        },  
 
         attendance: {
             standardDays: STANDARD_MONTH_DAYS,
