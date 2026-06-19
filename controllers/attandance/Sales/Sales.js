@@ -430,26 +430,25 @@ export const punchIn = async (req, res) => {
     const validatedLocation = validateLocation(location);
     const now = new Date();
 
-    const session = await mongoose.startSession();
 
 
     // Step 2: Get active subscription
-    const subscription = await Subscription.findOne({
-      company: companyId,
-      status: "ACTIVE",
-      isActive: true,
-      endDate: { $gte: new Date() }
-    }).session(session);
+    // const subscription = await Subscription.findOne({
+    //   company: companyId,
+    //   status: "ACTIVE",
+    //   isActive: true,
+    //   endDate: { $gte: new Date() }
+    // }).session(session);
 
-    if (!subscription) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(403).json({
-        success: false,
-        message: "No active subscription",
-        error: "No active subscription found for this company"
-      });
-    }
+    // if (!subscription) {
+    //   await session.abortTransaction();
+    //   session.endSession();
+    //   return res.status(403).json({
+    //     success: false,
+    //     message: "No active subscription",
+    //     error: "No active subscription found for this company"
+    //   });
+    // }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
