@@ -1104,7 +1104,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             wsMaster.getRow(1).height = 26;
 
             const mHeaders = [
-                "#", "Emp Code", "Emp Name", "Department", "Designation",
+                "#", "referalCode", "Emp Code", "Emp Name", "Department", "Designation",
                 "Employment Status", "Weekly Off",
                 "Shift Name", "Shift Start", "Shift End",
                 "Grace (Late Entry)", "Grace (Early Exit)",
@@ -1152,8 +1152,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     shiftEnd,
                     `${graceIn} min`,
                     `${graceOut} min`,
-                    emp.email || emp.contactInfo?.email || "N/A",
-                    emp.phone || emp.contactInfo?.phone || "N/A",
+                    emp.email || emp.userId?.email || "N/A",
+                    emp.phone || emp.userId?.phone || "N/A",
                     emp.jobInfo?.dateOfJoining
                         ? new Date(emp.jobInfo.dateOfJoining).toLocaleDateString("en-IN")
                         : "N/A",
