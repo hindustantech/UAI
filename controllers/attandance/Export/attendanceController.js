@@ -1087,6 +1087,97 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             wsSummary.getRow(2).height = 22;
         }
 
+
+        // ── Employee Master Data (premium only) ────────────────────────
+        if (!exceedsFreeLimit) {
+            const wsMaster = wb.addWorksheet("Employee Master");
+            wsMaster.views = [{ state: "frozen", ySplit: 2 }];
+
+            const mCols = 16;
+
+            wsMaster.mergeCells(1, 1, 1, mCols);
+            const mTitle = wsMaster.getCell(1, 1);
+            mTitle.value = `EMPLOYEE MASTER DATA  |  Generated on ${new Date().toLocaleDateString("en-IN")}`;
+            mTitle.font = { name: "Arial", bold: true, size: 13, color: { argb: "FFFFFFFF" } };
+            mTitle.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
+            mTitle.alignment = { horizontal: "center", vertical: "middle" };
+            wsMaster.getRow(1).height = 26;
+
+            const mHeaders = [
+                "#", "Emp Code", "Emp Name", "Department", "Designation",
+                "Employment Status", "Weekly Off",
+                "Shift Name", "Shift Start", "Shift End",
+                "Grace (Late Entry)", "Grace (Early Exit)",
+                "Email", "Phone", "Date of Joining", "Employee ID",
+            ];
+            const mHdrRow = wsMaster.getRow(2);
+            mHdrRow.height = 18;
+            mHeaders.forEach((h, i) => {
+                const cell = mHdrRow.getCell(i + 1);
+                cell.value = h;
+                cell.font = { name: "Arial", bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+                cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
+                cell.alignment = { horizontal: "center", vertical: "middle" };
+            });
+
+            employees.forEach((emp, idx) => {
+                const row = wsMaster.addRow([]);
+                row.height = 16;
+                const bg = idx % 2 === 0 ? ALT_ROW : "FFFFFFFF";
+
+                const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff.join(", ") : "Sunday";
+                const shiftName = emp.shift?.shiftName || "N/A";
+                const shiftStart = emp.shift?.startTime || "09:00";
+                const shiftEnd = emp.shift?.endTime || "18:00";
+                const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
+                const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
+
+                const vals = [
+                    idx + 1,
+                    emp.empCode || "—",
+                    emp.user_name || "N/A",
+                    emp.jobInfo?.department || "N/A",
+                    emp.jobInfo?.designation || "N/A",
+                    emp.employmentStatus || "N/A",
+                    weeklyOff,
+                    shiftName,
+                    shiftStart,
+                    shiftEnd,
+                    `${graceIn} min`,
+                    `${graceOut} min`,
+                    emp.email || emp.contactInfo?.email || "N/A",
+                    emp.phone || emp.contactInfo?.phone || "N/A",
+                    emp.jobInfo?.dateOfJoining
+                        ? new Date(emp.jobInfo.dateOfJoining).toLocaleDateString("en-IN")
+                        : "N/A",
+                    emp._id?.toString() || "N/A",
+                ];
+
+                vals.forEach((v, i) => {
+                    const c = row.getCell(i + 1);
+                    c.value = v;
+                    c.font = { name: "Arial", size: 9, bold: i <= 1 };
+                    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+                    c.alignment = {
+                        horizontal: (i >= 2 && i <= 4) || i === 12 || i === 13 ? "left" : "center",
+                        vertical: "middle",
+                    };
+                });
+            });
+
+            wsMaster.columns = [
+                { width: 5 }, { width: 12 }, { width: 22 }, { width: 18 }, { width: 18 },
+                { width: 16 }, { width: 16 },
+                { width: 16 }, { width: 12 }, { width: 12 },
+                { width: 16 }, { width: 16 },
+                { width: 24 }, { width: 16 }, { width: 16 }, { width: 24 },
+            ];
+
+            wsMaster.autoFilter = {
+                from: { row: 2, column: 1 },
+                to: { row: 2, column: mCols },
+            };
+        }
         // Row 2 (premium) or Row 3 (free): group headers
         const grpRowNum = exceedsFreeLimit ? 3 : 2;
         const groups = [

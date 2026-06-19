@@ -46,13 +46,13 @@ export function calculateSalary({
 
     /* ── 2. Calculate per-day rate based on standard 30-day month ── */
     const sal = employee.salaryStructure;
-    
+
     // Calculate total monthly gross to determine per-day LOP rate
     const monthlyBasic = sal.basic ?? 0;
     const monthlyHra = sal.hra ?? 0;
     const monthlyDa = sal.da ?? 0;
     const monthlyBonus = sal.bonus ?? 0;
-    
+
     // Calculate total monthly other allowances
     const monthlyOtherAllowances = (sal.otherAllowence ?? []).map(a => ({
         name: a.name,
@@ -61,8 +61,8 @@ export function calculateSalary({
     const monthlyOtherAllowTotal = monthlyOtherAllowances.reduce((s, a) => s + a.amount, 0);
 
     // Total monthly gross salary
-    const totalMonthlyGross = monthlyBasic + monthlyHra + monthlyDa + 
-                              monthlyBonus + monthlyOtherAllowTotal;
+    const totalMonthlyGross = monthlyBasic + monthlyHra + monthlyDa +
+        monthlyBonus + monthlyOtherAllowTotal;
 
     // Per-day rate for LOP calculation (based on total gross salary)
     const perDayRate = roundTo2(totalMonthlyGross / STANDARD_MONTH_DAYS);
@@ -104,6 +104,9 @@ export function calculateSalary({
         basicEarned + hraEarned + daEarned + bonusEarned + otherAllowTotal + overtimeEarned
     );
 
+    const pfcut = roundTo2(
+        basicEarned + daEarned
+    );
     /* ── 5. Loss of Pay (LOP) — absent days deduction ── */
     // LOP applies to absent days
     const lopDays = Math.max(0, absentDays);
@@ -124,15 +127,15 @@ export function calculateSalary({
         const pRule = payrollRule.deductions;
 
         pf = pRule.pf?.enabled
-            ? computeDeduction(grossSalary, pRule.pf)
+            ? computeDeduction(pfcut, pRule.pf)
             : 0;
 
         esi = pRule.esi?.enabled
-            ? computeDeduction(grossSalary, pRule.esi)
+            ? computeDeduction(pfcut, pRule.esi)
             : 0;
 
         gratuity = pRule.gratuity?.enabled
-            ? computeDeduction(grossSalary, pRule.gratuity)
+            ? computeDeduction(pfcut, pRule.gratuity)
             : 0;
     }
 
@@ -174,7 +177,7 @@ export function calculateSalary({
             bankName: bank.bankName,
             ifsc: bank.ifsc,
             joiningDate: jobInfo.joiningDate
-        },  
+        },
 
         attendance: {
             standardDays: STANDARD_MONTH_DAYS,
