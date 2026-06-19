@@ -432,8 +432,6 @@ export const punchIn = async (req, res) => {
     const validatedLocation = validateLocation(location);
     const now = new Date();
 
-    const sessions = await mongoose.startSession();
-    sessions.startTransaction();
 
 
     // Step 2: Get active subscription
@@ -442,11 +440,10 @@ export const punchIn = async (req, res) => {
       status: "ACTIVE",
       isActive: true,
       endDate: { $gte: new Date() }
-    }).sessions(sessions);
-    logger.info("subscription", subscription);
+    });
+   
     if (!subscription) {
-      await sessions.abortTransaction();
-      sessions.endSession();
+
       return res.status(403).json({
         success: false,
         message: "No active subscription",
