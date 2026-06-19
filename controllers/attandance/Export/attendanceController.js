@@ -1108,7 +1108,14 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 "Employment Status", "Weekly Off",
                 "Shift Name", "Shift Start", "Shift End",
                 "Grace (Late Entry)", "Grace (Early Exit)",
-                "Email", "Phone", "Date of Joining", "Employee ID",
+                "Email", "Phone", "Date of Joining",
+                "basic",
+                "hra",
+                "da",
+                "bonus",
+                "perDay",
+                "perHour",
+                "overtimeRate",
             ];
             const mHdrRow = wsMaster.getRow(2);
             mHdrRow.height = 18;
@@ -1150,7 +1157,14 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     emp.jobInfo?.dateOfJoining
                         ? new Date(emp.jobInfo.dateOfJoining).toLocaleDateString("en-IN")
                         : "N/A",
-                    emp._id?.toString() || "N/A",
+
+                    emp.salaryStructure?.basic || 0,
+                    emp.salaryStructure?.hra || 0,
+                    emp.salaryStructure?.da || 0,
+                    emp.salaryStructure?.bonus || 0,
+                    emp.salaryStructure?.perDay || 0,
+                    emp.salaryStructure?.perHour || 0,
+                    emp.salaryStructure?.overtimeRate || 0,
                 ];
 
                 vals.forEach((v, i) => {
