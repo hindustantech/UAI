@@ -14,13 +14,14 @@ import User from "../../models/userModel.js";
 import { resolveDateRange } from "../../utils/dateRangeResolver.js";
 import Shift from "../../models/Attandance/Shift.js";
 import logger from '../../utils/logger.js';
+import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
 
 
 
 
 export const dailyAttendanceEmp = async (req, res) => {
     try {
-        const { fromdate  } = req.query;
+        const { fromdate } = req.query;
         const employeeId = req.user._id;
         if (!date) {
             return res.status(400).json({
@@ -32,7 +33,7 @@ export const dailyAttendanceEmp = async (req, res) => {
         const targetDate = normalizeToUTCDate(date);
         const nextDate = new Date(targetDate);
         nextDate.setUTCDate(nextDate.getUTCDate() + 1);
-    
+
         const attendance = await Attendance.findOne({
             employeeId,
             date: {
@@ -374,6 +375,21 @@ export const markAttendance = async (req, res) => {
 
         const companyId = companyUser._id;
 
+        const subscription = await Subscription.findOne({
+            company: companyId,
+            status: "ACTIVE",
+            isActive: true,
+            endDate: { $gte: new Date() }
+        });
+
+        if (!subscription) {
+
+            return res.status(403).json({
+                success: false,
+                message: "No active subscription",
+                error: "No active subscription found for this company"
+            });
+        }
         /* ===========================
            3. EMPLOYEE VALIDATION
         =========================== */
