@@ -109,31 +109,66 @@ export const getAllPayrollByCompany = async (req, res) => {
 ───────────────────────────────────────── */
 export const getPayrollByEmployeeAndCompany = async (req, res) => {
     try {
-        const { companyId, employeeId } = req.params;
+        const { companyId, employeeId } = req.params; // employeeId is actually userId from User model
         const { month, year } = req.query;
 
         if (!mongoose.Types.ObjectId.isValid(companyId) || !mongoose.Types.ObjectId.isValid(employeeId)) {
-            return res.status(400).json({ success: false, message: "Invalid companyId or employeeId" });
+            return res.status(400).json({ success: false, message: "Invalid companyId or userId" });
         }
 
-        const filter = { companyId, employeeId };
+        // First, find the Employee document by userId and companyId
+        const employee = await Employee.findOne({
+            userId: employeeId,
+            companyId: companyId
+        });
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "Employee not found for this user in the specified company"
+            });
+        }
+
+        // Now use the Employee's _id for payroll queries
+        const filter = {
+            companyId,
+            employeeId: employee._id // Use Employee document _id
+        };
+
         if (month) filter["payPeriod.month"] = Number(month);
         if (year) filter["payPeriod.year"] = Number(year);
 
         // If month+year given -> expect a single unique record (per schema's unique index)
         if (month && year) {
             const payroll = await Payroll.findOne(filter)
-                .populate("employeeId", "name empCode designation department");
+                .populate({
+                    path: "employeeId",
+                    populate: {
+                        path: "userId",
+                        model: "User",
+                        select: "name email phone profileImage"
+                    }
+                });
 
             if (!payroll) {
-                return res.status(404).json({ success: false, message: "Payroll record not found for this period" });
+                return res.status(404).json({
+                    success: false,
+                    message: "Payroll record not found for this period"
+                });
             }
             return res.status(200).json({ success: true, data: payroll });
         }
 
         // Otherwise return all payroll history for that employee in that company
         const payrolls = await Payroll.find(filter)
-            .populate("employeeId", "name empCode designation department")
+            .populate({
+                path: "employeeId",
+                populate: {
+                    path: "userId",
+                    model: "User",
+                    select: "name email phone profileImage"
+                }
+            })
             .sort({ "payPeriod.year": -1, "payPeriod.month": -1 });
 
         return res.status(200).json({
