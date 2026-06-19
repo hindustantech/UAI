@@ -25,20 +25,20 @@ if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 ═══════════════════════════════════════════════════════════════ */
 async function getAttendanceSummary(employeeId, month, year) {
     const start = new Date(year, month - 1, 1);
-    const end   = new Date(year, month, 0, 23, 59, 59);
+    const end = new Date(year, month, 0, 23, 59, 59);
 
     const records = await Attendance.find({
         employeeId,
         date: { $gte: start, $lte: end }
     }).lean();
 
-    let presentDays   = 0;
-    let absentDays    = 0;
-    let leaveDays     = 0;
-    let holidays      = 0;
+    let presentDays = 0;
+    let absentDays = 0;
+    let leaveDays = 0;
+    let holidays = 0;
     let weeklyOffDays = 0;
-    let halfDays      = 0;
-    let lateDays      = 0;
+    let halfDays = 0;
+    let lateDays = 0;
 
     for (const rec of records) {
         switch (rec.status) {
@@ -50,17 +50,102 @@ async function getAttendanceSummary(employeeId, month, year) {
                 halfDays++;
                 presentDays += 0.5;
                 break;
-            case "absent":   absentDays++;    break;
-            case "leave":    leaveDays++;     break;
-            case "holiday":  holidays++;      break;
+            case "absent": absentDays++; break;
+            case "leave": leaveDays++; break;
+            case "holiday": holidays++; break;
             case "week_off": weeklyOffDays++; break;
-            default:         break;
+            default: break;
         }
     }
 
     return { presentDays, absentDays, leaveDays, holidays, weeklyOffDays, halfDays, lateDays };
 }
 
+
+
+
+
+
+
+/* ─────────────────────────────────────────
+   GET /api/payroll/company/:companyId
+   Get ALL payroll records for a company
+   (optionally filter by month/year/status via query params)
+───────────────────────────────────────── */
+export const getAllPayrollByCompany = async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const { month, year, status } = req.query;
+
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({ success: false, message: "Invalid companyId" });
+        }
+
+        const filter = { companyId };
+        if (month) filter["payPeriod.month"] = Number(month);
+        if (year) filter["payPeriod.year"] = Number(year);
+        if (status) filter.status = status;
+
+        const payrolls = await Payroll.find(filter)
+            .populate("employeeId", "name empCode designation department") // adjust fields as per Employee schema
+            .sort({ "payPeriod.year": -1, "payPeriod.month": -1 });
+
+        return res.status(200).json({
+            success: true,
+            count: payrolls.length,
+            data: payrolls
+        });
+    } catch (error) {
+        console.error("getAllPayrollByCompany error:", error);
+        return res.status(500).json({ success: false, message: "Server error", error: error.message });
+    }
+};
+
+/* ─────────────────────────────────────────
+   GET /api/payroll/company/:companyId/employee/:employeeId
+   Get payroll record(s) for a particular employee
+   within a particular company
+   (optionally filter by month/year via query params)
+───────────────────────────────────────── */
+export const getPayrollByEmployeeAndCompany = async (req, res) => {
+    try {
+        const { companyId, employeeId } = req.params;
+        const { month, year } = req.query;
+
+        if (!mongoose.Types.ObjectId.isValid(companyId) || !mongoose.Types.ObjectId.isValid(employeeId)) {
+            return res.status(400).json({ success: false, message: "Invalid companyId or employeeId" });
+        }
+
+        const filter = { companyId, employeeId };
+        if (month) filter["payPeriod.month"] = Number(month);
+        if (year) filter["payPeriod.year"] = Number(year);
+
+        // If month+year given -> expect a single unique record (per schema's unique index)
+        if (month && year) {
+            const payroll = await Payroll.findOne(filter)
+                .populate("employeeId", "name empCode designation department");
+
+            if (!payroll) {
+                return res.status(404).json({ success: false, message: "Payroll record not found for this period" });
+            }
+            return res.status(200).json({ success: true, data: payroll });
+        }
+
+        // Otherwise return all payroll history for that employee in that company
+        const payrolls = await Payroll.find(filter)
+            .populate("employeeId", "name empCode designation department")
+            .sort({ "payPeriod.year": -1, "payPeriod.month": -1 });
+
+        return res.status(200).json({
+            success: true,
+            count: payrolls.length,
+            data: payrolls
+        });
+    } catch (error) {
+        console.error("getPayrollByEmployeeAndCompany error:", error);
+        return res.status(500).json({ success: false, message: "Server error", error: error.message });
+    }
+};
 
 /* ═══════════════════════════════════════════════════════════════
    1.  POST /api/payroll/generate
@@ -105,15 +190,15 @@ export const generatePayroll = async (req, res) => {
             PayrollRule.findOne({ companyId, isActive: true }).lean()
         ]);
 
-        const attendance  = overrideAttendance ?? await getAttendanceSummary(employeeId, month, year);
-        const monthLabel  = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
-        const startDate   = new Date(year, month - 1, 1);
-        const endDate     = new Date(year, month, 0);
+        const attendance = overrideAttendance ?? await getAttendanceSummary(employeeId, month, year);
+        const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+        const startDate = new Date(year, month - 1, 1);
+        const endDate = new Date(year, month, 0);
 
         const payrollData = calculateSalary({
             employee, attendance, salaryRule, payrollRule,
             payPeriod: { month, year, label: monthLabel, startDate, endDate },
-            payDate:   payDate ? new Date(payDate) : endDate,
+            payDate: payDate ? new Date(payDate) : endDate,
             generatedBy: req.user._id
         });
 
@@ -151,9 +236,9 @@ export const generateBulkPayroll = async (req, res) => {
             PayrollRule.findOne({ companyId, isActive: true }).lean()
         ]);
 
-        const monthLabel      = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
-        const startDate       = new Date(year, month - 1, 1);
-        const endDate         = new Date(year, month, 0);
+        const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+        const startDate = new Date(year, month - 1, 1);
+        const endDate = new Date(year, month, 0);
         const resolvedPayDate = payDate ? new Date(payDate) : endDate;
 
         const results = { created: [], skipped: [], failed: [] };
@@ -173,11 +258,11 @@ export const generateBulkPayroll = async (req, res) => {
                     continue;
                 }
 
-                const attendance  = await getAttendanceSummary(employee._id, month, year);
+                const attendance = await getAttendanceSummary(employee._id, month, year);
                 const payrollData = calculateSalary({
                     employee, attendance, salaryRule, payrollRule,
                     payPeriod: { month, year, label: monthLabel, startDate, endDate },
-                    payDate:   resolvedPayDate,
+                    payDate: resolvedPayDate,
                     generatedBy: req.user._id
                 });
 
@@ -226,7 +311,7 @@ export const getEmployeePayroll = async (req, res) => {
             return res.status(200).json({ success: true, data: payroll });
         }
 
-        const skip  = (Number(page) - 1) * Number(limit);
+        const skip = (Number(page) - 1) * Number(limit);
         const query = { companyId, employeeId };
         if (year) query["payPeriod.year"] = Number(year);
 
@@ -262,9 +347,9 @@ export const getCompanyPayroll = async (req, res) => {
         const query = {
             companyId,
             "payPeriod.month": Number(month),
-            "payPeriod.year":  Number(year)
+            "payPeriod.year": Number(year)
         };
-        if (status)     query.status = status;
+        if (status) query.status = status;
         if (department) query["employeeSnapshot.department"] = department;
 
         const skip = (Number(page) - 1) * Number(limit);
@@ -274,12 +359,12 @@ export const getCompanyPayroll = async (req, res) => {
         ]);
 
         const summary = records.reduce((acc, p) => {
-            acc.totalGross      += p.grossSalary       ?? 0;
-            acc.totalDeductions += p.totalDeductions   ?? 0;
-            acc.totalNet        += p.netSalary         ?? 0;
-            acc.totalPF         += p.statutoryDeductions?.pf  ?? 0;
-            acc.totalESI        += p.statutoryDeductions?.esi ?? 0;
-            acc.totalLOP        += p.lossOfPay?.lopAmount     ?? 0;
+            acc.totalGross += p.grossSalary ?? 0;
+            acc.totalDeductions += p.totalDeductions ?? 0;
+            acc.totalNet += p.netSalary ?? 0;
+            acc.totalPF += p.statutoryDeductions?.pf ?? 0;
+            acc.totalESI += p.statutoryDeductions?.esi ?? 0;
+            acc.totalLOP += p.lossOfPay?.lopAmount ?? 0;
             return acc;
         }, { totalGross: 0, totalDeductions: 0, totalNet: 0, totalPF: 0, totalESI: 0, totalLOP: 0 });
 
@@ -316,14 +401,14 @@ export const updatePayrollStatus = async (req, res) => {
         }
 
         const oldStatus = payroll.status;
-        payroll.status  = status;
-        if (remarks)        payroll.remarks    = remarks;
+        payroll.status = status;
+        if (remarks) payroll.remarks = remarks;
         if (status === "approved") payroll.approvedBy = req.user._id;
-        if (status === "paid")    { payroll.paidAt = new Date(); payroll.paidBy = req.user._id; }
+        if (status === "paid") { payroll.paidAt = new Date(); payroll.paidBy = req.user._id; }
 
         payroll.editLogs.push({
             editedBy: req.user._id,
-            reason:   remarks ?? `Status changed: ${oldStatus} → ${status}`,
+            reason: remarks ?? `Status changed: ${oldStatus} → ${status}`,
             oldValue: { status: oldStatus },
             newValue: { status }
         });
@@ -353,7 +438,7 @@ export const downloadCompanyExcel = async (req, res) => {
         const records = await Payroll.find({
             companyId,
             "payPeriod.month": Number(month),
-            "payPeriod.year":  Number(year)
+            "payPeriod.year": Number(year)
         }).sort({ "employeeSnapshot.name": 1 }).lean();
 
         if (!records.length) {
@@ -370,7 +455,7 @@ export const downloadCompanyExcel = async (req, res) => {
 
         const stream = fs.createReadStream(filePath);
         stream.pipe(res);
-        stream.on("end", () => fs.unlink(filePath, () => {}));
+        stream.on("end", () => fs.unlink(filePath, () => { }));
 
     } catch (err) {
         console.error("[downloadCompanyExcel]", err);
@@ -394,7 +479,7 @@ export const downloadSalarySlipPDF = async (req, res) => {
         const payroll = await Payroll.findOne({ _id: payrollId, companyId }).lean();
         if (!payroll) return res.status(404).json({ success: false, message: "Payroll not found." });
 
-        const emp      = payroll.employeeSnapshot;
+        const emp = payroll.employeeSnapshot;
         const fileName = `salary_slip_${emp?.empCode ?? payrollId}_${payroll.payPeriod.year}_${String(payroll.payPeriod.month).padStart(2, "0")}.pdf`;
         const filePath = path.join(TMP_DIR, fileName);
 
@@ -405,7 +490,7 @@ export const downloadSalarySlipPDF = async (req, res) => {
 
         const stream = fs.createReadStream(filePath);
         stream.pipe(res);
-        stream.on("end", () => fs.unlink(filePath, () => {}));
+        stream.on("end", () => fs.unlink(filePath, () => { }));
 
     } catch (err) {
         console.error("[downloadSalarySlipPDF]", err);

@@ -8,7 +8,8 @@ import {
     getCompanyPayroll,
     updatePayrollStatus,
     downloadCompanyExcel,
-    downloadSalarySlipPDF
+    downloadSalarySlipPDF,
+    getAllPayrollByCompany, getPayrollByEmployeeAndCompany
 } from "../../controllers/payrollController.js";
 
 
@@ -37,12 +38,19 @@ router.post(
     authMiddleware,
     generatePayroll
 );
+// Get all payroll records for a company
+// e.g. GET /api/payroll/company/64f1.../?month=6&year=2025&status=paid
+router.get("/getAllPayrollByCompany/:companyId", getAllPayrollByCompany);
+
+// Get payroll for a particular employee within a particular company
+// e.g. GET /api/payroll/company/64f1.../employee/64f2.../?month=6&year=2025
+router.get("/getPayrollByEmployeeAndCompany/:companyId/employee/:employeeId", getPayrollByEmployeeAndCompany);
 
 /**
  * POST /api/payroll/generate-bulk
  * Generate payroll for ALL active employees of the company
  * Body: { month, year, payDate? }
- * Role: admin | super_admin
+
  */
 router.post(
     "/generate-bulk",
