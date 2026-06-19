@@ -430,7 +430,7 @@ export const punchIn = async (req, res) => {
     const validatedLocation = validateLocation(location);
     const now = new Date();
 
-
+    const session = await mongoose.startSession();
 
 
     // Step 2: Get active subscription
