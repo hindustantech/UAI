@@ -1104,18 +1104,18 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             wsMaster.getRow(1).height = 26;
 
             const mHeaders = [
-                "#", "referalCode", "Emp Code", "Emp Name", "Department", "Designation",
+                "#", "ReferalCode", "Emp Code", "Emp Name", "Department", "Designation",
                 "Employment Status", "Weekly Off",
                 "Shift Name", "Shift Start", "Shift End",
                 "Grace (Late Entry)", "Grace (Early Exit)",
                 "Email", "Phone", "Date of Joining",
                 "basic",
-                "hra",
-                "da",
-                "bonus",
-                "perDay",
-                "perHour",
-                "overtimeRate",
+                "HRA",
+                "DA",
+                "Bonus",
+                "PerDay",
+                "PerHour",
+                "OvertimeRate",
             ];
             const mHdrRow = wsMaster.getRow(2);
             mHdrRow.height = 18;
@@ -1142,6 +1142,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const vals = [
                     idx + 1,
                     emp.empCode || "—",
+                    emp.referalCode||'_',
                     emp.user_name || "N/A",
                     emp.jobInfo?.department || "N/A",
                     emp.jobInfo?.designation || "N/A",
