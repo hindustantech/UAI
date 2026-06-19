@@ -9,6 +9,7 @@ import Employee from "../../../models/Attandance/Employee.js";
 import { v4 as uuidv4 } from 'uuid';
 import { generateUniqueCustomerIdWithRetry } from "../../../utils/nanoid.js";
 import { Subscription } from "../../../models/Attandance/subscration/Subscription.js";
+import logger from "../../../utils/logger.js";
 
 /**
  * Calculate distance between two geographic points using Haversine formula
@@ -408,6 +409,7 @@ const normalizeLocation = (location) => {
   };
 };
 
+
 // Upload image to Cloudinary
 const uploadImage = async (file, folder) => {
   if (!file || !file.buffer) return null;
@@ -430,25 +432,27 @@ export const punchIn = async (req, res) => {
     const validatedLocation = validateLocation(location);
     const now = new Date();
 
+    const sessions = await mongoose.startSession();
+    sessions.startTransaction();
 
 
     // Step 2: Get active subscription
-    // const subscription = await Subscription.findOne({
-    //   company: companyId,
-    //   status: "ACTIVE",
-    //   isActive: true,
-    //   endDate: { $gte: new Date() }
-    // }).session(session);
-
-    // if (!subscription) {
-    //   await session.abortTransaction();
-    //   session.endSession();
-    //   return res.status(403).json({
-    //     success: false,
-    //     message: "No active subscription",
-    //     error: "No active subscription found for this company"
-    //   });
-    // }
+    const subscription = await Subscription.findOne({
+      company: companyId,
+      status: "ACTIVE",
+      isActive: true,
+      endDate: { $gte: new Date() }
+    }).sessions(sessions);
+    logger.info("subscription", subscription);
+    if (!subscription) {
+      await sessions.abortTransaction();
+      sessions.endSession();
+      return res.status(403).json({
+        success: false,
+        message: "No active subscription",
+        error: "No active subscription found for this company"
+      });
+    }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
