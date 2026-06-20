@@ -189,12 +189,12 @@ export const getPayrollByEmployeeAndCompany = async (req, res) => {
 export const generatePayroll = async (req, res) => {
     try {
         const { employeeId, month, year, payDate, overrideAttendance } = req.body;
-        let companyId
-        if (req.user.type == 'partner') {
-
+        let companyId;
+        if (req.user.type === 'partner') {
             companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
         }
-        companyId = req.user.companyId;
 
         if (!employeeId || !month || !year) {
             return res.status(400).json({ success: false, message: "employeeId, month, and year are required." });
@@ -259,13 +259,12 @@ export const generatePayroll = async (req, res) => {
 export const generateBulkPayroll = async (req, res) => {
     try {
         const { month, year, payDate } = req.body;
-        let companyId
-        if (req.user.type == 'partner') {
-
+        let companyId;
+        if (req.user.type === 'partner') {
             companyId = req.user.id;
-            console.log("companyId", companyId);
+        } else {
+            companyId = req.user.companyId;
         }
-        companyId = req.user.companyId;
 
         if (!month || !year) {
             return res.status(400).json({ success: false, message: "month and year are required." });
@@ -340,12 +339,12 @@ export const getEmployeePayroll = async (req, res) => {
     try {
         const { employeeId } = req.params;
         const { month, year, page = 1, limit = 12 } = req.query;
-        let companyId
-        if (req.user.type == 'partner') {
-
+        let companyId;
+        if (req.user.type === 'partner') {
             companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
         }
-        companyId = req.user.companyId;
 
         if (!mongoose.Types.ObjectId.isValid(employeeId)) {
             return res.status(400).json({ success: false, message: "Invalid employeeId." });
@@ -388,12 +387,12 @@ export const getEmployeePayroll = async (req, res) => {
 ═══════════════════════════════════════════════════════════════ */
 export const getCompanyPayroll = async (req, res) => {
     try {
-        let companyId
-        if (req.user.type == 'partner') {
-
+        let companyId;
+        if (req.user.type === 'partner') {
             companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
         }
-        companyId = req.user.companyId;
         const { month, year, department, status, page = 1, limit = 50 } = req.query;
 
         if (!month || !year) {
@@ -443,12 +442,12 @@ export const updatePayrollStatus = async (req, res) => {
     try {
         const { payrollId } = req.params;
         const { status, remarks } = req.body;
-        let companyId
-        if (req.user.type == 'partner') {
-
+        let companyId;
+        if (req.user.type === 'partner') {
             companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
         }
-        companyId = req.user.companyId;
 
         const ALLOWED = ["approved", "paid", "cancelled"];
         if (!ALLOWED.includes(status)) {
@@ -489,12 +488,12 @@ export const updatePayrollStatus = async (req, res) => {
 ═══════════════════════════════════════════════════════════════ */
 export const downloadCompanyExcel = async (req, res) => {
     try {
-        let companyId
-        if (req.user.type == 'partner') {
-
+        let companyId;
+        if (req.user.type === 'partner') {
             companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
         }
-        companyId = req.user.companyId;
         const { month, year } = req.query;
 
         if (!month || !year) {
@@ -536,12 +535,12 @@ export const downloadCompanyExcel = async (req, res) => {
 export const downloadSalarySlipPDF = async (req, res) => {
     try {
         const { payrollId } = req.params;
-        let companyId
-        if (req.user.type == 'partner') {
-
+        let companyId;
+        if (req.user.type === 'partner') {
             companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
         }
-        companyId = req.user.companyId;
 
         if (!mongoose.Types.ObjectId.isValid(payrollId)) {
             return res.status(400).json({ success: false, message: "Invalid payrollId." });

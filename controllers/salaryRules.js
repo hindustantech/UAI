@@ -8,7 +8,12 @@ import mongoose from "mongoose";
  */
 export const createSalaryRule = async (req, res) => {
     try {
-        const companyId = req.user._id;
+        let companyId;
+        if (req.user.type === 'partner') {
+            companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
+        }
 
         let salaryRule = await SalaryRule.findOne({ companyId });
 
@@ -52,12 +57,12 @@ export const createSalaryRule = async (req, res) => {
 
 export const getSalaryRuleById = async (req, res) => {
     try {
-        let companyId
-        if (req.user.type == 'partner') {
-
+        let companyId;
+        if (req.user.type === 'partner') {
             companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
         }
-        companyId = req.user.companyId;
         const { id } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -96,12 +101,12 @@ export const getSalaryRuleById = async (req, res) => {
  */
 export const getCompanySalaryRule = async (req, res) => {
     try {
-        let companyId
-        if (req.user.type == 'partner') {
-
+        let companyId;
+        if (req.user.type === 'partner') {
             companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
         }
-        companyId = req.user.companyId;
 
         const salaryRule = await SalaryRule.findOne({ companyId });
 
@@ -123,7 +128,12 @@ export const getCompanySalaryRule = async (req, res) => {
  */
 export const updateSalaryRule = async (req, res) => {
     try {
-        const companyId = req.user._id || req.user.id || req.user.companyId;
+        let companyId;
+        if (req.user.type === 'partner') {
+            companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
+        }
 
         const salaryRule = await SalaryRule.findOneAndUpdate(
             { companyId },
