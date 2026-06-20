@@ -1284,3 +1284,227 @@ export const exportDataSalesCSV = async (req, res) => {
         });
     }
 };
+
+
+
+/* ============================================================
+HELPERS
+============================================================ */
+
+// Safely pull [lng, lat] out of a geoPoint, or return blanks
+const coords = (geo) => {
+    if (!geo || !Array.isArray(geo.coordinates)) return { lng: "", lat: "" };
+    return { lng: geo.coordinates[0], lat: geo.coordinates[1] };
+};
+
+const sendCsv = (res, filename, rows, fields) => {
+    if (!rows.length) {
+        return res.status(404).json({ success: false, message: "No data found for the given filters" });
+    }
+    const parser = new Parser({ fields });
+    const csv = parser.parse(rows);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.status(200).send(csv);
+};
+
+
+
+/* ============================================================
+REPORT 1: CRM REPORT
+Customer data + punch-in data, one row per session
+GET /api/reports/crm?companyId=&startDate=&endDate=
+============================================================ */
+export const exportCrmReport = async (req, res) => {
+    try {
+        const { companyId, startDate, endDate } = req.query;
+
+        const filter = {};
+        if (companyId) filter.companyId = companyId;
+
+        if (startDate || endDate) {
+            filter.createdAt = {};
+            if (startDate) filter.createdAt.$gte = new Date(startDate);
+            if (endDate) filter.createdAt.$lte = new Date(endDate);
+        }
+
+        const sessions = await SalesSession.find(filter)
+            .populate("employeeId", "name email phone")
+            .populate("createdBy", "name email")
+            .lean();
+
+        const rows = sessions.map((s) => {
+            const custLoc = coords(s.customer?.location);
+            const punchInLoc = coords(s.punchInLocation);
+
+            return {
+                sessionId: s.sessionId,
+                status: s.status,
+                salesStatus: s.SalesStatus,
+
+                // ---- Customer data ----
+                customerId: s.customer?.customerId || "",
+                companyName: s.customer?.companyName || "",
+                contactName: s.customer?.contactName || "",
+                phoneNumber: s.customer?.phoneNumber || "",
+                address: s.customer?.address || "",
+                landmark: s.customer?.landmark || "",
+                customerLng: custLoc.lng,
+                customerLat: custLoc.lat,
+                shopPhotoCount: s.customer?.shopPhoto?.length || 0,
+
+                // ---- Punch-in data ----
+                employeeName: s.employeeId?.name || "",
+                employeeEmail: s.employeeId?.email || "",
+                punchInTime: s.punchInTime ? new Date(s.punchInTime).toISOString() : "",
+                punchInLng: punchInLoc.lng,
+                punchInLat: punchInLoc.lat,
+
+                createdAt: s.createdAt ? new Date(s.createdAt).toISOString() : "",
+            };
+        });
+
+        const fields = [
+            "sessionId", "status", "salesStatus",
+            "customerId", "companyName", "contactName", "phoneNumber",
+            "address", "landmark", "customerLng", "customerLat", "shopPhotoCount",
+            "employeeName", "employeeEmail", "punchInTime", "punchInLng", "punchInLat",
+            "createdAt",
+        ];
+
+        return sendCsv(res, `crm-report-${Date.now()}.csv`, rows, fields);
+    } catch (err) {
+        console.error("exportCrmReport error:", err);
+        return res.status(500).json({ success: false, message: "Failed to generate CRM report" });
+    }
+};
+
+/* ============================================================
+REPORT 2: SALES PERSON EXIT REPORT
+ALL data for sessions belonging to one particular person
+GET /api/reports/sales-person-exit?personId=&startDate=&endDate=
+============================================================ */
+export const exportSalesPersonExitReport = async (req, res) => {
+    try {
+        const { personId, startDate, endDate } = req.query;
+
+        if (!personId) {
+            return res.status(400).json({ success: false, message: "personId is required" });
+        }
+
+        const filter = {
+            $or: [
+                { employeeId: personId },
+                { createdBy: personId },
+                { assignedTo: personId },
+            ],
+        };
+
+        if (startDate || endDate) {
+            filter.createdAt = {};
+            if (startDate) filter.createdAt.$gte = new Date(startDate);
+            if (endDate) filter.createdAt.$lte = new Date(endDate);
+        }
+
+        const sessions = await SalesSession.find(filter)
+            .populate("employeeId", "name email phone")
+            .populate("createdBy", "name email")
+            .populate("assignedTo", "name email")
+            .lean();
+
+        const rows = sessions.map((s) => {
+            const custLoc = coords(s.customer?.location);
+            const punchInLoc = coords(s.punchInLocation);
+            const punchOutLoc = coords(s.punchOutLocation);
+
+            return {
+                sessionId: s.sessionId,
+                status: s.status,
+                salesStatus: s.SalesStatus,
+                formCompleted: s.formCompleted,
+
+                // ---- Customer ----
+                customerId: s.customer?.customerId || "",
+                companyName: s.customer?.companyName || "",
+                contactName: s.customer?.contactName || "",
+                phoneNumber: s.customer?.phoneNumber || "",
+                address: s.customer?.address || "",
+                landmark: s.customer?.landmark || "",
+                customerLng: custLoc.lng,
+                customerLat: custLoc.lat,
+
+                // ---- People ----
+                employeeName: s.employeeId?.name || "",
+                employeeEmail: s.employeeId?.email || "",
+                createdByName: s.createdBy?.name || "",
+                assignedTo: (s.assignedTo || []).map((u) => u.name || u._id).join("; "),
+
+                // ---- Punch info ----
+                punchInTime: s.punchInTime ? new Date(s.punchInTime).toISOString() : "",
+                punchInLng: punchInLoc.lng,
+                punchInLat: punchInLoc.lat,
+                punchOutTime: s.punchOutTime ? new Date(s.punchOutTime).toISOString() : "",
+                punchOutLng: punchOutLoc.lng,
+                punchOutLat: punchOutLoc.lat,
+                punchOutAddress: s.punchOutAddress || "",
+                lastPunchAt: s.lastPunchAt ? new Date(s.lastPunchAt).toISOString() : "",
+
+                // ---- Route / distance ----
+                totalDistance: s.totalDistance || 0,
+                duration: s.duration || 0,
+                routePointsCount: (s.routePath || []).length,
+
+                // ---- Logs (summarized counts + raw JSON for full detail) ----
+                visitLogsCount: (s.visitLogs || []).length,
+                salesLogsCount: (s.salesLogs || []).length,
+                meetingLogsCount: (s.meetingLogs || []).length,
+                visitNotesCount: (s.visitNotes || []).length,
+
+                visitLogsJson: JSON.stringify(s.visitLogs || []),
+                salesLogsJson: JSON.stringify(s.salesLogs || []),
+                meetingLogsJson: JSON.stringify(s.meetingLogs || []),
+                visitNotesJson: JSON.stringify(s.visitNotes || []),
+                routePathJson: JSON.stringify(s.routePath || []),
+
+                // ---- Next meeting ----
+                nextMeetingDecided: s.nextMeeting?.decided || false,
+                nextMeetingDate: s.nextMeeting?.date ? new Date(s.nextMeeting.date).toISOString() : "",
+                nextMeetingTime: s.nextMeeting?.time || "",
+                nextMeetingNotes: s.nextMeeting?.notes || "",
+
+                // ---- Evidence ----
+                evidenceVisitNotes: s.evidence?.visitNotes || "",
+                evidenceVisitPhotoUrl: s.evidence?.visitPhoto?.url || "",
+
+                createdAt: s.createdAt ? new Date(s.createdAt).toISOString() : "",
+                updatedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : "",
+            };
+        });
+
+        const fields = [
+            "sessionId", "status", "salesStatus", "formCompleted",
+            "customerId", "companyName", "contactName", "phoneNumber", "address", "landmark",
+            "customerLng", "customerLat",
+            "employeeName", "employeeEmail", "createdByName", "assignedTo",
+            "punchInTime", "punchInLng", "punchInLat",
+            "punchOutTime", "punchOutLng", "punchOutLat", "punchOutAddress", "lastPunchAt",
+            "totalDistance", "duration", "routePointsCount",
+            "visitLogsCount", "salesLogsCount", "meetingLogsCount", "visitNotesCount",
+            "visitLogsJson", "salesLogsJson", "meetingLogsJson", "visitNotesJson", "routePathJson",
+            "nextMeetingDecided", "nextMeetingDate", "nextMeetingTime", "nextMeetingNotes",
+            "evidenceVisitNotes", "evidenceVisitPhotoUrl",
+            "createdAt", "updatedAt",
+        ];
+
+        return sendCsv(res, `sales-person-exit-report-${personId}-${Date.now()}.csv`, rows, fields);
+    } catch (err) {
+        console.error("exportSalesPersonExitReport error:", err);
+        return res.status(500).json({ success: false, message: "Failed to generate exit report" });
+    }
+};
+
+
+
+
+
