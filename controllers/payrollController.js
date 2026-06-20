@@ -263,6 +263,7 @@ export const generateBulkPayroll = async (req, res) => {
         if (req.user.type == 'partner') {
 
             companyId = req.user.id;
+            console.log("companyId", companyId);
         }
         companyId = req.user.companyId;
 
