@@ -430,7 +430,7 @@ export const exportSalesPersonReport = async (req, res) => {
         ============================================================ */
 
         const timestamp = Date.now();
-        const sanitizedFileName = `sales_report_${salesPersonIdStr}_${timestamp}.csv`
+        const sanitizedFileName = `Sales_Visit_Report_${salesPersonIdStr}_${timestamp}.csv`
             .replace(/[^a-zA-Z0-9_.-]/g, '_'); // Sanitize filename
 
         filePath = path.join(exportDir, sanitizedFileName);
@@ -868,7 +868,7 @@ export const exportSalesReport = async (req, res) => {
             ? `${startDate.split('T')[0]}_to_${endDate.split('T')[0]}`
             : new Date().toISOString().split('T')[0];
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `Sales_Report_${companyName}_${employeeName}_${dateRange}_${timestamp}.csv`;
+        const filename = `Sales_Visit_Report_${companyName}_${employeeName}_${dateRange}_${timestamp}.csv`;
 
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -1265,7 +1265,7 @@ export const exportDataSalesCSV = async (req, res) => {
         const csvContent = csvRows.join("\n");
 
         // ── Send file ──────────────────────────────────────────────
-        const filename = `sales_summary_${rangeFrom}_to_${rangeTo}.csv`;
+        const filename = ` Sales_Audit_Report${rangeFrom}_to_${rangeTo}.csv`;
 
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader(
