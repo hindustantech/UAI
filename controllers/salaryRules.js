@@ -8,7 +8,7 @@ import mongoose from "mongoose";
  */
 export const createSalaryRule = async (req, res) => {
     try {
-        const companyId = req.user.companyId || req.user._id;
+        const companyId =  req.user._id;
 
         let salaryRule = await SalaryRule.findOne({ companyId });
 
@@ -52,7 +52,7 @@ export const createSalaryRule = async (req, res) => {
 
 export const getSalaryRuleById = async (req, res) => {
     try {
-        const companyId = req.user.companyId || req.user._id;
+        const companyId = req.user._id || req.user.companyId;
         const { id } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -91,7 +91,7 @@ export const getSalaryRuleById = async (req, res) => {
  */
 export const getCompanySalaryRule = async (req, res) => {
     try {
-        const companyId = req.user.companyId || req.user._id;
+        const companyId = req.user._id || req.user.companyId;
 
         const salaryRule = await SalaryRule.findOne({ companyId });
 
@@ -113,7 +113,7 @@ export const getCompanySalaryRule = async (req, res) => {
  */
 export const updateSalaryRule = async (req, res) => {
     try {
-        const companyId = req.user.companyId || req.user._id || req.user.id;
+        const companyId = req.user._id || req.user.id || req.user.companyId;
 
         const salaryRule = await SalaryRule.findOneAndUpdate(
             { companyId },
@@ -150,7 +150,7 @@ export const updateSalaryRule = async (req, res) => {
  */
 export const deleteSalaryRule = async (req, res) => {
     try {
-        const companyId = req.user.companyId || req.user._id;
+        const companyId =  req.user._id;
 
         const salaryRule = await SalaryRule.findOneAndDelete({
             companyId
