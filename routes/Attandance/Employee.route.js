@@ -20,7 +20,7 @@ import {
     downloadDeductionTemplate,
     togglePayslipDownloadForCompany,
     getPayslipDownloadStatus,
-    getPayslipDownloadStatus
+    getPayslipAllDownloadStatus
 } from "../../controllers/attandance/Employee.js";
 
 /* ===============================
@@ -56,6 +56,11 @@ router.patch(
     "/togglePayslipDownloadForCompany",
     authMiddleware,
     togglePayslipDownloadForCompany
+);
+router.get(
+    "/getPayslipAllDownloadStatus",
+    authMiddleware,
+    getPayslipAllDownloadStatus
 );
 router.get(
     "/getPayslipDownloadStatus",
