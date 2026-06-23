@@ -19,6 +19,7 @@ import {
     uploadEmployeeDeductions,
     downloadDeductionTemplate,
     togglePayslipDownloadForCompany,
+    getPayslipDownloadStatus,
     getPayslipDownloadStatus
 } from "../../controllers/attandance/Employee.js";
 

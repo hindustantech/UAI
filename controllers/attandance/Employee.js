@@ -1724,3 +1724,40 @@ export const getPayslipDownloadStatus = async (req, res) => {
         });
     }
 };
+
+
+
+export const getPayslipDownloadStatus = async (req, res) => {
+    try {
+        let companyId;
+        if (req.user.type === 'partner') {
+            companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
+        }
+
+        const employee = await Employee.findOne({
+            companyId
+        }).select("AllowDownlodslip");
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "No employees found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            allowDownloadSlip: employee.AllowDownlodslip
+        });
+
+    } catch (error) {
+        console.error("getPayslipDownloadStatus:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        });
+    }
+};
