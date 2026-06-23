@@ -1692,3 +1692,35 @@ export const togglePayslipDownloadForCompany = async (req, res) => {
         });
     }
 };
+
+
+
+
+
+export const getPayslipDownloadStatus = async (req, res) => {
+    try {
+        const employee = await Employee.findOne({
+            userId: req.user._id
+        }).select("AllowDownlodslip");
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "Employee not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            allowDownloadSlip: employee.AllowDownlodslip
+        });
+
+    } catch (error) {
+        console.error("getPayslipDownloadStatus:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        });
+    }
+};

@@ -18,8 +18,8 @@ import {
     getSalesEmployeesByCompanyPaginated,
     uploadEmployeeDeductions,
     downloadDeductionTemplate,
-    togglePayslipDownloadForCompany
-
+    togglePayslipDownloadForCompany,
+    getPayslipDownloadStatus
 } from "../../controllers/attandance/Employee.js";
 
 /* ===============================
@@ -51,10 +51,15 @@ router.post(
     upload.single("file"),
     uploadEmployeeDeductions
 );
-router.post(
+router.patch(
     "/togglePayslipDownloadForCompany",
     authMiddleware,
     togglePayslipDownloadForCompany
+);
+router.get(
+    "/getPayslipDownloadStatus",
+    authMiddleware,
+    getPayslipDownloadStatus
 );
 
 router.get(
