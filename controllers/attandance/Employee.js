@@ -1727,7 +1727,7 @@ export const getPayslipDownloadStatus = async (req, res) => {
 
 
 
-export const getPayslipDownloadStatus = async (req, res) => {
+export const getPayslipAllDownloadStatus = async (req, res) => {
     try {
         let companyId;
         if (req.user.type === 'partner') {
