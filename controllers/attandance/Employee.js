@@ -1647,3 +1647,48 @@ export const deactivateEmployee = async (req, res) => {
     }
 };
 
+
+
+
+export const togglePayslipDownloadForCompany = async (req, res) => {
+    try {
+        const { allow } = req.body; // true / false
+
+        let companyId;
+        if (req.user.type === 'partner') {
+            companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
+        }
+
+        if (typeof allow !== "boolean") {
+            return res.status(400).json({
+                success: false,
+                message: "allow must be true or false"
+            });
+        }
+
+        const result = await Employee.updateMany(
+            { companyId },
+            {
+                $set: {
+                    AllowDownlodslip: allow
+                }
+            }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: `Payslip download ${allow ? "enabled" : "disabled"} for all employees`,
+            modifiedCount: result.modifiedCount
+        });
+
+    } catch (error) {
+        console.error("togglePayslipDownloadForCompany:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        });
+    }
+};

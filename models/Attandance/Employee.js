@@ -99,6 +99,10 @@ const employeeSchema = new mongoose.Schema({
             }
         }]
     },
+    AllowDownlodslip: {
+        type: Boolean,
+        default: false
+    },
     bankDetails: {
         accountNo: String,
         ifsc: String,
