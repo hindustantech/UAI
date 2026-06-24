@@ -441,7 +441,7 @@ export const punchIn = async (req, res) => {
       isActive: true,
       endDate: { $gte: new Date() }
     });
-   
+
     if (!subscription) {
 
       return res.status(403).json({
@@ -934,6 +934,7 @@ const buildGeoPoint = (location) => {
  * @param {Object} [req.body.deviceInfo] - Device info {deviceId, os, appVersion}
  * @param {Object} res - Express response
  */
+
 export const punchOut = async (req, res) => {
   const dbSession = await mongoose.startSession();
   let isCommitted = false;
@@ -944,6 +945,7 @@ export const punchOut = async (req, res) => {
     const { id, companyId } = req.user;
     const { sessionId, location, deviceInfo } = req.body;
     const userId = id;
+
     /* ============================
        1. VALIDATION
     ============================ */
@@ -954,7 +956,10 @@ export const punchOut = async (req, res) => {
     /* ============================
        2. FETCH EMPLOYEE (ONLY FOR ATTENDANCE)
     ============================ */
-    console.log(`Fetching employee for userId: ${userId}, companyId: ${companyId}, employmentStatus: active`);
+    console.log(
+      `Fetching employee for userId: ${userId}, companyId: ${companyId}, employmentStatus: active`
+    );
+
     const employee = await Employee.findOne({
       userId,
       companyId,
@@ -965,7 +970,7 @@ export const punchOut = async (req, res) => {
       throw new Error("Employee not found or inactive");
     }
 
-    const employeeId = employee._id; // ✅ ONLY FOR ATTENDANCE
+    const employeeId = employee._id;
 
     /* ============================
        3. LOCATION VALIDATION
@@ -988,7 +993,7 @@ export const punchOut = async (req, res) => {
     );
 
     /* ============================
-       4. FETCH SESSION (USE userId)
+       4. FETCH SESSION
     ============================ */
     const activeSession = await SalesSession.findOne({
       sessionId,
@@ -1034,36 +1039,75 @@ export const punchOut = async (req, res) => {
     }
 
     /* ============================
-       6. UPDATE SESSION (userId)
+       6. FIND OPEN VISIT LOG INDEX
+       The latest visitLog entry for this user
+       that has punchInTime but no punchOutTime
     ============================ */
-    const updatedSession = await SalesSession.findOneAndUpdate(
-      {
-        _id: activeSession._id,
-        status: "in_progress"
+    const openVisitLogIndex = activeSession.visitLogs.reduce(
+      (foundIndex, log, index) => {
+        const isSameUser = log.userId?.toString() === userId.toString();
+        const isOpen = log.punchInTime && !log.punchOutTime;
+        // Keep the LAST matching index in case of multiple punch-ins
+        return isSameUser && isOpen ? index : foundIndex;
       },
+      -1
+    );
+
+    console.log(
+      `openVisitLogIndex: ${openVisitLogIndex} | visitLogs.length: ${activeSession.visitLogs.length}`
+    );
+
+    /* ============================
+       7. BUILD SESSION UPDATE
+    ============================ */
+    const sessionSetFields = {
+      status: "completed",
+      punchOutTime: now,
+      punchOutLocation: punchOutGeo,
+      duration: durationSeconds,
+      userId
+    };
+
+    // ✅ Close the open visitLog entry with punchOutTime + punchOutLocation
+    //    Uses positional dot-notation: visitLogs.<index>.field
+    if (openVisitLogIndex !== -1) {
+      sessionSetFields[`visitLogs.${openVisitLogIndex}.punchOutTime`] = now;
+      sessionSetFields[`visitLogs.${openVisitLogIndex}.punchOutLocation`] = punchOutGeo;
+    } else {
+      // Safety fallback: no open visitLog found (e.g. legacy data).
+      // Push a complete visitLog entry so duration is never lost.
+      console.warn(
+        `No open visitLog found for userId ${userId} in session ${sessionId}. ` +
+        `Falling back to session-level punchInTime for duration.`
+      );
+    }
+
+    const updatedSession = await SalesSession.findOneAndUpdate(
+      { _id: activeSession._id, status: "in_progress" },
       {
-        $set: {
-          status: "completed",
-          punchOutTime: now,
-          punchOutLocation: punchOutGeo,
-          duration: durationSeconds,
-          userId // ✅ keep userId
-        },
+        $set: sessionSetFields,
         $push: {
           routePath: {
-            userId, // ✅ NOT employeeId
+            userId,
             location: punchOutGeo,
             timestamp: now
-          }
+          },
+          // ✅ Fallback: if no open visitLog was found, push a complete one now
+          ...(openVisitLogIndex === -1 && {
+            visitLogs: {
+              userId,
+              punchInTime: activeSession.punchInTime,  // use session-level value
+              punchInLocation: activeSession.punchInLocation,
+              punchOutTime: now,
+              punchOutLocation: punchOutGeo
+            }
+          })
         },
         $inc: {
           totalDistance: distanceForThisPoint
         }
       },
-      {
-        new: true,
-        session: dbSession
-      }
+      { new: true, session: dbSession }
     );
 
     if (!updatedSession) {
@@ -1071,14 +1115,14 @@ export const punchOut = async (req, res) => {
     }
 
     /* ============================
-       7. ATTENDANCE UPDATE (employeeId ONLY)
+       8. ATTENDANCE UPDATE
     ============================ */
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const attendance = await Attendance.findOne({
       companyId,
-      employeeId, // ✅ ONLY HERE
+      employeeId,
       date: today
     }).session(dbSession);
 
@@ -1108,13 +1152,11 @@ export const punchOut = async (req, res) => {
         { session: dbSession }
       );
     } else {
-      console.warn(
-        `No attendance record for employee ${employeeId}`
-      );
+      console.warn(`No attendance record for employee ${employeeId}`);
     }
 
     /* ============================
-       8. COMMIT
+       9. COMMIT
     ============================ */
     await dbSession.commitTransaction();
     isCommitted = true;
@@ -1124,8 +1166,11 @@ export const punchOut = async (req, res) => {
       message: "Punch-out successful",
       data: {
         userId,
-        employeeId, // for reference only
-        sessionId: updatedSession._id
+        employeeId,
+        sessionId: updatedSession._id,
+        // ✅ Return duration so client can verify
+        durationSeconds,
+        visitLogsClosed: openVisitLogIndex !== -1 ? openVisitLogIndex : "fallback"
       }
     });
 

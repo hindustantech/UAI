@@ -1035,48 +1035,65 @@ export const exportDataSalesCSV = async (req, res) => {
             {
                 $addFields: {
                     sessionCallCount: {
-                        $size: {
-                            $filter: {
-                                input: { $ifNull: ["$visitLogs", []] },
-                                as: "v",
-                                cond: { $ifNull: ["$$v", false] }
-                            }
-                        }
+                        $size: { $ifNull: ["$visitLogs", []] }
                     },
+
                     sessionCallDuration: {
-                        $sum: {
-                            $map: {
-                                input: { $ifNull: ["$visitLogs", []] },
-                                as: "v",
-                                in: {
-                                    $cond: [
-                                        {
-                                            $and: [
-                                                { $ifNull: ["$$v.punchInTime", false] },
-                                                { $ifNull: ["$$v.punchOutTime", false] }
-                                            ]
-                                        },
-                                        {
-                                            $divide: [
-                                                {
-                                                    $subtract: [
-                                                        "$$v.punchOutTime",
-                                                        "$$v.punchInTime"
+                        $reduce: {
+                            input: { $ifNull: ["$visitLogs", []] },
+                            initialValue: 0,
+                            in: {
+                                $add: [
+                                    "$$value",
+                                    {
+                                        $let: {
+                                            vars: {
+                                                // ✅ Use visitLog.punchOutTime if it exists,
+                                                //    otherwise fall back to session-level punchOutTime
+                                                effectivePunchOut: {
+                                                    $ifNull: [
+                                                        "$$this.punchOutTime",
+                                                        "$punchOutTime"   // ← session-level fallback
                                                     ]
                                                 },
-                                                60000 // ms → minutes
-                                            ]
-                                        },
-                                        0
-                                    ]
-                                }
+                                                // ✅ Use visitLog.punchInTime if it exists,
+                                                //    otherwise fall back to session-level punchInTime
+                                                effectivePunchIn: {
+                                                    $ifNull: [
+                                                        "$$this.punchInTime",
+                                                        "$punchInTime"    // ← session-level fallback
+                                                    ]
+                                                }
+                                            },
+                                            in: {
+                                                $cond: {
+                                                    if: {
+                                                        $and: [
+                                                            { $gt: ["$$effectivePunchIn", null] },
+                                                            { $gt: ["$$effectivePunchOut", null] },
+                                                            // Guard: punchOut must be after punchIn
+                                                            { $gt: ["$$effectivePunchOut", "$$effectivePunchIn"] }
+                                                        ]
+                                                    },
+                                                    then: {
+                                                        $divide: [
+                                                            { $subtract: ["$$effectivePunchOut", "$$effectivePunchIn"] },
+                                                            60000  // ms → minutes
+                                                        ]
+                                                    },
+                                                    else: 0
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
                             }
                         }
                     }
                 }
             },
 
-            // ── STEP 2: Unwind only salesLogs (visitLogs already aggregated above) ──
+            // ── STEP 2: Unwind only salesLogs ──
             {
                 $unwind: {
                     path: "$salesLogs",
@@ -1092,10 +1109,7 @@ export const exportDataSalesCSV = async (req, res) => {
                         createdBy: "$createdBy"
                     },
 
-                    // Sum the pre-computed per-session call counts
                     totalCalls: { $sum: "$sessionCallCount" },
-
-                    // Sum the pre-computed per-session durations
                     totalCallDuration: { $sum: "$sessionCallDuration" },
 
                     totalAmountCollected: {
@@ -1163,9 +1177,9 @@ export const exportDataSalesCSV = async (req, res) => {
                 $addFields: {
                     avgCallTime: {
                         $cond: [
-                            { $eq: ["$totalCalls", 0] },
-                            0,
-                            { $divide: ["$totalCallDuration", "$totalCalls"] }
+                            { $gt: ["$totalCalls", 0] },
+                            { $divide: ["$totalCallDuration", "$totalCalls"] },
+                            0
                         ]
                     }
                 }
@@ -1184,7 +1198,7 @@ export const exportDataSalesCSV = async (req, res) => {
                         $dateToString: { format: "%Y-%m-%d", date: "$lastDate" }
                     },
                     totalCalls: "$totalCalls",
-                    totalCallDuration: { $round: ["$totalCallDuration", 2] },  // ← NEW
+                    totalCallDuration: { $round: ["$totalCallDuration", 2] },
                     avgCallTime: { $round: ["$avgCallTime", 2] },
                     totalAmountCollected: { $round: ["$totalAmountCollected", 2] },
                     totalPaidCount: "$totalPaidCount"
@@ -1201,7 +1215,7 @@ export const exportDataSalesCSV = async (req, res) => {
             });
         }
 
-        // ── Build CSV ──
+        // ── Build CSV ──────────────────────────────────────────────
         const csvRows = [];
 
         const rangeFrom = startDate
@@ -1216,14 +1230,13 @@ export const exportDataSalesCSV = async (req, res) => {
         csvRows.push(`"Generated:","${new Date().toISOString().slice(0, 19).replace("T", " ")}"`);
         csvRows.push("");
 
-        // ← totalCallDuration column added
         csvRows.push([
             "Sales Person Name",
             "Email",
             "Period From",
             "Period To",
             "Total Calls",
-            "Total Call Duration (min)",   // ← NEW
+            "Total Call Duration (min)",
             "Avg Call Time (min)",
             "Total Amount Collected",
             "Total Paid Count"
@@ -1236,7 +1249,7 @@ export const exportDataSalesCSV = async (req, res) => {
                 row.periodFrom || "",
                 row.periodTo || "",
                 row.totalCalls || 0,
-                row.totalCallDuration || 0,   // ← NEW
+                row.totalCallDuration || 0,
                 row.avgCallTime || 0,
                 row.totalAmountCollected || 0,
                 row.totalPaidCount || 0
@@ -1247,7 +1260,7 @@ export const exportDataSalesCSV = async (req, res) => {
         const grandTotal = salesData.reduce(
             (acc, r) => {
                 acc.totalCalls += r.totalCalls || 0;
-                acc.totalCallDuration += r.totalCallDuration || 0;   // ← NEW
+                acc.totalCallDuration += r.totalCallDuration || 0;
                 acc.totalAmountCollected += r.totalAmountCollected || 0;
                 acc.totalPaidCount += r.totalPaidCount || 0;
                 return acc;
@@ -1258,14 +1271,13 @@ export const exportDataSalesCSV = async (req, res) => {
         csvRows.push([
             '"TOTAL"', '""', '""', '""',
             grandTotal.totalCalls,
-            grandTotal.totalCallDuration.toFixed(2),   // ← NEW
+            grandTotal.totalCallDuration.toFixed(2),
             '""',
             grandTotal.totalAmountCollected.toFixed(2),
             grandTotal.totalPaidCount
         ].join(","));
 
         const csvContent = csvRows.join("\n");
-
         const filename = `Sales_Audit_Report_${rangeFrom}_to_${rangeTo}.csv`;
 
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -1281,7 +1293,6 @@ export const exportDataSalesCSV = async (req, res) => {
         });
     }
 };
-
 
 
 /* ============================================================
