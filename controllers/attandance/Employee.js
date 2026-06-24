@@ -1361,7 +1361,7 @@ export const getAllEmployees = async (req, res) => {
            ---------------------------------------------- */
         let companyId;
         companyId = req.user?._id || req.user?.id;
-        const roles = req.user?.role || req.user?.type;
+        const roles = req.user?.role || req.user?.type; 
 
         if (roles === 'user') {
             companyId = req.user?.companyId || req.user?.companyId;
@@ -1489,7 +1489,7 @@ export const getEmpDetails = async (req, res) => {
     }
 }
 
-export const getEmpByUserId = async (req, res) => {
+export const  getEmpByUserId = async (req, res) => {
     const userId = req.user?._id;
     try {
         const employee = await Employee.findOne({ userId }).populate("userId", "name email phone");

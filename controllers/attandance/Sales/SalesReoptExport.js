@@ -1014,18 +1014,14 @@ export const exportDataSalesCSV = async (req, res) => {
     try {
         const { companyId, startDate, endDate } = req.query;
 
-        // Build query filter
         let matchFilter = {};
-
         if (companyId) {
             matchFilter.companyId = new mongoose.Types.ObjectId(companyId);
         }
-
         if (startDate || endDate) {
             matchFilter.createdAt = {};
             if (startDate) matchFilter.createdAt.$gte = new Date(startDate);
             if (endDate) {
-                // Include the full end date (up to 23:59:59)
                 const end = new Date(endDate);
                 end.setHours(23, 59, 59, 999);
                 matchFilter.createdAt.$lte = end;
@@ -1035,7 +1031,52 @@ export const exportDataSalesCSV = async (req, res) => {
         const salesData = await SalesSession.aggregate([
             { $match: matchFilter },
 
-            // Unwind salesLogs to get individual sales entries
+            // ── STEP 1: Compute per-session visit stats BEFORE unwinding salesLogs ──
+            {
+                $addFields: {
+                    sessionCallCount: {
+                        $size: {
+                            $filter: {
+                                input: { $ifNull: ["$visitLogs", []] },
+                                as: "v",
+                                cond: { $ifNull: ["$$v", false] }
+                            }
+                        }
+                    },
+                    sessionCallDuration: {
+                        $sum: {
+                            $map: {
+                                input: { $ifNull: ["$visitLogs", []] },
+                                as: "v",
+                                in: {
+                                    $cond: [
+                                        {
+                                            $and: [
+                                                { $ifNull: ["$$v.punchInTime", false] },
+                                                { $ifNull: ["$$v.punchOutTime", false] }
+                                            ]
+                                        },
+                                        {
+                                            $divide: [
+                                                {
+                                                    $subtract: [
+                                                        "$$v.punchOutTime",
+                                                        "$$v.punchInTime"
+                                                    ]
+                                                },
+                                                60000 // ms → minutes
+                                            ]
+                                        },
+                                        0
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+
+            // ── STEP 2: Unwind only salesLogs (visitLogs already aggregated above) ──
             {
                 $unwind: {
                     path: "$salesLogs",
@@ -1043,17 +1084,7 @@ export const exportDataSalesCSV = async (req, res) => {
                 }
             },
 
-            // Unwind visitLogs to get individual visit/call entries
-            {
-                $unwind: {
-                    path: "$visitLogs",
-                    preserveNullAndEmptyArrays: true
-                }
-            },
-
-            // ─────────────────────────────────────────────────────────
-            // GROUP BY EMPLOYEE ONLY (no date) → summary for full range
-            // ─────────────────────────────────────────────────────────
+            // ── STEP 3: Group by employee ──
             {
                 $group: {
                     _id: {
@@ -1061,40 +1092,12 @@ export const exportDataSalesCSV = async (req, res) => {
                         createdBy: "$createdBy"
                     },
 
-                    // Total visits/calls across all sessions
-                    totalCalls: {
-                        $sum: {
-                            $cond: [{ $ifNull: ["$visitLogs", false] }, 1, 0]
-                        }
-                    },
+                    // Sum the pre-computed per-session call counts
+                    totalCalls: { $sum: "$sessionCallCount" },
 
-                    // Total call duration in minutes
-                    totalCallDuration: {
-                        $sum: {
-                            $cond: [
-                                {
-                                    $and: [
-                                        "$visitLogs.punchInTime",
-                                        "$visitLogs.punchOutTime"
-                                    ]
-                                },
-                                {
-                                    $divide: [
-                                        {
-                                            $subtract: [
-                                                "$visitLogs.punchOutTime",
-                                                "$visitLogs.punchInTime"
-                                            ]
-                                        },
-                                        60000 // ms → minutes
-                                    ]
-                                },
-                                0
-                            ]
-                        }
-                    },
+                    // Sum the pre-computed per-session durations
+                    totalCallDuration: { $sum: "$sessionCallDuration" },
 
-                    // Total amount collected across all paid sales
                     totalAmountCollected: {
                         $sum: {
                             $cond: [
@@ -1105,7 +1108,6 @@ export const exportDataSalesCSV = async (req, res) => {
                         }
                     },
 
-                    // Total paid sales count
                     totalPaidCount: {
                         $sum: {
                             $cond: [
@@ -1116,17 +1118,15 @@ export const exportDataSalesCSV = async (req, res) => {
                         }
                     },
 
-                    // Date range actually covered by this employee's data
                     firstDate: { $min: "$createdAt" },
                     lastDate: { $max: "$createdAt" },
 
-                    // Keep refs for lookup
                     employeeIdRef: { $first: "$employeeId" },
                     createdByRef: { $first: "$createdBy" }
                 }
             },
 
-            // Lookup employee user details
+            // ── STEP 4: Lookups ──
             {
                 $lookup: {
                     from: "users",
@@ -1144,7 +1144,6 @@ export const exportDataSalesCSV = async (req, res) => {
                 }
             },
 
-            // Flatten user details
             {
                 $addFields: {
                     employeeName: {
@@ -1159,7 +1158,7 @@ export const exportDataSalesCSV = async (req, res) => {
                 }
             },
 
-            // Average call time = totalDuration / totalCalls
+            // ── STEP 5: Derive avg ──
             {
                 $addFields: {
                     avgCallTime: {
@@ -1172,7 +1171,7 @@ export const exportDataSalesCSV = async (req, res) => {
                 }
             },
 
-            // Final projection
+            // ── STEP 6: Project ──
             {
                 $project: {
                     _id: 0,
@@ -1185,6 +1184,7 @@ export const exportDataSalesCSV = async (req, res) => {
                         $dateToString: { format: "%Y-%m-%d", date: "$lastDate" }
                     },
                     totalCalls: "$totalCalls",
+                    totalCallDuration: { $round: ["$totalCallDuration", 2] },  // ← NEW
                     avgCallTime: { $round: ["$avgCallTime", 2] },
                     totalAmountCollected: { $round: ["$totalAmountCollected", 2] },
                     totalPaidCount: "$totalPaidCount"
@@ -1201,10 +1201,9 @@ export const exportDataSalesCSV = async (req, res) => {
             });
         }
 
-        // ── Build CSV ──────────────────────────────────────────────
+        // ── Build CSV ──
         const csvRows = [];
 
-        // Report meta header (shows the queried date range)
         const rangeFrom = startDate
             ? new Date(startDate).toISOString().slice(0, 10)
             : "All time";
@@ -1215,21 +1214,21 @@ export const exportDataSalesCSV = async (req, res) => {
         csvRows.push(`"Sales Summary Report"`);
         csvRows.push(`"Period:","${rangeFrom} to ${rangeTo}"`);
         csvRows.push(`"Generated:","${new Date().toISOString().slice(0, 19).replace("T", " ")}"`);
-        csvRows.push(""); // blank separator row
+        csvRows.push("");
 
-        // Column headers
+        // ← totalCallDuration column added
         csvRows.push([
             "Sales Person Name",
             "Email",
             "Period From",
             "Period To",
             "Total Calls",
+            "Total Call Duration (min)",   // ← NEW
             "Avg Call Time (min)",
             "Total Amount Collected",
             "Total Paid Count"
         ].join(","));
 
-        // Data rows — one row per employee
         for (const row of salesData) {
             csvRows.push([
                 `"${row.salesPersonName.replace(/"/g, '""')}"`,
@@ -1237,6 +1236,7 @@ export const exportDataSalesCSV = async (req, res) => {
                 row.periodFrom || "",
                 row.periodTo || "",
                 row.totalCalls || 0,
+                row.totalCallDuration || 0,   // ← NEW
                 row.avgCallTime || 0,
                 row.totalAmountCollected || 0,
                 row.totalPaidCount || 0
@@ -1247,16 +1247,18 @@ export const exportDataSalesCSV = async (req, res) => {
         const grandTotal = salesData.reduce(
             (acc, r) => {
                 acc.totalCalls += r.totalCalls || 0;
+                acc.totalCallDuration += r.totalCallDuration || 0;   // ← NEW
                 acc.totalAmountCollected += r.totalAmountCollected || 0;
                 acc.totalPaidCount += r.totalPaidCount || 0;
                 return acc;
             },
-            { totalCalls: 0, totalAmountCollected: 0, totalPaidCount: 0 }
+            { totalCalls: 0, totalCallDuration: 0, totalAmountCollected: 0, totalPaidCount: 0 }
         );
 
         csvRows.push([
             '"TOTAL"', '""', '""', '""',
             grandTotal.totalCalls,
+            grandTotal.totalCallDuration.toFixed(2),   // ← NEW
             '""',
             grandTotal.totalAmountCollected.toFixed(2),
             grandTotal.totalPaidCount
@@ -1264,16 +1266,11 @@ export const exportDataSalesCSV = async (req, res) => {
 
         const csvContent = csvRows.join("\n");
 
-        // ── Send file ──────────────────────────────────────────────
-        const filename = ` Sales_Audit_Report${rangeFrom}_to_${rangeTo}.csv`;
+        const filename = `Sales_Audit_Report_${rangeFrom}_to_${rangeTo}.csv`;
 
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
-        res.setHeader(
-            "Content-Disposition",
-            `attachment; filename="${filename}"`
-        );
-
-        res.send("\uFEFF" + csvContent); // BOM for Excel UTF-8
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        res.send("\uFEFF" + csvContent);
 
     } catch (error) {
         console.error("Error exporting sales CSV:", error);
