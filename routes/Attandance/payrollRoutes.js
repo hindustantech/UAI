@@ -12,6 +12,7 @@ import {
     getAllPayrollByCompany, getPayrollByEmployeeAndCompany
 } from "../../controllers/payrollController.js";
 
+import { requireActiveSubscription, requirePaidPlan } from "../../middlewares/subscription.js";
 
 import authMiddleware from "../../middlewares/authMiddleware.js";
 
@@ -118,6 +119,8 @@ router.patch(
 router.get(
     "/download/excel",
     authMiddleware,
+    requireActiveSubscription,
+    requirePaidPlan,
     downloadCompanyExcel
 );
 
@@ -129,6 +132,8 @@ router.get(
 router.get(
     "/download/pdf/:payrollId",
     authMiddleware,
+    requireActiveSubscription,
+    requirePaidPlan,
     downloadSalarySlipPDF
 );
 

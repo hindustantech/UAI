@@ -38,6 +38,8 @@ import bulkUploadSalesRoute from './routes/Attandance/bulkUploadSalesSessions.js
 import payrollrule from './routes/PayrollRule.js'
 import salaryRules from './routes/salaryRuleRoutes.js'
 import payrollroutes from './routes/Attandance/payrollRoutes.js'
+import customorder from './routes/orderRoutes.js'
+import slabpricing from './routes/pricingRules.js'
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'

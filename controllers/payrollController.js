@@ -13,6 +13,7 @@ import Attendance from "../models/Attandance/Attendance.js";
 import { calculateSalary } from "../services/salaryCalculator.js";
 import { generatePayrollExcel } from "../services/excelGenerator.js";
 import { generateSalarySlipPDF } from "../services/pdfGenerator.js";
+import { Subscription } from "../models/Attandance/subscration/Subscription.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TMP_DIR = path.join(__dirname, "../tmp");
@@ -63,7 +64,52 @@ async function getAttendanceSummary(employeeId, month, year) {
 
 
 
+/**
+ * Check if a company has an active subscription and what plan they're on.
+ *
+ * @param {string|ObjectId} companyId
+ * @returns {Promise<{
+ *   isActive: boolean,
+ *   planType: string|null,       // "FREE" | "BASIC" | "STANDARD" | "PREMIUM" | "ENTERPRISE" | null
+ *   isFree: boolean,
+ *   plan: object|null,           // full planSnapshot if active
+ *   subscription: object|null    // full subscription doc if active
+ * }>}
+ */
+export const getCompanySubscriptionStatus = async (companyId) => {
+    const now = new Date();
 
+    const subscription = await Subscription.findOne({
+        company: companyId,
+        status: "ACTIVE",
+        isActive: true,
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+    })
+        .populate("plan")   // pulls in the full Plan doc
+        .lean();
+
+    // No active subscription found
+    if (!subscription) {
+        return {
+            isActive: false,
+            planType: null,
+            isFree: false,
+            plan: null,
+            subscription: null,
+        };
+    }
+
+    const plan = subscription.plan;  // populated Plan doc
+
+    return {
+        isActive: true,
+        planType: plan?.planType ?? subscription.planSnapshot?.name?.toUpperCase() ?? null,
+        isFree: plan?.isfree ?? false,
+        plan,
+        subscription,
+    };
+}
 
 
 
@@ -495,10 +541,8 @@ export const downloadCompanyExcel = async (req, res) => {
             companyId = req.user.companyId;
         }
         const { month, year } = req.query;
-
-        if (!month || !year) {
-            return res.status(400).json({ success: false, message: "month and year are required." });
-        }
+        // Basic check
+       
 
         const records = await Payroll.find({
             companyId,
@@ -541,6 +585,10 @@ export const downloadSalarySlipPDF = async (req, res) => {
         } else {
             companyId = req.user.companyId;
         }
+
+        // Basic check
+      
+
 
         if (!mongoose.Types.ObjectId.isValid(payrollId)) {
             return res.status(400).json({ success: false, message: "Invalid payrollId." });
