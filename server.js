@@ -40,6 +40,8 @@ import salaryRules from './routes/salaryRuleRoutes.js'
 import payrollroutes from './routes/Attandance/payrollRoutes.js'
 import customorder from './routes/orderRoutes.js'
 import slabpricing from './routes/pricingRules.js'
+import blogPost from './routes/Blog/blogRoutes.js'
+import categoryblog from './routes/Blog/categoryRoutes.js'
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
