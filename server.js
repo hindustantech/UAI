@@ -49,7 +49,6 @@ dotenv.config();
 await connectDB();
 // START BACKGROUND WORKER HERE
 
-
 const app = express();
 
 app.set('view engine', 'ejs');
@@ -83,6 +82,12 @@ app.use(
   express.static(path.join(process.cwd(), "exports"))
 );
 
+
+
+
+app.use('/api/v1/slab/',slabpricing)
+app.use('/api/v1/blogPost/',blogPost)
+app.use('/api/v1/categoryblog/',categoryblog)
 
 app.use('/api/usermanagement', usermanagement);
 app.use('/api/permissionRoutes', permissionRoutes);
