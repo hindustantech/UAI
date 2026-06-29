@@ -1,12 +1,13 @@
 import Category from "../../models/Blog/Category.js";
 import Blog from "../../models/Blog/Blog.js";
+import { uploadToCloudinary } from "../../utils/Cloudinary.js";
 
 // @desc    Create category
 // @route   POST /api/categories
 // @access  Private/Admin
 export const createCategory = async (req, res) => {
     try {
-        const { name, description, image, icon, subCategories, parentCategory } = req.body;
+        const { name, description, icon, subCategories, parentCategory } = req.body;
 
         // Check if category exists
         const existingCategory = await Category.findOne({ name });
@@ -17,10 +18,25 @@ export const createCategory = async (req, res) => {
             });
         }
 
+        // Handle image upload if file is provided
+        let imageUrl = null;
+        if (req.file) {
+            try {
+                const result = await uploadToCloudinary(req.file.buffer, 'categories');
+                imageUrl = result.secure_url;
+            } catch (uploadError) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Failed to upload image",
+                    error: uploadError.message,
+                });
+            }
+        }
+
         const category = await Category.create({
             name,
             description,
-            image,
+            image: imageUrl, // Store the Cloudinary URL
             icon,
             subCategories,
             parentCategory,
@@ -41,6 +57,54 @@ export const createCategory = async (req, res) => {
     }
 };
 
+// @desc    Update category
+// @route   PUT /api/categories/:id
+// @access  Private/Admin
+export const updateCategory = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updates = { ...req.body };
+
+        // Handle image upload if new file is provided
+        if (req.file) {
+            try {
+                const result = await uploadToCloudinary(req.file.buffer, 'categories');
+                updates.image = result.secure_url;
+            } catch (uploadError) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Failed to upload image",
+                    error: uploadError.message,
+                });
+            }
+        }
+
+        const category = await Category.findByIdAndUpdate(id, updates, {
+            new: true,
+            runValidators: true,
+        });
+
+        if (!category) {
+            return res.status(404).json({
+                success: false,
+                message: "Category not found",
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Category updated successfully",
+            data: category,
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Error updating category",
+            error: error.message,
+        });
+    }
+};
+
 // @desc    Get all categories with subcategories
 // @route   GET /api/categories
 // @access  Public
@@ -49,11 +113,11 @@ export const getAllCategories = async (req, res) => {
         const { parentOnly, includeInactive } = req.query;
 
         let query = {};
-        
+
         if (parentOnly === "true") {
             query.parentCategory = null;
         }
-        
+
         if (!includeInactive) {
             query.isActive = true;
         }
@@ -94,9 +158,9 @@ export const getCategoryById = async (req, res) => {
         }
 
         // Get blog count for this category
-        const blogCount = await Blog.countDocuments({ 
-            category: id, 
-            status: "PUBLISHED" 
+        const blogCount = await Blog.countDocuments({
+            category: id,
+            status: "PUBLISHED"
         });
 
         res.status(200).json({
@@ -148,36 +212,7 @@ export const getCategoryBySlug = async (req, res) => {
 // @desc    Update category
 // @route   PUT /api/categories/:id
 // @access  Private/Admin
-export const updateCategory = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const updates = req.body;
 
-        const category = await Category.findByIdAndUpdate(id, updates, {
-            new: true,
-            runValidators: true,
-        });
-
-        if (!category) {
-            return res.status(404).json({
-                success: false,
-                message: "Category not found",
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            message: "Category updated successfully",
-            data: category,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: "Error updating category",
-            error: error.message,
-        });
-    }
-};
 
 // @desc    Delete category
 // @route   DELETE /api/categories/:id
@@ -277,9 +312,9 @@ export const getBlogsByCategory = async (req, res) => {
         const { id } = req.params;
         const { page = 1, limit = 10, sort = "-createdAt" } = req.query;
 
-        const blogs = await Blog.find({ 
-            category: id, 
-            status: "PUBLISHED" 
+        const blogs = await Blog.find({
+            category: id,
+            status: "PUBLISHED"
         })
             .sort(sort)
             .limit(limit * 1)
@@ -288,9 +323,9 @@ export const getBlogsByCategory = async (req, res) => {
             .populate("category", "name slug")
             .select("title slug excerpt featuredImage author authorName createdAt views likeCount commentCount averageRating readTime");
 
-        const total = await Blog.countDocuments({ 
-            category: id, 
-            status: "PUBLISHED" 
+        const total = await Blog.countDocuments({
+            category: id,
+            status: "PUBLISHED"
         });
 
         res.status(200).json({

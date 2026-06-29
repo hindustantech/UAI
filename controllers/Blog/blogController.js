@@ -1,5 +1,7 @@
 import Blog from "../../models/Blog/Blog.js";
 import Category from "../../models/Blog/Category.js";
+import { uploadToCloudinary } from "../../utils/Cloudinary.js";
+
 
 // @desc    Create blog post
 // @route   POST /api/blogs
@@ -13,8 +15,6 @@ export const createBlog = async (req, res) => {
             category,
             subCategory,
             tags,
-            featuredImage,
-            gallery,
             status = "DRAFT",
             allowComments = true,
             metaTitle,
@@ -45,15 +45,37 @@ export const createBlog = async (req, res) => {
             }
         }
 
+        // Handle image uploads
+        let featuredImageUrl = null;
+        let galleryUrls = [];
+
+        // Upload featured image if provided
+        if (req.files?.featuredImage) {
+            const result = await uploadToCloudinary(
+                req.files.featuredImage[0].buffer,
+                'blogs/featured'
+            );
+            featuredImageUrl = result.secure_url;
+        }
+
+        // Upload gallery images if provided
+        if (req.files?.gallery) {
+            const uploadPromises = req.files.gallery.map(file =>
+                uploadToCloudinary(file.buffer, 'blogs/gallery')
+            );
+            const results = await Promise.all(uploadPromises);
+            galleryUrls = results.map(result => result.secure_url);
+        }
+
         const blog = await Blog.create({
             title,
             content,
             excerpt: excerpt || content.substring(0, 200),
             category,
             subCategory,
-            tags,
-            featuredImage,
-            gallery,
+            tags: tags ? JSON.parse(tags) : [],
+            featuredImage: featuredImageUrl,
+            gallery: galleryUrls,
             author: req.user.id,
             authorName: req.user.name,
             authorAvatar: req.user.avatar,
@@ -61,7 +83,7 @@ export const createBlog = async (req, res) => {
             allowComments,
             metaTitle: metaTitle || title,
             metaDescription: metaDescription || excerpt || content.substring(0, 160),
-            metaKeywords,
+            metaKeywords: metaKeywords ? JSON.parse(metaKeywords) : [],
             scheduledAt: status === "SCHEDULED" ? scheduledAt : null,
             publishedAt: status === "PUBLISHED" ? new Date() : null,
         });
@@ -80,6 +102,95 @@ export const createBlog = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Error creating blog post",
+            error: error.message,
+        });
+    }
+};
+
+// @desc    Update blog post
+// @route   PUT /api/blogs/:id
+// @access  Private
+export const updateBlog = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+
+        // Check if blog exists
+        const blog = await Blog.findById(id);
+
+        if (!blog) {
+            return res.status(404).json({
+                success: false,
+                message: "Blog post not found",
+            });
+        }
+
+        // Check ownership (unless admin)
+        if (blog.author.toString() !== req.user.id && req.user.role !== "admin") {
+            return res.status(403).json({
+                success: false,
+                message: "Not authorized to update this blog post",
+            });
+        }
+
+        // Handle image uploads for update
+        if (req.files?.featuredImage) {
+            const result = await uploadToCloudinary(
+                req.files.featuredImage[0].buffer,
+                'blogs/featured'
+            );
+            updates.featuredImage = result.secure_url;
+        }
+
+        // Upload new gallery images if provided
+        if (req.files?.gallery) {
+            const uploadPromises = req.files.gallery.map(file =>
+                uploadToCloudinary(file.buffer, 'blogs/gallery')
+            );
+            const results = await Promise.all(uploadPromises);
+            const newGalleryUrls = results.map(result => result.secure_url);
+
+            // Merge with existing gallery or replace
+            if (updates.appendToGallery) {
+                updates.gallery = [...(blog.gallery || []), ...newGalleryUrls];
+            } else {
+                updates.gallery = newGalleryUrls;
+            }
+        }
+
+        // Add to revision history if content changed
+        if (updates.content && updates.content !== blog.content) {
+            blog.revisionHistory.push({
+                content: blog.content,
+                updatedBy: req.user.id,
+                updatedAt: new Date(),
+            });
+            blog.version += 1;
+        }
+
+        // Update fields
+        Object.keys(updates).forEach(key => {
+            if (key !== "_id" && key !== "author") {
+                blog[key] = updates[key];
+            }
+        });
+
+        // Handle status change
+        if (updates.status === "PUBLISHED" && !blog.publishedAt) {
+            blog.publishedAt = new Date();
+        }
+
+        await blog.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Blog post updated successfully",
+            data: blog,
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Error updating blog post",
             error: error.message,
         });
     }
@@ -125,7 +236,7 @@ export const getAllBlogs = async (req, res) => {
         if (featured) query.isFeatured = featured === "true";
         if (trending) query.isTrending = trending === "true";
         if (editorPick) query.isEditorPick = editorPick === "true";
-        
+
         if (minRating) {
             query.averageRating = { $gte: parseFloat(minRating) };
         }
@@ -258,69 +369,7 @@ export const getBlogBySlug = async (req, res) => {
     }
 };
 
-// @desc    Update blog post
-// @route   PUT /api/blogs/:id
-// @access  Private
-export const updateBlog = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const updates = req.body;
 
-        // Check if blog exists
-        const blog = await Blog.findById(id);
-
-        if (!blog) {
-            return res.status(404).json({
-                success: false,
-                message: "Blog post not found",
-            });
-        }
-
-        // Check ownership (unless admin)
-        if (blog.author.toString() !== req.user.id && req.user.role !== "admin") {
-            return res.status(403).json({
-                success: false,
-                message: "Not authorized to update this blog post",
-            });
-        }
-
-        // Add to revision history if content changed
-        if (updates.content && updates.content !== blog.content) {
-            blog.revisionHistory.push({
-                content: blog.content,
-                updatedBy: req.user.id,
-                updatedAt: new Date(),
-            });
-            blog.version += 1;
-        }
-
-        // Update fields
-        Object.keys(updates).forEach(key => {
-            if (key !== "_id" && key !== "author") {
-                blog[key] = updates[key];
-            }
-        });
-
-        // Handle status change
-        if (updates.status === "PUBLISHED" && !blog.publishedAt) {
-            blog.publishedAt = new Date();
-        }
-
-        await blog.save();
-
-        res.status(200).json({
-            success: true,
-            message: "Blog post updated successfully",
-            data: blog,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: "Error updating blog post",
-            error: error.message,
-        });
-    }
-};
 
 // @desc    Delete blog post
 // @route   DELETE /api/blogs/:id
@@ -468,7 +517,7 @@ export const addComment = async (req, res) => {
         if (parentCommentId) {
             // This is a reply
             newComment.parentComment = parentCommentId;
-            
+
             const parentComment = blog.comments.id(parentCommentId);
             if (!parentComment) {
                 return res.status(404).json({
@@ -479,7 +528,7 @@ export const addComment = async (req, res) => {
 
             blog.comments.push(newComment);
             await blog.save();
-            
+
             // Add reply to parent comment
             const savedComment = blog.comments[blog.comments.length - 1];
             parentComment.replies.push(savedComment._id);
@@ -604,7 +653,7 @@ export const getBlogStats = async (req, res) => {
         const totalBlogs = await Blog.countDocuments();
         const publishedBlogs = await Blog.countDocuments({ status: "PUBLISHED" });
         const draftBlogs = await Blog.countDocuments({ status: "DRAFT" });
-        
+
         const totalViews = await Blog.aggregate([
             { $group: { _id: null, totalViews: { $sum: "$views" } } }
         ]);
