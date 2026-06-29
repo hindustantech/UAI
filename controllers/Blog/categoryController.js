@@ -2,6 +2,7 @@ import Category from "../../models/Blog/Category.js";
 import Blog from "../../models/Blog/Blog.js";
 import { uploadToCloudinary } from "../../utils/Cloudinary.js";
 
+
 // @desc    Create category
 // @route   POST /api/categories
 // @access  Private/Admin
@@ -9,8 +10,19 @@ export const createCategory = async (req, res) => {
     try {
         const { name, description, icon, subCategories, parentCategory } = req.body;
 
+        // Validate required fields
+        if (!name || name.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: "Category name is required",
+            });
+        }
+
         // Check if category exists
-        const existingCategory = await Category.findOne({ name });
+        const existingCategory = await Category.findOne({ 
+            name: { $regex: new RegExp(`^${name}$`, 'i') } 
+        });
+        
         if (existingCategory) {
             return res.status(400).json({
                 success: false,
@@ -34,12 +46,12 @@ export const createCategory = async (req, res) => {
         }
 
         const category = await Category.create({
-            name,
-            description,
-            image: imageUrl, // Store the Cloudinary URL
-            icon,
-            subCategories,
-            parentCategory,
+            name: name.trim(),
+            description: description || '',
+            image: imageUrl,
+            icon: icon || '📁',
+            subCategories: subCategories || [],
+            parentCategory: parentCategory || null,
             createdBy: req.user.id,
         });
 
@@ -49,6 +61,16 @@ export const createCategory = async (req, res) => {
             data: category,
         });
     } catch (error) {
+        // Handle validation errors specifically
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({
+                success: false,
+                message: "Validation error",
+                errors: errors,
+            });
+        }
+        
         res.status(500).json({
             success: false,
             message: "Error creating category",
@@ -65,6 +87,29 @@ export const updateCategory = async (req, res) => {
         const { id } = req.params;
         const updates = { ...req.body };
 
+        // Validate name if provided
+        if (updates.name && updates.name.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: "Category name cannot be empty",
+            });
+        }
+
+        // Check if category exists with new name
+        if (updates.name) {
+            const existingCategory = await Category.findOne({
+                name: { $regex: new RegExp(`^${updates.name}$`, 'i') },
+                _id: { $ne: id }
+            });
+            
+            if (existingCategory) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Category with this name already exists",
+                });
+            }
+        }
+
         // Handle image upload if new file is provided
         if (req.file) {
             try {
@@ -78,6 +123,9 @@ export const updateCategory = async (req, res) => {
                 });
             }
         }
+
+        // Clean up updates
+        if (updates.name) updates.name = updates.name.trim();
 
         const category = await Category.findByIdAndUpdate(id, updates, {
             new: true,
@@ -97,6 +145,15 @@ export const updateCategory = async (req, res) => {
             data: category,
         });
     } catch (error) {
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({
+                success: false,
+                message: "Validation error",
+                errors: errors,
+            });
+        }
+        
         res.status(500).json({
             success: false,
             message: "Error updating category",
@@ -104,6 +161,8 @@ export const updateCategory = async (req, res) => {
         });
     }
 };
+
+// ... rest of your controller remains the same
 
 // @desc    Get all categories with subcategories
 // @route   GET /api/categories
