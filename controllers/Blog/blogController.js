@@ -326,7 +326,6 @@ export const updateBlog = async (req, res) => {
 
 
 
-
 // @desc    Get all blogs with filtering and pagination
 // @route   GET /api/blogs
 // @access  Public
@@ -378,19 +377,29 @@ export const getAllBlogs = async (req, res) => {
             if (dateTo) query.createdAt.$lte = new Date(dateTo);
         }
 
-        // Text search
+        // Text search - using regex instead of text search to avoid index issues
         if (search) {
-            query.$text = { $search: search };
+            query.$or = [
+                { title: { $regex: search, $options: 'i' } },
+                { excerpt: { $regex: search, $options: 'i' } },
+                { tags: { $regex: search, $options: 'i' } },
+            ];
         }
 
-        // Execute query
+        // Parse page and limit as numbers
+        const pageNum = parseInt(page) || 1;
+        const limitNum = parseInt(limit) || 10;
+        const skip = (pageNum - 1) * limitNum;
+
+        // Execute query with proper population
         const blogs = await Blog.find(query)
             .sort(sort)
-            .limit(limit * 1)
-            .skip((page - 1) * limit)
+            .limit(limitNum)
+            .skip(skip)
             .populate("author", "name avatar bio")
             .populate("category", "name slug icon")
-            .select("-content -comments -ratings -revisionHistory");
+            .select("-content -comments -ratings -revisionHistory")
+            .lean(); // Use lean() for better performance
 
         const total = await Blog.countDocuments(query);
 
@@ -398,13 +407,14 @@ export const getAllBlogs = async (req, res) => {
             success: true,
             data: blogs,
             pagination: {
-                currentPage: parseInt(page),
-                totalPages: Math.ceil(total / limit),
+                currentPage: pageNum,
+                totalPages: Math.ceil(total / limitNum),
                 totalBlogs: total,
-                hasMore: page * limit < total,
+                hasMore: pageNum * limitNum < total,
             },
         });
     } catch (error) {
+        console.error('Get all blogs error:', error);
         res.status(500).json({
             success: false,
             message: "Error fetching blogs",
@@ -423,7 +433,8 @@ export const getBlogById = async (req, res) => {
         const blog = await Blog.findById(id)
             .populate("author", "name avatar bio socialLinks")
             .populate("category", "name slug icon")
-            .populate("relatedPosts", "title slug featuredImage createdAt");
+            .populate("relatedPosts", "title slug featuredImage createdAt")
+            .lean();
 
         if (!blog) {
             return res.status(404).json({
@@ -433,23 +444,23 @@ export const getBlogById = async (req, res) => {
         }
 
         // Increment view count
-        blog.views += 1;
-        await blog.save({ validateBeforeSave: false });
+        await Blog.findByIdAndUpdate(id, { $inc: { views: 1 } });
 
-        // Get related posts by category and tags
+        // Get related posts by category and tags if not already populated
         if (!blog.relatedPosts || blog.relatedPosts.length === 0) {
             const relatedPosts = await Blog.find({
                 _id: { $ne: blog._id },
                 status: "PUBLISHED",
                 $or: [
                     { category: blog.category },
-                    { tags: { $in: blog.tags } },
+                    { tags: { $in: blog.tags || [] } },
                 ],
             })
                 .limit(3)
-                .select("title slug featuredImage createdAt author authorName");
+                .select("title slug featuredImage createdAt author authorName")
+                .lean();
 
-            blog.relatedPosts = relatedPosts;
+            blog.relatedPosts = relatedPosts || [];
         }
 
         res.status(200).json({
@@ -457,6 +468,7 @@ export const getBlogById = async (req, res) => {
             data: blog,
         });
     } catch (error) {
+        console.error('Get blog by id error:', error);
         res.status(500).json({
             success: false,
             message: "Error fetching blog post",
