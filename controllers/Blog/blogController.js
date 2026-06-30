@@ -2,10 +2,10 @@ import Blog from "../../models/Blog/Blog.js";
 import Category from "../../models/Blog/Category.js";
 import { uploadToCloudinary } from "../../utils/Cloudinary.js";
 
+import Blog from "../../models/Blog/Blog.js";
+import Category from "../../models/Blog/Category.js";
+import { uploadToCloudinary } from "../../utils/Cloudinary.js";
 
-// @desc    Create blog post
-// @route   POST /api/blogs
-// @access  Private
 // @desc    Create blog post
 // @route   POST /api/blogs
 // @access  Private
@@ -41,6 +41,21 @@ export const createBlog = async (req, res) => {
             });
         }
 
+        if (!category) {
+            return res.status(400).json({
+                success: false,
+                message: "Blog category is required",
+            });
+        }
+
+        // Validate user authentication
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({
+                success: false,
+                message: "User authentication required",
+            });
+        }
+
         // Validate category exists
         const categoryExists = await Category.findById(category);
         if (!categoryExists) {
@@ -52,7 +67,7 @@ export const createBlog = async (req, res) => {
 
         // Validate subcategory if provided
         if (subCategory) {
-            const subExists = categoryExists.subCategories.some(
+            const subExists = categoryExists.subCategories?.some(
                 sub => sub.name === subCategory || sub.slug === subCategory
             );
             if (!subExists) {
@@ -64,33 +79,48 @@ export const createBlog = async (req, res) => {
         }
 
         // Handle image uploads with proper structure
-        let featuredImageObj = null;
+        let featuredImageObj = {
+            url: "https://via.placeholder.com/800x400?text=No+Image",
+            public_id: "default",
+            altText: title || 'Blog featured image',
+        };
+
         let galleryArray = [];
 
         // Upload featured image if provided
-        if (req.files?.featuredImage) {
-            const result = await uploadToCloudinary(
-                req.files.featuredImage[0].buffer,
-                'blogs/featured'
-            );
-            featuredImageObj = {
-                url: result.secure_url,
-                public_id: result.public_id,
-                altText: title || 'Blog featured image',
-            };
+        if (req.files?.featuredImage && req.files.featuredImage[0]) {
+            try {
+                const result = await uploadToCloudinary(
+                    req.files.featuredImage[0].buffer,
+                    'blogs/featured'
+                );
+                featuredImageObj = {
+                    url: result.secure_url,
+                    public_id: result.public_id,
+                    altText: title || 'Blog featured image',
+                };
+            } catch (uploadError) {
+                console.error('Featured image upload error:', uploadError);
+                // Continue with default image if upload fails
+            }
         }
 
         // Upload gallery images if provided
-        if (req.files?.gallery) {
-            const uploadPromises = req.files.gallery.map(file =>
-                uploadToCloudinary(file.buffer, 'blogs/gallery')
-            );
-            const results = await Promise.all(uploadPromises);
-            galleryArray = results.map((result, index) => ({
-                url: result.secure_url,
-                public_id: result.public_id,
-                altText: `${title} gallery image ${index + 1}`,
-            }));
+        if (req.files?.gallery && req.files.gallery.length > 0) {
+            try {
+                const uploadPromises = req.files.gallery.map(file =>
+                    uploadToCloudinary(file.buffer, 'blogs/gallery')
+                );
+                const results = await Promise.all(uploadPromises);
+                galleryArray = results.map((result, index) => ({
+                    url: result.secure_url,
+                    public_id: result.public_id,
+                    altText: `${title} gallery image ${index + 1}`,
+                }));
+            } catch (uploadError) {
+                console.error('Gallery upload error:', uploadError);
+                // Continue without gallery if upload fails
+            }
         }
 
         // Parse tags and metaKeywords safely
@@ -98,29 +128,37 @@ export const createBlog = async (req, res) => {
         let parsedMetaKeywords = [];
 
         try {
-            parsedTags = tags ? (typeof tags === 'string' ? JSON.parse(tags) : tags) : [];
+            if (tags) {
+                parsedTags = typeof tags === 'string' ? JSON.parse(tags) : tags;
+            }
         } catch (e) {
-            parsedTags = tags ? tags.split(',').map(t => t.trim()) : [];
+            parsedTags = tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [];
         }
 
         try {
-            parsedMetaKeywords = metaKeywords ? (typeof metaKeywords === 'string' ? JSON.parse(metaKeywords) : metaKeywords) : [];
+            if (metaKeywords) {
+                parsedMetaKeywords = typeof metaKeywords === 'string' ? JSON.parse(metaKeywords) : metaKeywords;
+            }
         } catch (e) {
-            parsedMetaKeywords = metaKeywords ? metaKeywords.split(',').map(k => k.trim()) : [];
+            parsedMetaKeywords = metaKeywords ? metaKeywords.split(',').map(k => k.trim()).filter(Boolean) : [];
         }
 
-        const blog = await Blog.create({
+        // Get author name from authenticated user
+        const authorName = req.user.name || req.user.username || 'Anonymous';
+
+        // Create blog post
+        const blogData = {
             title,
             content,
             excerpt: excerpt || content.substring(0, 200),
             category,
-            subCategory,
+            subCategory: subCategory || null,
             tags: parsedTags,
             featuredImage: featuredImageObj,
             gallery: galleryArray,
             author: req.user.id,
-            authorName: req.user.name,
-            authorAvatar: req.user.avatar || null,
+            authorName: authorName,
+            authorAvatar: req.user.avatar || req.user.profilePicture || null,
             status,
             allowComments: allowComments === true || allowComments === 'true',
             metaTitle: metaTitle || title,
@@ -128,7 +166,14 @@ export const createBlog = async (req, res) => {
             metaKeywords: parsedMetaKeywords,
             scheduledAt: status === "SCHEDULED" ? scheduledAt : null,
             publishedAt: status === "PUBLISHED" ? new Date() : null,
+        };
+
+        console.log('Creating blog with data:', {
+            ...blogData,
+            content: blogData.content.substring(0, 100) + '...' // Truncate for logging
         });
+
+        const blog = await Blog.create(blogData);
 
         // Update category blog count
         await Category.findByIdAndUpdate(category, {
@@ -147,6 +192,17 @@ export const createBlog = async (req, res) => {
         });
     } catch (error) {
         console.error('Create blog error:', error);
+
+        // Handle mongoose validation errors
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({
+                success: false,
+                message: "Validation Error",
+                errors: messages,
+            });
+        }
+
         res.status(500).json({
             success: false,
             message: "Error creating blog post",
@@ -182,27 +238,43 @@ export const updateBlog = async (req, res) => {
         }
 
         // Handle image uploads for update
-        if (req.files?.featuredImage) {
-            const result = await uploadToCloudinary(
-                req.files.featuredImage[0].buffer,
-                'blogs/featured'
-            );
-            updates.featuredImage = result.secure_url;
+        if (req.files?.featuredImage && req.files.featuredImage[0]) {
+            try {
+                const result = await uploadToCloudinary(
+                    req.files.featuredImage[0].buffer,
+                    'blogs/featured'
+                );
+                updates.featuredImage = {
+                    url: result.secure_url,
+                    public_id: result.public_id,
+                    altText: updates.title || blog.title,
+                };
+            } catch (uploadError) {
+                console.error('Featured image upload error:', uploadError);
+            }
         }
 
         // Upload new gallery images if provided
-        if (req.files?.gallery) {
-            const uploadPromises = req.files.gallery.map(file =>
-                uploadToCloudinary(file.buffer, 'blogs/gallery')
-            );
-            const results = await Promise.all(uploadPromises);
-            const newGalleryUrls = results.map(result => result.secure_url);
+        if (req.files?.gallery && req.files.gallery.length > 0) {
+            try {
+                const uploadPromises = req.files.gallery.map(file =>
+                    uploadToCloudinary(file.buffer, 'blogs/gallery')
+                );
+                const results = await Promise.all(uploadPromises);
+                const newGalleryUrls = results.map((result, index) => ({
+                    url: result.secure_url,
+                    public_id: result.public_id,
+                    altText: `${updates.title || blog.title} gallery image ${index + 1}`,
+                }));
 
-            // Merge with existing gallery or replace
-            if (updates.appendToGallery) {
-                updates.gallery = [...(blog.gallery || []), ...newGalleryUrls];
-            } else {
-                updates.gallery = newGalleryUrls;
+                // Merge with existing gallery or replace
+                if (updates.appendToGallery) {
+                    updates.gallery = [...(blog.gallery || []), ...newGalleryUrls];
+                } else {
+                    updates.gallery = newGalleryUrls;
+                }
+            } catch (uploadError) {
+                console.error('Gallery upload error:', uploadError);
             }
         }
 
@@ -218,7 +290,7 @@ export const updateBlog = async (req, res) => {
 
         // Update fields
         Object.keys(updates).forEach(key => {
-            if (key !== "_id" && key !== "author") {
+            if (key !== "_id" && key !== "author" && key !== "authorName") {
                 blog[key] = updates[key];
             }
         });
@@ -236,6 +308,17 @@ export const updateBlog = async (req, res) => {
             data: blog,
         });
     } catch (error) {
+        console.error('Update blog error:', error);
+
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({
+                success: false,
+                message: "Validation Error",
+                errors: messages,
+            });
+        }
+
         res.status(500).json({
             success: false,
             message: "Error updating blog post",
@@ -243,6 +326,10 @@ export const updateBlog = async (req, res) => {
         });
     }
 };
+
+
+
+
 
 // @desc    Get all blogs with filtering and pagination
 // @route   GET /api/blogs

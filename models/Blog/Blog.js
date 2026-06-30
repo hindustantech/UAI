@@ -122,7 +122,7 @@ const blogSchema = new mongoose.Schema({
     featuredImage: {
         url: {
             type: String,
-            required: [true, "Featured image is required"],
+            required: [true, "Featured image URL is required"],
         },
         public_id: String,
         altText: String,
@@ -144,9 +144,12 @@ const blogSchema = new mongoose.Schema({
     },
     authorName: {
         type: String,
-        required: true,
+        required: [true, "Author name is required"],
     },
-    authorAvatar: String,
+    authorAvatar: {
+        type: String,
+        default: null,
+    },
     
     // Status and Publishing
     status: {
