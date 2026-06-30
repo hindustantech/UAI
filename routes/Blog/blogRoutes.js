@@ -6,6 +6,7 @@ import {
     getBlogBySlug,
     updateBlog,
     deleteBlog,
+    addComment,
     rateBlog,
     toggleLike,
     toggleBookmark,
@@ -49,8 +50,8 @@ router.get("/:id", getBlogById);
 router.post("/", authMiddleware, blogUploadFields, createBlog);
 router.put("/:id", authMiddleware, blogUploadFields, updateBlog);
 router.delete("/:id", authMiddleware, deleteBlog);
-// router.post("/:id/rate", authMiddleware, rateBlog);
-// router.post("/:id/comment", authMiddleware, addComment);
+router.post("/:id/rate", authMiddleware, rateBlog);
+router.post("/:id/comment", authMiddleware, addComment);
 router.post("/:id/like", authMiddleware, toggleLike);
 router.post("/:id/bookmark", authMiddleware, toggleBookmark);
 
