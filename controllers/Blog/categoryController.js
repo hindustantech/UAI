@@ -268,9 +268,6 @@ export const getCategoryBySlug = async (req, res) => {
     }
 };
 
-// @desc    Update category
-// @route   PUT /api/categories/:id
-// @access  Private/Admin
 
 
 // @desc    Delete category
