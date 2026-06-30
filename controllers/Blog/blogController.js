@@ -6,6 +6,9 @@ import { uploadToCloudinary } from "../../utils/Cloudinary.js";
 // @desc    Create blog post
 // @route   POST /api/blogs
 // @access  Private
+// @desc    Create blog post
+// @route   POST /api/blogs
+// @access  Private
 export const createBlog = async (req, res) => {
     try {
         const {
@@ -23,6 +26,21 @@ export const createBlog = async (req, res) => {
             scheduledAt,
         } = req.body;
 
+        // Validate required fields
+        if (!title) {
+            return res.status(400).json({
+                success: false,
+                message: "Blog title is required",
+            });
+        }
+
+        if (!content) {
+            return res.status(400).json({
+                success: false,
+                message: "Blog content is required",
+            });
+        }
+
         // Validate category exists
         const categoryExists = await Category.findById(category);
         if (!categoryExists) {
@@ -35,7 +53,7 @@ export const createBlog = async (req, res) => {
         // Validate subcategory if provided
         if (subCategory) {
             const subExists = categoryExists.subCategories.some(
-                sub => sub.name === subCategory
+                sub => sub.name === subCategory || sub.slug === subCategory
             );
             if (!subExists) {
                 return res.status(400).json({
@@ -45,9 +63,9 @@ export const createBlog = async (req, res) => {
             }
         }
 
-        // Handle image uploads
-        let featuredImageUrl = null;
-        let galleryUrls = [];
+        // Handle image uploads with proper structure
+        let featuredImageObj = null;
+        let galleryArray = [];
 
         // Upload featured image if provided
         if (req.files?.featuredImage) {
@@ -55,7 +73,11 @@ export const createBlog = async (req, res) => {
                 req.files.featuredImage[0].buffer,
                 'blogs/featured'
             );
-            featuredImageUrl = result.secure_url;
+            featuredImageObj = {
+                url: result.secure_url,
+                public_id: result.public_id,
+                altText: title || 'Blog featured image',
+            };
         }
 
         // Upload gallery images if provided
@@ -64,7 +86,27 @@ export const createBlog = async (req, res) => {
                 uploadToCloudinary(file.buffer, 'blogs/gallery')
             );
             const results = await Promise.all(uploadPromises);
-            galleryUrls = results.map(result => result.secure_url);
+            galleryArray = results.map((result, index) => ({
+                url: result.secure_url,
+                public_id: result.public_id,
+                altText: `${title} gallery image ${index + 1}`,
+            }));
+        }
+
+        // Parse tags and metaKeywords safely
+        let parsedTags = [];
+        let parsedMetaKeywords = [];
+
+        try {
+            parsedTags = tags ? (typeof tags === 'string' ? JSON.parse(tags) : tags) : [];
+        } catch (e) {
+            parsedTags = tags ? tags.split(',').map(t => t.trim()) : [];
+        }
+
+        try {
+            parsedMetaKeywords = metaKeywords ? (typeof metaKeywords === 'string' ? JSON.parse(metaKeywords) : metaKeywords) : [];
+        } catch (e) {
+            parsedMetaKeywords = metaKeywords ? metaKeywords.split(',').map(k => k.trim()) : [];
         }
 
         const blog = await Blog.create({
@@ -73,17 +115,17 @@ export const createBlog = async (req, res) => {
             excerpt: excerpt || content.substring(0, 200),
             category,
             subCategory,
-            tags: tags ? JSON.parse(tags) : [],
-            featuredImage: featuredImageUrl,
-            gallery: galleryUrls,
+            tags: parsedTags,
+            featuredImage: featuredImageObj,
+            gallery: galleryArray,
             author: req.user.id,
             authorName: req.user.name,
-            authorAvatar: req.user.avatar,
+            authorAvatar: req.user.avatar || null,
             status,
-            allowComments,
+            allowComments: allowComments === true || allowComments === 'true',
             metaTitle: metaTitle || title,
             metaDescription: metaDescription || excerpt || content.substring(0, 160),
-            metaKeywords: metaKeywords ? JSON.parse(metaKeywords) : [],
+            metaKeywords: parsedMetaKeywords,
             scheduledAt: status === "SCHEDULED" ? scheduledAt : null,
             publishedAt: status === "PUBLISHED" ? new Date() : null,
         });
@@ -93,12 +135,18 @@ export const createBlog = async (req, res) => {
             $inc: { blogCount: 1 }
         });
 
+        // Populate the blog with category and author details
+        const populatedBlog = await Blog.findById(blog._id)
+            .populate('category', 'name slug')
+            .populate('author', 'name avatar');
+
         res.status(201).json({
             success: true,
             message: "Blog post created successfully",
-            data: blog,
+            data: populatedBlog,
         });
     } catch (error) {
+        console.error('Create blog error:', error);
         res.status(500).json({
             success: false,
             message: "Error creating blog post",
