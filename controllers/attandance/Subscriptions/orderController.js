@@ -1,4 +1,4 @@
-import plan from "../../../models/Attandance/subscration/plan.js";
+import Plan from "../../../models/Attandance/subscration/plan.js";
 import { Subscription } from "../../../models/Attandance/subscration/Subscription.js";
 import { calculateDynamicPricing, calculateUpgradeCost } from "../../../services/pricingCalculator.js";
 import crypto from "crypto";
