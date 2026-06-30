@@ -86,7 +86,7 @@ app.use(
 
 
 app.use('/api/v1/slab/',slabpricing)
-app.use('/api/v1/blogPost/',blogPost)
+app.use('/api/v1/blogPost',blogPost)
 app.use('/api/v1/categoryblog/',categoryblog)
 
 app.use('/api/usermanagement', usermanagement);
