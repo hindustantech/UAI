@@ -2,10 +2,6 @@ import Blog from "../../models/Blog/Blog.js";
 import Category from "../../models/Blog/Category.js";
 import { uploadToCloudinary } from "../../utils/Cloudinary.js";
 
-import Blog from "../../models/Blog/Blog.js";
-import Category from "../../models/Blog/Category.js";
-import { uploadToCloudinary } from "../../utils/Cloudinary.js";
-
 // @desc    Create blog post
 // @route   POST /api/blogs
 // @access  Private
