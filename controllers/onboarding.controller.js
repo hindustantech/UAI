@@ -2,16 +2,65 @@
 
 import Onboarding from "../models/Onboarding.js";
 import Lead from '../models/uaileads.js';
+// import { sendEmail } from '../utils/sendEmail.js';
+// const sendEmail = async (to, subject, text) => {
+//     // Implement your email sending logic here
+//     const text = `Dear ${to},\n\n${text}\n\nBest regards,\nYour Company`;
+//     const subject = "Welcome to UAI";
+//     to = to; // Ensure 'to' is a valid email address
+//     sendEmail(to, subject, text);
+//     console.log(`Sending email to: ${to}, Subject: ${subject}, Text: ${text}`);
+// }
 
-const sendEmail = async (to, subject, text) => {
-    // Implement your email sending logic here
-    console.log(`Sending email to: ${to}, Subject: ${subject}, Text: ${text}`);
-}
+const sendUAIWelcomeTemplate = async (phone, customerName) => {
+    const API_KEY = process.env.QUICKHUB_API_KEY;
+    const API_URL = 'https://whatsapp.quickhub.ai/public/whatsapp/send-template';
 
-const sendWhatsappMarketingTemplate = async (phone, message) => {
-    // Implement your WhatsApp sending logic here
-    console.log(`Sending WhatsApp message to: ${phone}, Message: ${message}`);
-}
+    // Your approved template name
+    const templateName = 'uai_first'; // Replace with your actual template name
+
+    const payload = {
+        "to": phone,
+        "templateName": templateName,
+        "variables": {
+            "body": {
+                "Customer name": customerName
+                // The template will automatically include:
+                // - 3 solutions info
+                // - Play Store link
+                // - Reply options (1, 2, 3)
+            }
+        }
+    };
+
+    try {
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log(`✅ UAI welcome message sent to ${phone}`);
+            return { success: true, data };
+        } else {
+            console.error(`❌ Failed:`, data);
+            return { success: false, error: data };
+        }
+    } catch (error) {
+        console.error(`❌ Error:`, error);
+        return { success: false, error: error.message };
+    }
+};
+
+
+
+
 
 
 export const createOnboarding = async (req, res) => {
@@ -56,9 +105,10 @@ export const createOnboarding = async (req, res) => {
                 status: "pending",
             },
         });
-
+        const result = await sendUAIWelcomeTemplate(onboarding.personalInfo.phone, onboarding.personalInfo.name);
         return res.status(201).json({
             success: true,
+            templateResult: templateResult.success,
             message: "Onboarding created successfully.",
             data: onboarding,
         });
@@ -142,8 +192,10 @@ export const createLead = async (req, res) => {
             salesTeam,
             notes,
         });
+        const templateResult = await sendUAIWelcomeTemplate(lead.phone, lead.companyName);
 
         return res.status(201).json({
+            templateResult: templateResult.success,
             success: true,
             message: "Lead created successfully.",
             data: lead,
