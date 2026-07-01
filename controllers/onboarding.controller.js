@@ -11,7 +11,7 @@ const formatPhoneNumber = (phone) => {
     let cleaned = phone.replace(/\D/g, '');
     // Add country code if missing (e.g., India)
     if (!cleaned.startsWith('91') && cleaned.length === 10) {
-        cleaned = '91' + cleaned;
+        cleaned = '+91' + cleaned;
     }
     return cleaned;
 };
