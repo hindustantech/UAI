@@ -474,6 +474,7 @@ const createUpgradeWorksheet = (wb, startDate, endDate, recordCount) => {
     return ws;
 };
 
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  EXPORT 1 — DETAILED ATTENDANCE (day-by-day) WITH BREAK DETAILS
 // ═════════════════════════════════════════════════════════════════════════════
@@ -644,6 +645,7 @@ export const generateAttendanceCSV = async (req, res) => {
             "Status", "Location Verified", "Remarks", "Auto Marked", "Suspicious",
         ];
 
+        /* ── XLSX output ──────────────────────────────────────────────── */
         if (format !== "csv") {
             const workbook = new ExcelJS.Workbook();
             workbook.creator = "HR System";
@@ -748,7 +750,7 @@ export const generateAttendanceCSV = async (req, res) => {
 
             // Add Break Details sheet for premium users
             if (!exceedsFreeLimit) {
-                const wsBreaks = wb.addWorksheet("Break Details");
+                const wsBreaks = workbook.addWorksheet("Break Details");
                 wsBreaks.views = [{ state: "frozen", ySplit: 1 }];
 
                 wsBreaks.mergeCells(1, 1, 1, 10);
@@ -842,7 +844,8 @@ export const generateAttendanceCSV = async (req, res) => {
         /* ── CSV output ───────────────────────────────────────────────── */
         if (exceedsFreeLimit) {
             let csv = `# ⚠️ PREMIUM FEATURE — UPGRADE REQUIRED\n`;
-            csv += `# Showing ${PREMIUM_CONFIG.maxFreeRows} of ${employeeCount} employees\n`;
+            csv += `# Showing ${PREMIUM_CONFIG.maxFreeRows} of ${employeeCount} employees (${PREMIUM_CONFIG.maxFreeRows * dateRange.length} of ${totalRecords} records)\n`;
+            csv += `# Locked rows contain dummy placeholder data — upgrade to see real data with break details\n`;
             csv += `# Contact: sales@yourcompany.com\n\n`;
             csv += fields.map((f) => `"${f}"`).join(",") + "\n";
             rows.forEach((r) => {
@@ -864,7 +867,6 @@ export const generateAttendanceCSV = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to generate attendance report", error: error.message });
     }
 };
-
 /* ─────────────────────────────────────────
    MATRIX EXPORT WITH BREAK INFO
 ───────────────────────────────────────── */
