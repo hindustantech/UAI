@@ -5,15 +5,29 @@ import Lead from '../models/uaileads.js';
 // import { sendEmail } from '../utils/sendEmail.js';
 
 
+// Add before sending
+const formatPhoneNumber = (phone) => {
+    // Remove any non-digit characters
+    let cleaned = phone.replace(/\D/g, '');
+    // Add country code if missing (e.g., India)
+    if (!cleaned.startsWith('91') && cleaned.length === 10) {
+        cleaned = '91' + cleaned;
+    }
+    return cleaned;
+};
+
+// Use in your functions
 const sendUAIWelcomeTemplate = async (phone, customerName) => {
     const API_KEY = process.env.QUICKHUB_API_KEY;
     const API_URL = 'https://whatsapp.quickhub.ai/public/whatsapp/send-template';
+
+    const formattedPhone = formatPhoneNumber(phone);
 
     // Your approved template name
     const templateName = 'uai_first'; // Replace with your actual template name
 
     const payload = {
-        "to": phone,
+        "to": formattedPhone,
         "templateName": templateName,
         "variables": {
             "body": {
