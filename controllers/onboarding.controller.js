@@ -3,14 +3,7 @@
 import Onboarding from "../models/Onboarding.js";
 import Lead from '../models/uaileads.js';
 // import { sendEmail } from '../utils/sendEmail.js';
-// const sendEmail = async (to, subject, text) => {
-//     // Implement your email sending logic here
-//     const text = `Dear ${to},\n\n${text}\n\nBest regards,\nYour Company`;
-//     const subject = "Welcome to UAI";
-//     to = to; // Ensure 'to' is a valid email address
-//     sendEmail(to, subject, text);
-//     console.log(`Sending email to: ${to}, Subject: ${subject}, Text: ${text}`);
-// }
+
 
 const sendUAIWelcomeTemplate = async (phone, customerName) => {
     const API_KEY = process.env.QUICKHUB_API_KEY;
