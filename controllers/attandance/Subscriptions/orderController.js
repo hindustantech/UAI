@@ -264,9 +264,9 @@ export const verifyPayment = async (req, res) => {
                 paidAt: new Date(),
             },
             usage: {
-                employeesUsed: attendanceEmployees,
-                no_of_sales_person_employeesUsed: salesEmployees,
-                no_of_pro_sales_person_employeesUsed: proSalesEmployees,
+                // employeesUsed: attendanceEmployees,
+                // no_of_sales_person_employeesUsed: salesEmployees,
+                // no_of_pro_sales_person_employeesUsed: proSalesEmployees,
                 maxEmployees: attendanceEmployees,
                 no_of_sales_person_maxEmployees: salesEmployees,
                 no_of_pro_sales_person_maxEmployees: proSalesEmployees,
