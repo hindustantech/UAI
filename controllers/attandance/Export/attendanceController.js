@@ -27,17 +27,123 @@ const minutesToHours = (mins = 0) =>
     (Math.abs(mins) / 60).toFixed(2);
 
 /**
+ * Get break details with deductions
+ * Returns array of break info and calculates total deductions
+ */
+const getBreakDetails = (actualBreaks = [], shiftBreakConfig = []) => {
+    const breakDetails = [];
+    let totalDeductMinutes = 0;
+    let totalExcessMinutes = 0;
+    let totalBreakMinutes = 0;
+
+    if (actualBreaks && actualBreaks.length > 0) {
+        actualBreaks.forEach(breakEntry => {
+            // Calculate actual break duration
+            let breakDuration = 0;
+            let startTime = "—";
+            let endTime = "—";
+
+            if (breakEntry.startTime) {
+                startTime = formatTime(breakEntry.startTime);
+            }
+            if (breakEntry.endTime) {
+                endTime = formatTime(breakEntry.endTime);
+            }
+
+            if (breakEntry.durationMinutes) {
+                breakDuration = breakEntry.durationMinutes;
+            } else if (breakEntry.startTime && breakEntry.endTime) {
+                breakDuration = Math.round(
+                    (new Date(breakEntry.endTime).getTime() - new Date(breakEntry.startTime).getTime()) / (1000 * 60)
+                );
+            }
+
+            totalBreakMinutes += breakDuration;
+
+            let allowedMinutes = 0;
+            let isPaid = false;
+            let deductedMinutes = 0;
+            let excessMinutes = 0;
+            let breakName = breakEntry.breakName || breakEntry.type || "Break";
+
+            if (breakDuration > 0 && shiftBreakConfig && shiftBreakConfig.length > 0) {
+                // Find matching shift break configuration
+                const shiftBreak = shiftBreakConfig.find(sb => {
+                    const configName = (sb.name || "").toLowerCase();
+                    const entryName = breakName.toLowerCase();
+                    return configName === entryName || 
+                           configName.includes(entryName) || 
+                           entryName.includes(configName);
+                });
+
+                if (shiftBreak) {
+                    allowedMinutes = shiftBreak.duration || shiftBreak.allowedMinutes || 30;
+                    isPaid = shiftBreak.isPaid === true;
+
+                    if (!isPaid) {
+                        // UNPAID BREAK: Deduct ALL break time
+                        deductedMinutes = breakDuration;
+                        totalDeductMinutes += breakDuration;
+                    } else {
+                        // PAID BREAK: Only deduct excess time
+                        if (breakDuration > allowedMinutes) {
+                            excessMinutes = breakDuration - allowedMinutes;
+                            deductedMinutes = excessMinutes;
+                            totalDeductMinutes += excessMinutes;
+                            totalExcessMinutes += excessMinutes;
+                        }
+                    }
+                } else {
+                    // No matching config found, treat as unpaid (safe default)
+                    allowedMinutes = 0;
+                    isPaid = false;
+                    deductedMinutes = breakDuration;
+                    totalDeductMinutes += breakDuration;
+                }
+            } else if (breakDuration > 0) {
+                // No shift config available, deduct all break time (safe default)
+                deductedMinutes = breakDuration;
+                totalDeductMinutes += breakDuration;
+            }
+
+            breakDetails.push({
+                name: breakName,
+                startTime: startTime,
+                endTime: endTime,
+                duration: breakDuration,
+                durationFormatted: formatMinutes(breakDuration),
+                allowedMinutes: allowedMinutes,
+                allowedFormatted: formatMinutes(allowedMinutes),
+                isPaid: isPaid,
+                deductedMinutes: deductedMinutes,
+                deductedFormatted: formatMinutes(deductedMinutes),
+                excessMinutes: excessMinutes,
+                excessFormatted: formatMinutes(excessMinutes),
+            });
+        });
+    }
+
+    return {
+        breakDetails,
+        totalBreakMinutes,
+        totalDeductMinutes,
+        totalExcessMinutes,
+        summary: breakDetails.map(b => 
+            `${b.name}: ${b.durationFormatted} (${b.isPaid ? 'Paid' : 'Unpaid'}, Allowed: ${b.allowedFormatted}, Deducted: ${b.deductedFormatted})`
+        ).join(" | ")
+    };
+};
+
+/**
  * Calculate working hours considering breaks
- * - Unpaid breaks: deduct ALL break time
- * - Paid breaks within limits: no deduction
- * - Paid breaks exceeded: deduct only excess minutes
  */
 const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], shiftBreakConfig = []) => {
     if (!punchIn || !punchOut) return { 
         totalMinutes: 0, 
         payableMinutes: 0, 
         breakDeductedMinutes: 0,
-        excessBreakMinutes: 0 
+        excessBreakMinutes: 0,
+        breakDetails: []
     };
 
     const punchInTime = new Date(punchIn).getTime();
@@ -46,56 +152,7 @@ const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], s
     // Total gross working minutes (punch to punch)
     const totalGrossMinutes = Math.round((punchOutTime - punchInTime) / (1000 * 60));
     
-    let totalDeductMinutes = 0;
-    let excessBreakMinutes = 0;
-    
-    if (actualBreaks && actualBreaks.length > 0) {
-        actualBreaks.forEach(breakEntry => {
-            // Calculate actual break duration
-            let breakDuration = 0;
-            if (breakEntry.durationMinutes) {
-                breakDuration = breakEntry.durationMinutes;
-            } else if (breakEntry.startTime && breakEntry.endTime) {
-                breakDuration = Math.round(
-                    (new Date(breakEntry.endTime).getTime() - new Date(breakEntry.startTime).getTime()) / (1000 * 60)
-                );
-            }
-            
-            if (breakDuration > 0 && shiftBreakConfig && shiftBreakConfig.length > 0) {
-                // Find matching shift break configuration
-                const shiftBreak = shiftBreakConfig.find(sb => {
-                    const breakName = (breakEntry.breakName || breakEntry.type || "").toLowerCase();
-                    const configName = (sb.name || "").toLowerCase();
-                    return configName === breakName || 
-                           configName.includes(breakName) || 
-                           breakName.includes(configName);
-                });
-                
-                if (shiftBreak) {
-                    const allowedMinutes = shiftBreak.duration || shiftBreak.allowedMinutes || 30;
-                    
-                    if (shiftBreak.isPaid === false) {
-                        // UNPAID BREAK: Deduct ALL break time
-                        totalDeductMinutes += breakDuration;
-                    } else {
-                        // PAID BREAK: Only deduct excess time
-                        if (breakDuration > allowedMinutes) {
-                            const exceeded = breakDuration - allowedMinutes;
-                            excessBreakMinutes += exceeded;
-                            totalDeductMinutes += exceeded;
-                        }
-                        // If within allowed time, no deduction (paid break)
-                    }
-                } else {
-                    // No matching config found, treat as unpaid (safe default)
-                    totalDeductMinutes += breakDuration;
-                }
-            } else if (breakDuration > 0) {
-                // No shift config available, deduct all break time (safe default)
-                totalDeductMinutes += breakDuration;
-            }
-        });
-    }
+    const { breakDetails, totalDeductMinutes, totalExcessMinutes } = getBreakDetails(actualBreaks, shiftBreakConfig);
     
     const payableMinutes = Math.max(0, totalGrossMinutes - totalDeductMinutes);
     
@@ -103,13 +160,13 @@ const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], s
         totalMinutes: totalGrossMinutes,
         payableMinutes: payableMinutes,
         breakDeductedMinutes: totalDeductMinutes,
-        excessBreakMinutes: excessBreakMinutes
+        excessBreakMinutes: totalExcessMinutes,
+        breakDetails: breakDetails
     };
 };
 
 /**
  * Determine Late / Early-leave status given shift & punch times.
- * Returns array of status tags that will be appended to the main status.
  */
 const getLateEarlyTags = (shiftStart, shiftEnd, punchIn, punchOut, graceIn = 10, graceOut = 10) => {
     const tags = [];
@@ -206,27 +263,25 @@ const buildAttendanceMap = (records) => {
     return map;
 };
 
-/** Returns { code, label, punchIn, punchOut, hours } for one day */
+/** Returns { code, label, punchIn, punchOut, hours, breakInfo } for one day */
 const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEnd = "18:00", graceIn = 10, graceOut = 10) => {
-    if (isWeeklyOff) return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00" };
-    if (!attendance) return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00" };
+    if (isWeeklyOff) return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
+    if (!attendance) return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
 
     const pi = formatTime(attendance.punchIn);
     const po = formatTime(attendance.punchOut);
 
     switch (attendance.status) {
-        case "leave": return { code: "L", label: "Leave", punchIn: "—", punchOut: "—", hours: "0:00" };
-        case "holiday": return { code: "H", label: "Holiday", punchIn: "—", punchOut: "—", hours: "0:00" };
-        case "week_off": return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00" };
-        case "absent": return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00" };
+        case "leave": return { code: "L", label: "Leave", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
+        case "holiday": return { code: "H", label: "Holiday", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
+        case "week_off": return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
+        case "absent": return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
         default: {
-            // Calculate working hours with break deductions
             let hrs = "0:00";
+            let breakInfo = "";
             if (attendance.punchIn && attendance.punchOut) {
-                // Get shift breaks configuration
                 const shiftBreaks = attendance.shift?.breaks || [];
                 
-                // Calculate working hours with break deductions
                 const workCalc = calculateWorkingHoursWithBreaks(
                     attendance.punchIn, 
                     attendance.punchOut, 
@@ -234,51 +289,51 @@ const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEn
                     shiftBreaks
                 );
                 
-                // Format as HH:MM
                 hrs = formatWorkingHours(workCalc.payableMinutes);
+                breakInfo = workCalc.breakDetails.map(b => 
+                    `${b.name}(${b.durationFormatted}${b.deductedMinutes > 0 ? ` -${b.deductedFormatted}` : ''})`
+                ).join(", ");
             }
 
-            // Check for half day (less than 4 hours = 240 minutes)
             if (attendance.status === "half_day") {
-                return { code: "HD", label: "Half Day", punchIn: pi || "—", punchOut: po || "—", hours: hrs };
+                return { code: "HD", label: "Half Day", punchIn: pi || "—", punchOut: po || "—", hours: hrs, breakInfo };
             }
 
-            // Present – detect late / early leave
             let tag = "P";
             if (pi) {
                 const inMin = timeStrToMinutes(pi);
-                if (inMin - timeStrToMinutes(shiftStart) > graceIn) tag = "PL"; // Present Late
+                if (inMin - timeStrToMinutes(shiftStart) > graceIn) tag = "PL";
             }
             if (po) {
                 const outMin = timeStrToMinutes(po);
                 const shiftOut = timeStrToMinutes(shiftEnd);
-                if (shiftOut - outMin > graceOut) tag = tag === "PL" ? "PLE" : "PE"; // Early Exit
+                if (shiftOut - outMin > graceOut) tag = tag === "PL" ? "PLE" : "PE";
             }
             const labels = { P: "Present", PL: "Late", PE: "Early Exit", PLE: "Late+Early" };
-            return { code: tag, label: labels[tag] || "Present", punchIn: pi || "—", punchOut: po || "—", hours: hrs };
+            return { code: tag, label: labels[tag] || "Present", punchIn: pi || "—", punchOut: po || "—", hours: hrs, breakInfo };
         }
     }
 };
 
 /* Status colour palette */
 const STATUS_FILL = {
-    P: "FFD9EAD3", // green
-    PL: "FFFFFF99", // yellow
-    PE: "FFFCE5CD", // orange
-    PLE: "FFFFD966", // amber
-    HD: "FFFFE599", // light yellow
-    A: "FFFFC7CE", // red
-    L: "FFD9D2E9", // lavender
-    WO: "FFD0E4F7", // blue
-    H: "FFB7E1CD", // teal-green
+    P: "FFD9EAD3",
+    PL: "FFFFFF99",
+    PE: "FFFCE5CD",
+    PLE: "FFFFD966",
+    HD: "FFFFE599",
+    A: "FFFFC7CE",
+    L: "FFD9D2E9",
+    WO: "FFD0E4F7",
+    H: "FFB7E1CD",
 };
 const STATUS_FONT = {
     A: "FF9C0006", L: "FF6A0DAD", WO: "FF1155CC", H: "FF137333",
     PL: "FF7D6608", PE: "FF7D4604", PLE: "FF7D4604",
 };
 
-const HEADER_BG = "FF1F3864"; // dark navy
-const SUBHEAD_BG = "FF2F5496"; // medium blue
+const HEADER_BG = "FF1F3864";
+const SUBHEAD_BG = "FF2F5496";
 const ALT_ROW_BG = "FFF2F6FC";
 const ALT_ROW = "FFF2F6FC";
 
@@ -286,7 +341,6 @@ const PREMIUM_CONFIG = {
     maxFreeRows: 1,
 };
 
-// ── Premium check (returns boolean) ───────────────────────────────────────
 const checkPremiumAccess = async (companyId) => {
     try {
         const subscription = await Subscription.findOne({
@@ -300,12 +354,6 @@ const checkPremiumAccess = async (companyId) => {
 
         if (!subscription?.plan) return false;
 
-        console.log("Subscription found:", {
-            planName: subscription.plan.name,
-            isFree: subscription.plan.isfree,
-            endDate: subscription.endDate,
-        });
-
         return !subscription.plan.isfree;
     } catch (error) {
         console.error("Premium Check Error:", error);
@@ -313,7 +361,6 @@ const checkPremiumAccess = async (companyId) => {
     }
 };
 
-// ── Dummy row generators ─────────────────────────────────────────────────
 const makeDummySummaryRow = (index) => ({
     empCode: `EMP-${String(index + 1).padStart(3, "0")}`,
     empName: "****** ******",
@@ -334,6 +381,8 @@ const makeDummySummaryRow = (index) => ({
     avgWorkHrs: "—",
     totalOTHrs: "—",
     totalLateHrs: "—",
+    totalBreakHrs: "—",
+    totalDeductedHrs: "—",
     attPct: "—",
     basic: "—",
     hra: "—",
@@ -354,9 +403,12 @@ const makeDummyDetailRow = (empIndex, dateIndex) => ({
     "Punch In": "**:**",
     "Punch Out": "**:**",
     "Total Hours": "**:00",
+    "Gross Hours": "**:00",
+    "Break Deducted": "**:00",
     "Overtime (min)": "—",
     "Late (min)": "—",
     "Early Leave (min)": "—",
+    "Break Details": "*****",
     "Break (min)": "—",
     "Status": "🔒 Locked",
     "Location Verified": "—",
@@ -365,7 +417,6 @@ const makeDummyDetailRow = (empIndex, dateIndex) => ({
     "Suspicious": "—",
 });
 
-// ── Upgrade worksheet ─────────────────────────────────────────────────────
 const createUpgradeWorksheet = (wb, startDate, endDate, recordCount) => {
     const ws = wb.addWorksheet("⚠️ Upgrade Required");
     ws.columns = [{ width: 60 }];
@@ -382,7 +433,7 @@ const createUpgradeWorksheet = (wb, startDate, endDate, recordCount) => {
     addRow(1, "⚠️  PREMIUM FEATURE — UPGRADE REQUIRED  ⚠️",
         { bold: true, size: 16, color: { argb: "FF9C0006" } }, "FFFFC7CE", 36);
 
-    addRow(2, "Full attendance reports with salary structure are available on Premium plans only.",
+    addRow(2, "Full attendance reports with break details and salary structure are available on Premium plans only.",
         { bold: true }, null, 28);
 
     addRow(3,
@@ -390,18 +441,19 @@ const createUpgradeWorksheet = (wb, startDate, endDate, recordCount) => {
         `Free plan is limited to ${PREMIUM_CONFIG.maxFreeRows} employees.`,
         {}, "FFFFF2CC", 28);
 
-    addRow(4, "The data below is blurred. Upgrade to see the complete report.",
+    addRow(4, "The data below is blurred. Upgrade to see complete break details and deductions.",
         { italic: true, color: { argb: "FF555555" } });
 
     addRow(5, "🔓  Upgrade to Premium to unlock:", { bold: true, size: 13, color: { argb: "FF137333" } }, null, 28);
 
     const features = [
-        "✓  Full attendance report for unlimited employees",
+        "✓  Full attendance report with break details (Paid/Unpaid, Allowed vs Actual)",
+        "✓  Break deduction calculations (excess time reduced from working hours)",
         "✓  Salary structure columns (Basic, HRA, DA, Bonus, Per Day, OT Rate)",
         "✓  Department-wise pivot analysis",
         "✓  Overtime & late-hours calculations",
         "✓  Advanced attendance grading",
-        "✓  CSV & XLSX export",
+        "✓  CSV & XLSX export with all break information",
         "✓  Priority email support",
     ];
     features.forEach((f, i) => {
@@ -423,7 +475,7 @@ const createUpgradeWorksheet = (wb, startDate, endDate, recordCount) => {
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  EXPORT 1 — DETAILED ATTENDANCE (day-by-day)
+//  EXPORT 1 — DETAILED ATTENDANCE (day-by-day) WITH BREAK DETAILS
 // ═════════════════════════════════════════════════════════════════════════════
 export const generateAttendanceCSV = async (req, res) => {
     try {
@@ -464,11 +516,8 @@ export const generateAttendanceCSV = async (req, res) => {
         const totalRecords = employeeCount * dateRange.length;
 
         const isPremium = await checkPremiumAccess(companyId);
-        console.log(`Company ${companyId} premium access: ${isPremium}`);
-
         const exceedsFreeLimit = !isPremium && employeeCount > PREMIUM_CONFIG.maxFreeRows;
 
-        // ── Build rows ────────────────────────────────────────────────
         let rows = [];
 
         const employeesToProcess = exceedsFreeLimit
@@ -491,6 +540,7 @@ export const generateAttendanceCSV = async (req, res) => {
                 const isWeeklyOff = weeklyOffDays.includes(dayOfWeek);
 
                 let punchInTime = "—", punchOutTime = "—", totalHours = "0:00";
+                let grossHours = "0:00", breakDeducted = "0:00", breakDetails = "";
                 let overtimeMinutes = 0, lateMinutes = 0, earlyLeaveMinutes = 0, breakMinutes = 0;
                 let statusLabel = "", locationVerified = "No", remarks = "", autoMarked = "No", suspicious = "No";
 
@@ -502,7 +552,6 @@ export const generateAttendanceCSV = async (req, res) => {
                     punchInTime = attendance.punchIn ? formatTime(attendance.punchIn) : "—";
                     punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
                     
-                    // Calculate working hours with break deductions
                     const workCalc = calculateWorkingHoursWithBreaks(
                         attendance.punchIn,
                         attendance.punchOut,
@@ -511,10 +560,17 @@ export const generateAttendanceCSV = async (req, res) => {
                     );
                     
                     totalHours = formatWorkingHours(workCalc.payableMinutes);
+                    grossHours = formatWorkingHours(workCalc.totalMinutes);
+                    breakDeducted = formatWorkingHours(workCalc.breakDeductedMinutes);
+                    breakMinutes = workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
+                    
+                    // Build detailed break information
+                    const { summary } = getBreakDetails(attendance.breaks, shiftBreaks);
+                    breakDetails = summary || "No breaks";
+                    
                     overtimeMinutes = attendance.workSummary?.overtimeMinutes || 0;
                     lateMinutes = formatLateTime(attendance.workSummary?.lateMinutes) || 0;
                     earlyLeaveMinutes = attendance.workSummary?.earlyLeaveMinutes || 0;
-                    breakMinutes = totalBreakMinutes(attendance.breaks);
                     locationVerified = attendance.geoLocation?.verified ? "Yes" : "No";
                     remarks = attendance.remarks || "";
                     autoMarked = attendance.isAutoMarked ? "Yes" : "No";
@@ -533,9 +589,9 @@ export const generateAttendanceCSV = async (req, res) => {
                     }
 
                     switch (attendance.status) {
-                        case "leave": statusLabel = "Leave"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; break;
+                        case "leave": statusLabel = "Leave"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;
                         case "half_day": statusLabel = "Half Day"; break;
-                        case "holiday": statusLabel = "Holiday"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; break;
+                        case "holiday": statusLabel = "Holiday"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;
                         case "week_off": statusLabel = "Week Off"; break;
                         case "absent": statusLabel = "Absent"; break;
                         default: {
@@ -554,7 +610,10 @@ export const generateAttendanceCSV = async (req, res) => {
                     "Day": dayOfWeek,
                     "Punch In": punchInTime,
                     "Punch Out": punchOutTime,
+                    "Gross Hours": grossHours,
                     "Total Hours": totalHours,
+                    "Break Deducted": breakDeducted,
+                    "Break Details": breakDetails,
                     "Overtime (min)": overtimeMinutes,
                     "Late (min)": lateMinutes,
                     "Early Leave (min)": earlyLeaveMinutes,
@@ -568,7 +627,6 @@ export const generateAttendanceCSV = async (req, res) => {
             }
         }
 
-        // Pad remaining employees with dummy rows for free users
         if (exceedsFreeLimit) {
             const dummyEmpCount = employeeCount - PREMIUM_CONFIG.maxFreeRows;
             for (let ei = 0; ei < dummyEmpCount; ei++) {
@@ -581,11 +639,11 @@ export const generateAttendanceCSV = async (req, res) => {
         const fields = [
             "Emp Code", "Emp Name", "Department", "Shift",
             "Date", "Day", "Punch In", "Punch Out",
-            "Total Hours", "Overtime (min)", "Late (min)", "Early Leave (min)", "Break (min)",
+            "Gross Hours", "Total Hours", "Break Deducted", "Break Details",
+            "Overtime (min)", "Late (min)", "Early Leave (min)", "Break (min)",
             "Status", "Location Verified", "Remarks", "Auto Marked", "Suspicious",
         ];
 
-        /* ── XLSX output ──────────────────────────────────────────────── */
         if (format !== "csv") {
             const workbook = new ExcelJS.Workbook();
             workbook.creator = "HR System";
@@ -616,7 +674,7 @@ export const generateAttendanceCSV = async (req, res) => {
 
                 sheet.mergeCells(2, 1, 2, fields.length);
                 const subNoteCell = sheet.getCell(2, 1);
-                subNoteCell.value = `Rows marked 🔒 contain dummy data. Upgrade to Premium for full access.`;
+                subNoteCell.value = `Rows marked 🔒 contain dummy data. Upgrade to Premium for full access with break details.`;
                 subNoteCell.font = { name: "Arial", size: 10, italic: true, color: { argb: "FF555555" } };
                 subNoteCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } };
                 subNoteCell.alignment = { horizontal: "center", vertical: "middle" };
@@ -625,13 +683,13 @@ export const generateAttendanceCSV = async (req, res) => {
                 nextRow = 3;
             }
 
-            sheet.columns = fields.map((f) => ({ header: f, key: f, width: 15 }));
+            sheet.columns = fields.map((f) => ({ header: f, key: f, width: 18 }));
             const headerRow = sheet.getRow(nextRow);
             if (exceedsFreeLimit) {
                 fields.forEach((f, i) => { headerRow.getCell(i + 1).value = f; });
             }
             headerRow.eachCell((cell) => {
-                cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
+                cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 9 };
                 cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2F5496" } };
                 cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
             });
@@ -661,10 +719,10 @@ export const generateAttendanceCSV = async (req, res) => {
                 const baseFill = isLocked ? "FFD3D3D3" : (idx % 2 === 0 ? "FFF9FAFB" : "FFFFFFFF");
 
                 dataRow.eachCell({ includeEmpty: true }, (cell) => {
-                    cell.alignment = { horizontal: "center", vertical: "middle" };
+                    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
                     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: baseFill } };
                     cell.font = {
-                        name: "Arial", size: 9,
+                        name: "Arial", size: 8,
                         color: { argb: isLocked ? "FF888888" : "FF000000" },
                         italic: isLocked,
                     };
@@ -673,7 +731,13 @@ export const generateAttendanceCSV = async (req, res) => {
                 const statusCell = dataRow.getCell("Status");
                 const bgColor = STATUS_COLORS[r["Status"]] || baseFill;
                 statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
-                statusCell.font = { name: "Arial", size: 9, bold: !isLocked, italic: isLocked, color: { argb: isLocked ? "FF888888" : "FF000000" } };
+                statusCell.font = { name: "Arial", size: 8, bold: !isLocked, italic: isLocked, color: { argb: isLocked ? "FF888888" : "FF000000" } };
+
+                // Highlight break deducted
+                if (!isLocked && r["Break Deducted"] && r["Break Deducted"] !== "0:00") {
+                    const breakCell = dataRow.getCell("Break Deducted");
+                    breakCell.font = { name: "Arial", size: 8, bold: true, color: { argb: "FF9C0006" } };
+                }
 
                 if (!isLocked && r["Suspicious"] === "Yes") {
                     dataRow.eachCell((cell) => {
@@ -682,35 +746,88 @@ export const generateAttendanceCSV = async (req, res) => {
                 }
             });
 
+            // Add Break Details sheet for premium users
             if (!exceedsFreeLimit) {
-                sheet.autoFilter = {
-                    from: { row: 1, column: 1 },
-                    to: { row: 1, column: sheet.columns.length },
-                };
+                const wsBreaks = wb.addWorksheet("Break Details");
+                wsBreaks.views = [{ state: "frozen", ySplit: 1 }];
 
-                const summary = workbook.addWorksheet("Summary");
-                summary.columns = [
-                    { header: "Status", key: "status", width: 20 },
-                    { header: "Count", key: "count", width: 10 },
-                    { header: "% of Total", key: "pct", width: 14 },
+                wsBreaks.mergeCells(1, 1, 1, 10);
+                const bTitleCell = wsBreaks.getCell(1, 1);
+                bTitleCell.value = `BREAK DETAILS REPORT  |  ${startDate} to ${endDate}`;
+                bTitleCell.font = { name: "Arial", bold: true, size: 13, color: { argb: "FFFFFFFF" } };
+                bTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
+                bTitleCell.alignment = { horizontal: "center", vertical: "middle" };
+                wsBreaks.getRow(1).height = 24;
+
+                const bHeaders = ["Emp Code", "Emp Name", "Date", "Break Name", "Start", "End", "Duration", "Allowed", "Paid/Unpaid", "Deducted"];
+                const bHeaderRow = wsBreaks.getRow(2);
+                bHeaders.forEach((h, i) => {
+                    const cell = bHeaderRow.getCell(i + 1);
+                    cell.value = h;
+                    cell.font = { name: "Arial", bold: true, size: 9, color: { argb: "FFFFFFFF" } };
+                    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: SUBHEAD_BG } };
+                    cell.alignment = { horizontal: "center", vertical: "middle" };
+                });
+                bHeaderRow.height = 18;
+
+                wsBreaks.columns = [
+                    { width: 12 }, { width: 22 }, { width: 13 }, { width: 15 },
+                    { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
+                    { width: 12 }, { width: 12 },
                 ];
-                summary.getRow(1).eachCell((cell) => {
-                    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
-                    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2F5496" } };
-                    cell.alignment = { horizontal: "center" };
-                });
-                const statusCounts = rows.reduce((acc, r) => {
-                    const s = r["Status"] || "Unknown";
-                    acc[s] = (acc[s] || 0) + 1;
-                    return acc;
-                }, {});
-                const total = rows.length;
-                Object.entries(statusCounts).forEach(([status, count]) => {
-                    summary.addRow({ status, count, pct: `${((count / total) * 100).toFixed(1)}%` });
-                });
-                summary.addRow({});
-                summary.addRow({ status: "Total Records", count: total, pct: "100%" });
+
+                let breakRowNum = 3;
+                for (const emp of employeesToProcess) {
+                    const shiftBreaks = emp.shift?.breaks || [];
+                    for (const date of dateRange) {
+                        const dateKey = date.toISOString().split("T")[0];
+                        const attendance = attendanceMap.get(`${emp._id}_${dateKey}`);
+                        
+                        if (attendance && attendance.breaks && attendance.breaks.length > 0) {
+                            const { breakDetails } = getBreakDetails(attendance.breaks, shiftBreaks);
+                            
+                            breakDetails.forEach((bd) => {
+                                const row = wsBreaks.getRow(breakRowNum++);
+                                row.height = 15;
+                                const bg = (breakRowNum % 2 === 0) ? ALT_ROW_BG : "FFFFFFFF";
+                                
+                                const vals = [
+                                    emp.empCode || "—",
+                                    emp.user_name || "N/A",
+                                    dateKey,
+                                    bd.name,
+                                    bd.startTime,
+                                    bd.endTime,
+                                    bd.durationFormatted,
+                                    bd.allowedFormatted,
+                                    bd.isPaid ? "Paid" : "Unpaid",
+                                    bd.deductedFormatted,
+                                ];
+                                
+                                vals.forEach((v, i) => {
+                                    const cell = row.getCell(i + 1);
+                                    cell.value = v;
+                                    cell.font = { name: "Arial", size: 9 };
+                                    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+                                    cell.alignment = { horizontal: "center", vertical: "middle" };
+                                });
+                                
+                                // Highlight deductions
+                                if (bd.deductedMinutes > 0) {
+                                    const deductCell = row.getCell(10);
+                                    deductCell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
+                                    deductCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+                                }
+                            });
+                        }
+                    }
+                }
             }
+
+            sheet.autoFilter = {
+                from: { row: nextRow, column: 1 },
+                to: { row: nextRow, column: fields.length },
+            };
 
             const filename = exceedsFreeLimit
                 ? `attendance_sample_${startDate}_to_${endDate}.xlsx`
@@ -725,8 +842,7 @@ export const generateAttendanceCSV = async (req, res) => {
         /* ── CSV output ───────────────────────────────────────────────── */
         if (exceedsFreeLimit) {
             let csv = `# ⚠️ PREMIUM FEATURE — UPGRADE REQUIRED\n`;
-            csv += `# Showing ${PREMIUM_CONFIG.maxFreeRows} of ${employeeCount} employees (${PREMIUM_CONFIG.maxFreeRows * dateRange.length} of ${totalRecords} records)\n`;
-            csv += `# Locked rows contain dummy placeholder data — upgrade to see real data\n`;
+            csv += `# Showing ${PREMIUM_CONFIG.maxFreeRows} of ${employeeCount} employees\n`;
             csv += `# Contact: sales@yourcompany.com\n\n`;
             csv += fields.map((f) => `"${f}"`).join(",") + "\n";
             rows.forEach((r) => {
@@ -750,9 +866,7 @@ export const generateAttendanceCSV = async (req, res) => {
 };
 
 /* ─────────────────────────────────────────
-   MATRIX EXPORT
-   One row per employee, dates as columns.
-   Each cell shows status code with HH:MM format
+   MATRIX EXPORT WITH BREAK INFO
 ───────────────────────────────────────── */
 
 export const generateAttendanceMatrixCSV = async (req, res) => {
@@ -784,7 +898,6 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
         const attMap = buildAttendanceMap(attendanceRecords);
         const dateRange = buildDateRange(start, end);
 
-        /* ── Workbook ── */
         const wb = new ExcelJS.Workbook();
         wb.creator = "HR System";
         wb.created = new Date();
@@ -796,7 +909,7 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             views: [{ state: "frozen", xSplit: 4, ySplit: 3 }],
         });
 
-        // ── Row 1: Title ──
+        // Row 1: Title
         ws.mergeCells(1, 1, 1, 4 + dateRange.length);
         const titleCell = ws.getCell(1, 1);
         titleCell.value = `ATTENDANCE MATRIX REPORT  |  ${startDate}  to  ${endDate}`;
@@ -805,7 +918,7 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
         titleCell.alignment = { horizontal: "center", vertical: "middle" };
         ws.getRow(1).height = 28;
 
-        // ── Row 2: Date sub-headers ──
+        // Row 2: Date sub-headers
         const dateRow = ws.getRow(2);
         ["#", "Emp Code", "Emp Name", "Department"].forEach((h, i) => {
             const c = dateRow.getCell(i + 1);
@@ -826,7 +939,7 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
         });
         dateRow.height = 40;
 
-        // ── Row 3: Legend ──
+        // Row 3: Legend
         const legendRow = ws.getRow(3);
         const legends = [
             { code: "P", label: "Present" }, { code: "PL", label: "Late" },
@@ -846,14 +959,13 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
         });
         legendRow.height = 16;
 
-        // ── Fixed columns widths ──
         ws.getColumn(1).width = 5;
         ws.getColumn(2).width = 12;
         ws.getColumn(3).width = 22;
         ws.getColumn(4).width = 18;
-        dateRange.forEach((_, i) => { ws.getColumn(5 + i).width = 9; });
+        dateRange.forEach((_, i) => { ws.getColumn(5 + i).width = 10; });
 
-        // ── Data rows ──
+        // Data rows
         employees.forEach((emp, empIdx) => {
             const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
             const shiftStart = emp.shift?.startTime || "09:00";
@@ -865,9 +977,8 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             const rowNum = dataRow.number;
             const isAlt = empIdx % 2 === 0;
 
-            dataRow.height = 20;
+            dataRow.height = 25;
 
-            // Fixed cells
             const fixedVals = [
                 empIdx + 1,
                 emp.empCode || "—",
@@ -883,29 +994,32 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
                 cell.border = { right: { style: "thin", color: { argb: "FFCCCCCC" } } };
             });
 
-            // Date cells
             dateRange.forEach((date, di) => {
                 const dateKey = date.toISOString().split("T")[0];
                 const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const att = attMap.get(`${emp._id}_${dateKey}`);
                 const isWO = weeklyOff.includes(dayName);
 
-                const { code, label, punchIn, punchOut, hours } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
+                const { code, label, punchIn, punchOut, hours, breakInfo } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
 
                 const cell = ws.getCell(rowNum, 5 + di);
-                // Show: code with hours in HH:MM format
                 cell.value = `${code}\n${hours}`;
                 cell.font = {
-                    name: "Arial", size: 9, bold: true,
+                    name: "Arial", size: 8, bold: true,
                     color: { argb: STATUS_FONT[code] || "FF000000" },
                 };
                 cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: STATUS_FILL[code] || "FFFFFFFF" } };
                 cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-                // Add tooltip via comment
+                
+                // Enhanced tooltip with break info
+                let tooltipText = `${label}\nIn:  ${punchIn}\nOut: ${punchOut}\nHrs: ${hours}`;
+                if (breakInfo) {
+                    tooltipText += `\nBreaks: ${breakInfo}`;
+                }
+                
                 cell.note = {
                     texts: [
-                        { font: { bold: true, size: 9 }, text: `${label}\n` },
-                        { font: { size: 9 }, text: `In:  ${punchIn}\nOut: ${punchOut}\nHrs: ${hours}` },
+                        { font: { bold: true, size: 9 }, text: tooltipText },
                     ],
                 };
                 cell.border = {
@@ -917,25 +1031,28 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             });
         });
 
-        // ── Auto filter row 2 cols 1-4 ──
         ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: 4 } };
 
         /* ══════════════════════════════
-           SHEET 2 – DETAIL (punch times)
-           Flat list with all details
+           SHEET 2 – DETAIL WITH BREAKS
         ══════════════════════════════ */
         const wsDetail = wb.addWorksheet("Daily Detail");
         wsDetail.views = [{ state: "frozen", ySplit: 2 }];
 
-        wsDetail.mergeCells(1, 1, 1, 12);
+        wsDetail.mergeCells(1, 1, 1, 16);
         const dTitleCell = wsDetail.getCell(1, 1);
-        dTitleCell.value = `DAILY DETAIL  |  ${startDate}  to  ${endDate}`;
+        dTitleCell.value = `DAILY DETAIL WITH BREAKS  |  ${startDate}  to  ${endDate}`;
         dTitleCell.font = { name: "Arial", bold: true, size: 13, color: { argb: "FFFFFFFF" } };
         dTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
         dTitleCell.alignment = { horizontal: "center", vertical: "middle" };
         wsDetail.getRow(1).height = 24;
 
-        const detailHeaders = ["#", "Emp Code", "Emp Name", "Department", "Shift", "Date", "Day", "Punch In", "Punch Out", "Total Hrs", "Status", "Remarks"];
+        const detailHeaders = [
+            "#", "Emp Code", "Emp Name", "Department", "Shift", 
+            "Date", "Day", "Punch In", "Punch Out", 
+            "Gross Hrs", "Total Hrs", "Break Deducted", "Break Details",
+            "Status", "Overtime", "Remarks"
+        ];
         const dHeaderRow = wsDetail.getRow(2);
         detailHeaders.forEach((h, i) => {
             const c = dHeaderRow.getCell(i + 1);
@@ -948,7 +1065,9 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
 
         wsDetail.columns = [
             { width: 5 }, { width: 12 }, { width: 22 }, { width: 18 }, { width: 20 },
-            { width: 13 }, { width: 11 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 14 }, { width: 25 },
+            { width: 13 }, { width: 11 }, { width: 10 }, { width: 10 }, 
+            { width: 10 }, { width: 10 }, { width: 12 }, { width: 35 },
+            { width: 14 }, { width: 10 }, { width: 25 },
         ];
 
         let detailRowNum = 3;
@@ -960,34 +1079,62 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
             const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
             const shiftName = emp.shift?.shiftName || `Default (${shiftStart}–${shiftEnd})`;
+            const shiftBreaks = emp.shift?.breaks || [];
 
             for (const date of dateRange) {
                 const dateKey = date.toISOString().split("T")[0];
                 const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const att = attMap.get(`${emp._id}_${dateKey}`);
                 const isWO = weeklyOff.includes(dayName);
-                const { code, label, punchIn, punchOut, hours } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
+                const { code, label, punchIn, punchOut, hours, breakInfo } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
+
+                let grossHrs = "0:00";
+                let breakDeducted = "0:00";
+                let overtimeDisplay = "—";
+                
+                if (att && att.punchIn && att.punchOut) {
+                    const workCalc = calculateWorkingHoursWithBreaks(
+                        att.punchIn, att.punchOut, att.breaks, shiftBreaks
+                    );
+                    grossHrs = formatWorkingHours(workCalc.totalMinutes);
+                    breakDeducted = formatWorkingHours(workCalc.breakDeductedMinutes);
+                    overtimeDisplay = att.workSummary?.overtimeMinutes 
+                        ? `${att.workSummary.overtimeMinutes} min` 
+                        : "—";
+                }
 
                 const row = wsDetail.getRow(detailRowNum++);
                 row.height = 15;
                 const isAlt = seq % 2 === 0;
-                const vals = [seq++, emp.empCode || "—", emp.user_name || "N/A", emp.jobInfo?.department || "N/A",
-                    shiftName, dateKey, dayName.slice(0, 3), punchIn, punchOut, hours, label, att?.remarks || ""];
+                const vals = [
+                    seq++, emp.empCode || "—", emp.user_name || "N/A", 
+                    emp.jobInfo?.department || "N/A", shiftName, 
+                    dateKey, dayName.slice(0, 3), punchIn, punchOut,
+                    grossHrs, hours, breakDeducted, breakInfo || "—",
+                    label, overtimeDisplay, att?.remarks || ""
+                ];
                 vals.forEach((v, i) => {
                     const c = row.getCell(i + 1);
                     c.value = v;
-                    c.font = { name: "Arial", size: 9 };
+                    c.font = { name: "Arial", size: 8 };
                     c.alignment = { horizontal: i <= 1 || i >= 5 ? "center" : "left", vertical: "middle" };
                     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isAlt ? ALT_ROW_BG : "FFFFFFFF" } };
                 });
+                
                 // Status cell colour
-                const statusCell = row.getCell(11);
+                const statusCell = row.getCell(14);
                 statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: STATUS_FILL[code] || "FFFFFFFF" } };
-                statusCell.font = { name: "Arial", size: 9, bold: true, color: { argb: STATUS_FONT[code] || "FF000000" } };
+                statusCell.font = { name: "Arial", size: 8, bold: true, color: { argb: STATUS_FONT[code] || "FF000000" } };
                 statusCell.alignment = { horizontal: "center", vertical: "middle" };
+                
+                // Highlight break deducted
+                if (breakDeducted && breakDeducted !== "0:00") {
+                    const breakCell = row.getCell(12);
+                    breakCell.font = { name: "Arial", size: 8, bold: true, color: { argb: "FF9C0006" } };
+                }
             }
         }
-        wsDetail.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: 12 } };
+        wsDetail.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: 16 } };
 
         /* ── Send ── */
         res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -1002,7 +1149,7 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  EXPORT 3 — ATTENDANCE SUMMARY (with salary structure)
+//  EXPORT 3 — ATTENDANCE SUMMARY WITH BREAK SUMMARY
 // ═════════════════════════════════════════════════════════════════════════════
 export const generateAttendanceSummaryCSV = async (req, res) => {
     try {
@@ -1036,11 +1183,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         const employeeCount = employees.length;
 
         const isPremium = await checkPremiumAccess(companyId);
-        console.log(`Premium access for company ${companyId}: ${isPremium}`);
-
         const exceedsFreeLimit = !isPremium && employeeCount > PREMIUM_CONFIG.maxFreeRows;
 
-        // ── Build summary rows ────────────────────────────────────────
         let summaryRows = [];
 
         const employeesToProcess = exceedsFreeLimit
@@ -1053,10 +1197,12 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const shiftEnd = emp.shift?.endTime || "18:00";
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
             const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
+            const shiftBreaks = emp.shift?.breaks || [];
 
             let present = 0, absent = 0, leave = 0, weekOff = 0, halfDay = 0;
             let holiday = 0, late = 0, earlyExit = 0;
             let totalWorkMin = 0, totalOTMin = 0, totalLateMin = 0;
+            let totalBreakMin = 0, totalBreakDeductedMin = 0, totalGrossMin = 0;
 
             for (const date of dateRange) {
                 const dateKey = date.toISOString().split("T")[0];
@@ -1073,11 +1219,13 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     case "HD":
                         halfDay++; present++;
                         if (att) {
-                            const shiftBreaks = emp.shift?.breaks || [];
                             const workCalc = calculateWorkingHoursWithBreaks(
                                 att.punchIn, att.punchOut, att.breaks, shiftBreaks
                             );
                             totalWorkMin += workCalc.payableMinutes;
+                            totalGrossMin += workCalc.totalMinutes;
+                            totalBreakMin += workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
+                            totalBreakDeductedMin += workCalc.breakDeductedMinutes;
                             totalOTMin += att.workSummary?.overtimeMinutes || 0;
                             totalLateMin += att.workSummary?.lateMinutes || 0;
                         }
@@ -1087,11 +1235,13 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                         if (code === "PL" || code === "PLE") late++;
                         if (code === "PE" || code === "PLE") earlyExit++;
                         if (att) {
-                            const shiftBreaks = emp.shift?.breaks || [];
                             const workCalc = calculateWorkingHoursWithBreaks(
                                 att.punchIn, att.punchOut, att.breaks, shiftBreaks
                             );
                             totalWorkMin += workCalc.payableMinutes;
+                            totalGrossMin += workCalc.totalMinutes;
+                            totalBreakMin += workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
+                            totalBreakDeductedMin += workCalc.breakDeductedMinutes;
                             totalOTMin += att.workSummary?.overtimeMinutes || 0;
                             totalLateMin += att.workSummary?.lateMinutes || 0;
                         }
@@ -1118,7 +1268,10 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 leave,
                 late,
                 earlyExit,
+                totalGrossHrs: parseFloat((totalGrossMin / 60).toFixed(2)),
                 totalWorkHrs: parseFloat((totalWorkMin / 60).toFixed(2)),
+                totalBreakHrs: parseFloat((totalBreakMin / 60).toFixed(2)),
+                totalDeductedHrs: parseFloat((totalBreakDeductedMin / 60).toFixed(2)),
                 avgWorkHrs: parseFloat(avgHrs.toFixed(2)),
                 totalOTHrs: parseFloat((totalOTMin / 60).toFixed(2)),
                 totalLateHrs: parseFloat((totalLateMin / 60).toFixed(2)),
@@ -1133,7 +1286,6 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             });
         }
 
-        // Pad remaining rows with dummy data for free users
         if (exceedsFreeLimit) {
             const dummyCount = employeeCount - PREMIUM_CONFIG.maxFreeRows;
             for (let i = 0; i < dummyCount; i++) {
@@ -1141,7 +1293,6 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             }
         }
 
-        /* ── Build workbook ──────────────────────────────────────────── */
         const wb = new ExcelJS.Workbook();
         wb.creator = "HR System";
 
@@ -1158,39 +1309,34 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             views: [{ state: "frozen", ySplit: 3 }],
         });
 
-        const sCols = 26;
+        const sCols = 29;
 
-        // Row 1: title
         wsSummary.mergeCells(1, 1, 1, sCols);
         const sTitleCell = wsSummary.getCell(1, 1);
         sTitleCell.value = exceedsFreeLimit
-            ? `⚠️ SAMPLE REPORT (${PREMIUM_CONFIG.maxFreeRows} of ${employeeCount} employees shown — UPGRADE FOR FULL DATA)  |  ${startDate} to ${endDate}`
-            : `ATTENDANCE SUMMARY WITH SALARY STRUCTURE  |  ${startDate} to ${endDate}`;
+            ? `⚠️ SAMPLE REPORT (${PREMIUM_CONFIG.maxFreeRows} of ${employeeCount} employees shown)  |  ${startDate} to ${endDate}`
+            : `ATTENDANCE SUMMARY WITH BREAK DETAILS & SALARY  |  ${startDate} to ${endDate}`;
         sTitleCell.font = { name: "Arial", bold: true, size: 13, color: { argb: exceedsFreeLimit ? "FF9C0006" : "FFFFFFFF" } };
         sTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: exceedsFreeLimit ? "FFFFC7CE" : HEADER_BG } };
         sTitleCell.alignment = { horizontal: "center", vertical: "middle" };
         wsSummary.getRow(1).height = 30;
 
-        // Row 2: upgrade note (free only)
         if (exceedsFreeLimit) {
             wsSummary.mergeCells(2, 1, 2, sCols);
             const noteCell = wsSummary.getCell(2, 1);
             noteCell.value =
-                `🔒 Rows with "******" are locked. Upgrade to Premium to unlock all ${employeeCount} employees with full salary data.  ` +
-                `Contact: sales@yourcompany.com`;
+                `🔒 Rows with "******" are locked. Upgrade to Premium for full break details and salary data. Contact: sales@yourcompany.com`;
             noteCell.font = { name: "Arial", size: 10, italic: true, color: { argb: "FF9C0006" } };
             noteCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } };
             noteCell.alignment = { horizontal: "center", vertical: "middle" };
             wsSummary.getRow(2).height = 22;
         }
 
-        // ── Employee Master Data (premium only) ────────────────────────
         if (!exceedsFreeLimit) {
             const wsMaster = wb.addWorksheet("Employee Master");
             wsMaster.views = [{ state: "frozen", ySplit: 2 }];
 
             const mCols = 23;
-
             wsMaster.mergeCells(1, 1, 1, mCols);
             const mTitle = wsMaster.getCell(1, 1);
             mTitle.value = `EMPLOYEE MASTER DATA  |  Generated on ${new Date().toLocaleDateString("en-IN")}`;
@@ -1221,7 +1367,6 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const row = wsMaster.addRow([]);
                 row.height = 16;
                 const bg = idx % 2 === 0 ? ALT_ROW : "FFFFFFFF";
-
                 const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff.join(", ") : "Sunday";
                 const shiftName = emp.shift?.shiftName || "N/A";
                 const shiftStart = emp.shift?.startTime || "09:00";
@@ -1230,30 +1375,17 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
 
                 const vals = [
-                    idx + 1,
-                    emp.referalCode || '_',
-                    emp.empCode || "—",
-                    emp.user_name || "N/A",
-                    emp.jobInfo?.department || "N/A",
-                    emp.jobInfo?.designation || "N/A",
-                    emp.employmentStatus || "N/A",
-                    weeklyOff,
-                    shiftName,
-                    shiftStart,
-                    shiftEnd,
-                    `${graceIn} min`,
-                    `${graceOut} min`,
+                    idx + 1, emp.referalCode || '_', emp.empCode || "—",
+                    emp.user_name || "N/A", emp.jobInfo?.department || "N/A",
+                    emp.jobInfo?.designation || "N/A", emp.employmentStatus || "N/A",
+                    weeklyOff, shiftName, shiftStart, shiftEnd,
+                    `${graceIn} min`, `${graceOut} min`,
                     emp.email || emp.userId?.email || "N/A",
                     emp.phone || emp.userId?.phone || "N/A",
-                    emp.jobInfo?.dateOfJoining
-                        ? new Date(emp.jobInfo.dateOfJoining).toLocaleDateString("en-IN")
-                        : "N/A",
-                    emp.salaryStructure?.basic || 0,
-                    emp.salaryStructure?.hra || 0,
-                    emp.salaryStructure?.da || 0,
-                    emp.salaryStructure?.bonus || 0,
-                    emp.salaryStructure?.perDay || 0,
-                    emp.salaryStructure?.perHour || 0,
+                    emp.jobInfo?.dateOfJoining ? new Date(emp.jobInfo.dateOfJoining).toLocaleDateString("en-IN") : "N/A",
+                    emp.salaryStructure?.basic || 0, emp.salaryStructure?.hra || 0,
+                    emp.salaryStructure?.da || 0, emp.salaryStructure?.bonus || 0,
+                    emp.salaryStructure?.perDay || 0, emp.salaryStructure?.perHour || 0,
                     emp.salaryStructure?.overtimeRate || 0,
                 ];
 
@@ -1262,37 +1394,23 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     c.value = v;
                     c.font = { name: "Arial", size: 9, bold: i <= 1 };
                     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
-                    c.alignment = {
-                        horizontal: (i >= 2 && i <= 4) || i === 12 || i === 13 ? "left" : "center",
-                        vertical: "middle",
-                    };
+                    c.alignment = { horizontal: (i >= 2 && i <= 4) || i === 12 || i === 13 ? "left" : "center", vertical: "middle" };
                 });
             });
 
-            wsMaster.columns = [
-                { width: 5 }, { width: 12 }, { width: 12 }, { width: 22 }, { width: 18 }, { width: 18 },
-                { width: 16 }, { width: 16 },
-                { width: 16 }, { width: 12 }, { width: 12 },
-                { width: 16 }, { width: 16 },
-                { width: 24 }, { width: 16 }, { width: 16 },
-                { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
-                { width: 12 }, { width: 12 }, { width: 12 },
-            ];
-
-            wsMaster.autoFilter = {
-                from: { row: 2, column: 1 },
-                to: { row: 2, column: mCols },
-            };
+            wsMaster.columns = Array(mCols).fill({ width: 15 });
+            wsMaster.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: mCols } };
         }
 
-        // Row 2 (premium) or Row 3 (free): group headers
         const grpRowNum = exceedsFreeLimit ? 3 : 2;
         const groups = [
             { label: "EMPLOYEE INFO", start: 1, span: 5 },
-            { label: "DATE BREAKDOWN", start: 6, span: 8 },
-            { label: "HOURS", start: 14, span: 4 },
-            { label: "ATTENDANCE", start: 18, span: 2 },
-            { label: "SALARY STRUCTURE (₹)", start: 20, span: 7 },
+            { label: "DATE BREAKDOWN", start: 6, span: 9 },
+            { label: "WORKING HOURS", start: 15, span: 3 },
+            { label: "BREAK SUMMARY", start: 18, span: 2 },
+            { label: "HOURS", start: 20, span: 3 },
+            { label: "ATTENDANCE", start: 23, span: 2 },
+            { label: "SALARY (₹)", start: 25, span: 5 },
         ];
         const grpRow = wsSummary.getRow(grpRowNum);
         grpRow.height = 16;
@@ -1305,12 +1423,14 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             cell.alignment = { horizontal: "center", vertical: "middle" };
         });
 
-        // Sub-headers row
         const subRowNum = grpRowNum + 1;
         const sHeaders = [
             "#", "Emp Code", "Emp Name", "Department", "Designation",
-            "Total Days", "Week Off", "Holiday", "Presentable Days", "Present", "Half Day", "Absent", "Leave", "Late Days",
-            "Total Hrs", "Avg Hrs/Day", "OT Hrs", "Late (Hrs)",
+            "Total Days", "Week Off", "Holiday", "Presentable Days", 
+            "Present", "Half Day", "Absent", "Leave", "Late Days",
+            "Gross Hrs", "Net Hrs", "Avg Hrs/Day",
+            "Break Hrs", "Deducted Hrs",
+            "OT Hrs", "Late Hrs", "Att %",
             "Att %", "Att Grade",
             "Basic", "HRA", "DA", "Bonus", "Per Day", "Per Hour", "OT Rate",
         ];
@@ -1319,20 +1439,12 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         sHeaders.forEach((h, i) => {
             const cell = sHeaderRow.getCell(i + 1);
             cell.value = h;
-            cell.font = { name: "Arial", bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+            cell.font = { name: "Arial", bold: true, size: 9, color: { argb: "FFFFFFFF" } };
             cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
             cell.alignment = { horizontal: "center", vertical: "middle" };
         });
 
-        wsSummary.columns = [
-            { width: 5 }, { width: 12 }, { width: 22 }, { width: 18 }, { width: 18 },
-            { width: 11 }, { width: 10 }, { width: 10 }, { width: 14 }, { width: 10 },
-            { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 },
-            { width: 11 }, { width: 13 }, { width: 10 }, { width: 11 },
-            { width: 10 }, { width: 12 },
-            { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
-            { width: 12 }, { width: 12 }, { width: 12 },
-        ];
+        wsSummary.columns = Array(sCols).fill({ width: 14 });
 
         const dataStartRow = subRowNum + 1;
 
@@ -1356,7 +1468,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 idx + 1, r.empCode, r.empName, r.department, r.designation,
                 r.totalDays, r.weekOff, r.holiday, r.presentableDays,
                 r.present, r.halfDay, r.absent, r.leave, r.late,
-                r.totalWorkHrs, r.avgWorkHrs, r.totalOTHrs, r.totalLateHrs,
+                r.totalGrossHrs, r.totalWorkHrs, r.avgWorkHrs,
+                r.totalBreakHrs, r.totalDeductedHrs,
+                r.totalOTHrs, r.totalLateHrs,
                 attDisplay, grade,
                 r.basic, r.hra, r.da, r.bonus, r.perDay, r.perHour, r.overtimeRate,
             ];
@@ -1366,19 +1480,16 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 c.value = v;
                 c.font = { name: "Arial", size: 9, bold: i <= 1, color: { argb: isDummy ? "FF888888" : "FF000000" } };
                 c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
-                c.alignment = {
-                    horizontal: (i === 2 || i === 3 || i === 4) ? "left" : "center",
-                    vertical: "middle",
-                };
+                c.alignment = { horizontal: (i === 2 || i === 3 || i === 4) ? "left" : "center", vertical: "middle" };
                 if (!isDummy && typeof v === "number") {
-                    if (i >= 14 && i <= 17) c.numFmt = "0.00";
-                    if (i >= 20) c.numFmt = "#,##0.00";
+                    if (i >= 14 && i <= 21) c.numFmt = "0.00";
+                    if (i >= 24) c.numFmt = "#,##0.00";
                 }
             });
 
             // Att % formatting
             if (!isDummy && typeof r.attPct === "number") {
-                const attCell = row.getCell(19);
+                const attCell = row.getCell(23);
                 attCell.value = r.attPct / 100;
                 attCell.numFmt = "0.0%";
                 attCell.font = { name: "Arial", size: 9, bold: true };
@@ -1386,18 +1497,23 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             }
 
             // Grade cell
-            const gradeCell = row.getCell(20);
+            const gradeCell = row.getCell(24);
             gradeCell.font = { name: "Arial", size: 9, bold: true, color: { argb: gradeColor } };
             gradeCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: gradeBg } };
 
-            // Absent highlight (real rows only)
+            // Highlight break deductions
+            if (!isDummy && r.totalDeductedHrs > 0) {
+                const deductCell = row.getCell(19);
+                deductCell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
+            }
+
+            // Absent highlight
             if (!isDummy && r.absent > 0) {
                 row.getCell(12).font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
                 row.getCell(12).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
             }
         });
 
-        // Totals row
         const realCount = exceedsFreeLimit ? PREMIUM_CONFIG.maxFreeRows : summaryRows.length;
         const lastReal = dataStartRow + realCount - 1;
         const totRow = wsSummary.addRow([]);
@@ -1414,31 +1530,31 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             [12, `=SUM(L${dataStartRow}:L${lastReal})`],
             [13, `=SUM(M${dataStartRow}:M${lastReal})`],
             [14, `=SUM(N${dataStartRow}:N${lastReal})`],
-            [15, `=AVERAGE(O${dataStartRow}:O${lastReal})`],
-            [16, `=AVERAGE(P${dataStartRow}:P${lastReal})`],
-            [17, `=SUM(Q${dataStartRow}:Q${lastReal})`],
-            [18, `=AVERAGE(R${dataStartRow}:R${lastReal})`],
-            [19, `=AVERAGE(S${dataStartRow}:S${lastReal})`],
+            [15, `=SUM(O${dataStartRow}:O${lastReal})`],
+            [16, `=SUM(P${dataStartRow}:P${lastReal})`],
+            [17, `=AVERAGE(Q${dataStartRow}:Q${lastReal})`],
+            [18, `=SUM(R${dataStartRow}:R${lastReal})`],
+            [19, `=SUM(S${dataStartRow}:S${lastReal})`],
+            [20, `=SUM(T${dataStartRow}:T${lastReal})`],
+            [21, `=AVERAGE(U${dataStartRow}:U${lastReal})`],
+            [23, `=AVERAGE(W${dataStartRow}:W${lastReal})`],
         ].forEach(([col, val]) => {
             const c = totRow.getCell(col);
             c.value = val;
             c.font = { name: "Arial", size: 9, bold: true };
             c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
             c.alignment = { horizontal: "center", vertical: "middle" };
-            if (col === 19) c.numFmt = "0.0%";
+            if (col === 23) c.numFmt = "0.0%";
         });
 
-        wsSummary.autoFilter = {
-            from: { row: subRowNum, column: 1 },
-            to: { row: subRowNum, column: sCols },
-        };
+        wsSummary.autoFilter = { from: { row: subRowNum, column: 1 }, to: { row: subRowNum, column: sCols } };
 
-        // ── Dept Pivot (premium only) ─────────────────────────────────
+        // Department Pivot (premium only)
         if (!exceedsFreeLimit) {
             const wsDept = wb.addWorksheet("Dept Pivot");
             wsDept.views = [{ state: "frozen", ySplit: 2 }];
 
-            wsDept.mergeCells(1, 1, 1, 11);
+            wsDept.mergeCells(1, 1, 1, 12);
             const dtTitle = wsDept.getCell(1, 1);
             dtTitle.value = `DEPARTMENT-WISE PIVOT  |  ${startDate} to ${endDate}`;
             dtTitle.font = { name: "Arial", bold: true, size: 13, color: { argb: "FFFFFFFF" } };
@@ -1447,7 +1563,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             wsDept.getRow(1).height = 26;
 
             const deptHdrs = ["Department", "Headcount", "Present Days", "Absent Days", "Leave Days",
-                "Week Off", "Half Days", "Late Days", "Total OT Hrs", "Total Late Hrs", "Avg Att %"];
+                "Week Off", "Half Days", "Late Days", "Total OT Hrs", "Total Late Hrs", "Total Break Hrs", "Avg Att %"];
             const deptHdrRow = wsDept.getRow(2);
             deptHdrRow.height = 18;
             deptHdrs.forEach((h, i) => {
@@ -1464,7 +1580,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 if (!deptMap.has(dept)) {
                     deptMap.set(dept, {
                         headcount: 0, present: 0, absent: 0, leave: 0, weekOff: 0,
-                        halfDay: 0, late: 0, otHrs: 0, lateHrs: 0, attPctSum: 0,
+                        halfDay: 0, late: 0, otHrs: 0, lateHrs: 0, breakHrs: 0, attPctSum: 0,
                     });
                 }
                 const d = deptMap.get(dept);
@@ -1477,6 +1593,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 d.late += r.late || 0;
                 d.otHrs += r.totalOTHrs || 0;
                 d.lateHrs += r.totalLateHrs || 0;
+                d.breakHrs += r.totalBreakHrs || 0;
                 d.attPctSum += r.attPct || 0;
             });
 
@@ -1488,24 +1605,20 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
 
                 [dept, d.headcount, d.present, d.absent, d.leave, d.weekOff,
                     d.halfDay, d.late, parseFloat(d.otHrs.toFixed(2)),
-                    parseFloat(d.lateHrs.toFixed(2)), avgAtt
+                    parseFloat(d.lateHrs.toFixed(2)), parseFloat(d.breakHrs.toFixed(2)), avgAtt
                 ].forEach((v, i) => {
                     const c = row.getCell(i + 1);
                     c.value = v;
                     c.font = { name: "Arial", size: 9, bold: i === 0 };
                     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
                     c.alignment = { horizontal: i === 0 ? "left" : "center", vertical: "middle" };
-                    if (i === 10) c.numFmt = "0.0%";
+                    if (i === 11) c.numFmt = "0.0%";
                 });
             });
 
-            wsDept.columns = [
-                { width: 22 }, { width: 12 }, { width: 13 }, { width: 13 }, { width: 12 },
-                { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 12 }, { width: 12 },
-            ];
+            wsDept.columns = Array(12).fill({ width: 14 });
         }
 
-        // ── Send response ─────────────────────────────────────────────
         const filename = exceedsFreeLimit
             ? `attendance_sample_${startDate}_to_${endDate}.xlsx`
             : `attendance_premium_${startDate}_to_${endDate}.xlsx`;
