@@ -8,7 +8,7 @@ import Razorpay from "razorpay";
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_API_KEY,
     key_secret: process.env.RAZORPAY_API_SECRET,
-});
+}); 
 
 // @desc    Create custom plan order with dynamic pricing
 // @route   POST /api/orders/create-custom-plan
@@ -176,7 +176,7 @@ export const verifyPayment = async (req, res) => {
         // Verify signature
         const sign = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSign = crypto
-            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+            .createHmac("sha256", process.env.RAZORPAY_API_SECRET)
             .update(sign.toString())
             .digest("hex");
 

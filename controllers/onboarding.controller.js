@@ -3,6 +3,17 @@
 import Onboarding from "../models/Onboarding.js";
 import Lead from '../models/uaileads.js';
 
+const sendEmail = async (to, subject, text) => {
+    // Implement your email sending logic here
+    console.log(`Sending email to: ${to}, Subject: ${subject}, Text: ${text}`);
+}
+
+const sendWhatsappMarketingTemplate = async (phone, message) => {
+    // Implement your WhatsApp sending logic here
+    console.log(`Sending WhatsApp message to: ${phone}, Message: ${message}`);
+}
+
+
 export const createOnboarding = async (req, res) => {
     try {
         const {
