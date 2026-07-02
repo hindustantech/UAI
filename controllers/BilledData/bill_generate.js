@@ -24,8 +24,8 @@ const COMPANY = {
     name: "Praecore Brandteck Pvt.Ltd",
     address: "51, Rainbasera colony,Adityapura jamshedpur - 831013",
     phone: "+91 8986147449",
-    email: "info@praecorebrandteck.com",
-    website: "https://hr.praecore.in",
+    email: "praecorehr@gmail.com",
+    website: "https://uai.praecore.in",
     CIN: "U631122JH2025PTC025749",
     verifyBase: process.env.BILL_VERIFY_BASE_URL || "https://web.praecore.in",
 };
