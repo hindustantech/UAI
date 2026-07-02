@@ -67,9 +67,9 @@ const sendUAIWelcomeTemplate = async (phone, customerName) => {
 
 
 const salesEmails = [
-    "sales1@uattendance.in",
-    "sales2@uattendance.in",
-    "manager@uattendance.in",
+    "pathakhemanga4@gmail.com",
+    "praecorehr@gmail.com",
+    // "manager@uattendance.in",
 ];
 
 
