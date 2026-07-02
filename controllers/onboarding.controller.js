@@ -2,7 +2,7 @@
 
 import Onboarding from "../models/Onboarding.js";
 import Lead from '../models/uaileads.js';
-// import { sendEmail } from '../utils/sendEmail.js';
+import { sendEmail } from '../utils/mail.js';
 
 
 // Add before sending
@@ -66,7 +66,11 @@ const sendUAIWelcomeTemplate = async (phone, customerName) => {
 };
 
 
-
+const salesEmails = [
+    "sales1@uattendance.in",
+    "sales2@uattendance.in",
+    "manager@uattendance.in",
+];
 
 
 
@@ -113,6 +117,42 @@ export const createOnboarding = async (req, res) => {
             },
         });
         const result = await sendUAIWelcomeTemplate(onboarding.personalInfo.phone, onboarding.personalInfo.name);
+
+        // Email to Sales Team
+        await sendEmail({
+            to: salesEmails.join(","),
+            subject: `🚀 New Lead Captured - ${lead.companyName}`,
+            html: `
+        <h2>New Lead Captured</h2>
+
+        <table border="1" cellpadding="10" cellspacing="0">
+            <tr>
+                <td><strong>Company</strong></td>
+                <td>${onboarding.personalInfo.phone}</td>
+            </tr>
+
+            <tr>
+                <td><strong>Phone</strong></td>
+                <td>${onboarding.personalInfo.phone}</td>
+            </tr>
+
+            <tr>
+                <td><strong>Company Size</strong></td>
+                <td>${onboarding.company.name}</td>
+            </tr>
+
+
+            <tr>
+                <td><strong>Created At</strong></td>
+                <td>${new Date().toLocaleString()}</td>
+            </tr>
+        </table>
+
+        <br>
+
+        <p>Please contact this lead as soon as possible.</p>
+    `,
+        });
         return res.status(201).json({
             success: true,
             templateResult: templateResult.success,
@@ -200,7 +240,50 @@ export const createLead = async (req, res) => {
             notes,
         });
         const templateResult = await sendUAIWelcomeTemplate(lead.phone, lead.companyName);
+        // Email to Sales Team
+        await sendEmail({
+            to: salesEmails.join(","),
+            subject: `🚀 New Lead Captured - ${lead.companyName}`,
+            html: `
+        <h2>New Lead Captured</h2>
 
+        <table border="1" cellpadding="10" cellspacing="0">
+            <tr>
+                <td><strong>Company</strong></td>
+                <td>${lead.companyName}</td>
+            </tr>
+
+            <tr>
+                <td><strong>Phone</strong></td>
+                <td>${lead.phone}</td>
+            </tr>
+
+            <tr>
+                <td><strong>Company Size</strong></td>
+                <td>${lead.companySize}</td>
+            </tr>
+
+            <tr>
+                <td><strong>Sales Team</strong></td>
+                <td>${lead.salesTeam || "N/A"}</td>
+            </tr>
+
+            <tr>
+                <td><strong>Notes</strong></td>
+                <td>${lead.notes || "N/A"}</td>
+            </tr>
+
+            <tr>
+                <td><strong>Created At</strong></td>
+                <td>${new Date().toLocaleString()}</td>
+            </tr>
+        </table>
+
+        <br>
+
+        <p>Please contact this lead as soon as possible.</p>
+    `,
+        });
         return res.status(201).json({
             templateResult: templateResult.success,
             success: true,
