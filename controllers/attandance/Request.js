@@ -7,6 +7,7 @@ import Employee from "../../models/Attandance/Employee.js";
 ====================================
 1. CREATE ATTENDANCE REQUEST
 ====================================
+*/
 
 /*
     UTIL: Normalize date (remove time part)
@@ -15,6 +16,121 @@ const normalizeDate = (date) => {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
     return d;
+};
+
+/*
+    UTIL: Parse valid date
+*/
+const parseValidDate = (value, fieldName = "date") => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (isNaN(parsed.getTime())) {
+        return null;
+    }
+    return parsed;
+};
+
+/*
+    UTIL: Resolve punch base date
+*/
+const resolvePunchBaseDate = (punchDetails = {}) => {
+    let baseDate =
+        parseValidDate(punchDetails.date) ||
+        parseValidDate(punchDetails.punchInTime) ||
+        parseValidDate(punchDetails.punchOutTime);
+    return baseDate;
+};
+
+/*
+    UTIL: Get day bounds
+*/
+const getDayBounds = (date) => {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start.getTime() + 86400000);
+    return { start, end };
+};
+
+/*
+    UTIL: Calculate total break minutes
+*/
+const calculateTotalBreakMinutes = (breaks = []) => {
+    if (!breaks || !Array.isArray(breaks)) return 0;
+    return breaks.reduce((total, breakItem) => {
+        return total + (breakItem.durationMinutes || 0);
+    }, 0);
+};
+
+/*
+    UTIL: Calculate late minutes based on shift start time
+*/
+const calculateLateMinutes = (punchIn, shiftStartTime) => {
+    if (!punchIn || !shiftStartTime) return 0;
+
+    const [hours, minutes] = shiftStartTime.split(':').map(Number);
+    const shiftStart = new Date(punchIn);
+    shiftStart.setHours(hours, minutes, 0, 0);
+
+    // Add grace period of 5 minutes
+    const gracePeriod = 5;
+    const lateBy = Math.max(0, (punchIn.getTime() - shiftStart.getTime()) / 60000);
+
+    return lateBy > gracePeriod ? Math.round(lateBy) : 0;
+};
+
+/*
+    UTIL: Calculate early leave minutes based on shift end time
+*/
+const calculateEarlyLeaveMinutes = (punchOut, shiftEndTime) => {
+    if (!punchOut || !shiftEndTime) return 0;
+
+    const [hours, minutes] = shiftEndTime.split(':').map(Number);
+    const shiftEnd = new Date(punchOut);
+    shiftEnd.setHours(hours, minutes, 0, 0);
+
+    const earlyBy = Math.max(0, (shiftEnd.getTime() - punchOut.getTime()) / 60000);
+    return earlyBy > 0 ? Math.round(earlyBy) : 0;
+};
+
+/*
+    UTIL: Calculate working hours and work summary
+*/
+const calculateWorkingHours = (punchIn, punchOut, existingAttendance) => {
+    if (!punchIn || !punchOut) return {};
+
+    // Calculate total working minutes
+    const totalMinutes = Math.round(
+        (punchOut.getTime() - punchIn.getTime()) / 60000
+    );
+
+    // Calculate total working hours (decimal)
+    const totalWorkingHours = parseFloat((totalMinutes / 60).toFixed(2));
+
+    // Get shift details
+    const shiftMinutes = existingAttendance?.shift?.shiftMinutes || 540; // Default 9 hours (540 minutes)
+    const shiftStartTime = existingAttendance?.shift?.startTime || "09:00";
+    const shiftEndTime = existingAttendance?.shift?.endTime || "18:00";
+
+    // Calculate breaks
+    const breakMinutes = calculateTotalBreakMinutes(existingAttendance?.breaks || []);
+
+    // Calculate work summary components
+    const payableMinutes = Math.max(0, totalMinutes - breakMinutes);
+    const overtimeMinutes = Math.max(0, payableMinutes - shiftMinutes);
+    const lateMinutes = calculateLateMinutes(punchIn, shiftStartTime);
+    const earlyLeaveMinutes = calculateEarlyLeaveMinutes(punchOut, shiftEndTime);
+
+    return {
+        totalWorkingHours,
+        workSummary: {
+            totalMinutes,
+            payableMinutes,
+            overtimeMinutes,
+            lateMinutes,
+            earlyLeaveMinutes
+        },
+        lateByMinutes: lateMinutes
+    };
 };
 
 /*
@@ -241,6 +357,7 @@ export const createAttendanceRequest = async (req, res) => {
         });
     }
 };
+
 /*
 ====================================
 2. GET ALL REQUESTS (with filters)
@@ -260,7 +377,6 @@ export const getAttendanceRequests = async (req, res) => {
 
         const userId = req.user._id;
         const userRole = req.user.role || req.user.type;
-
 
         // Build query based on user role
         let query = { companyId };
@@ -401,21 +517,17 @@ export const getAttendanceRequestById = async (req, res) => {
 4. APPROVE REQUEST
 ====================================
 */
-
-
 export const approveAttendanceRequest = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
         const { requestId } = req.params;
-        let adminId
-        adminId = req.user._id || req.user.id;
+        let adminId = req.user._id || req.user.id;
         const role = req.user?.role || req.user?.type;
         if (role === 'user') {
             adminId = req.user?.companyId || req.user?.companyId;
         }
-
 
         // ───────────────────────── VALIDATION ─────────────────────────
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
@@ -458,6 +570,14 @@ export const approveAttendanceRequest = async (req, res) => {
                             date: start,
                             status: "leave",
                             approvalStatus: "approved",
+                            totalWorkingHours: 0,
+                            workSummary: {
+                                totalMinutes: 0,
+                                payableMinutes: 0,
+                                overtimeMinutes: 0,
+                                lateMinutes: 0,
+                                earlyLeaveMinutes: 0
+                            },
                             remarks: `Leave approved via request ${requestId}`,
                             geoLocation: {
                                 type: "Point",
@@ -473,7 +593,7 @@ export const approveAttendanceRequest = async (req, res) => {
         }
 
         // ============================================================
-        // 🔹 PUNCH FLOW (FIXED CORE ISSUE)
+        // 🔹 PUNCH FLOW (WITH WORKING HOURS CALCULATION)
         // ============================================================
         if (
             ["punch_in_out", "punch_in_and_out", "punch_in"].includes(
@@ -487,8 +607,7 @@ export const approveAttendanceRequest = async (req, res) => {
                 await session.abortTransaction();
                 return res.status(400).json({
                     success: false,
-                    message:
-                        "Invalid punch request: date, punchInTime, or punchOutTime required"
+                    message: "Invalid punch request: date, punchInTime, or punchOutTime required"
                 });
             }
 
@@ -537,7 +656,7 @@ export const approveAttendanceRequest = async (req, res) => {
 
                 if (prev?.geoLocation?.coordinates?.length) {
                     geoLocation = {
-                        ...prev.geoLocation.toObject?.() ?? prev.geoLocation,
+                        ...(prev.geoLocation.toObject?.() ?? prev.geoLocation),
                         verified: false,
                         source: "manual"
                     };
@@ -551,23 +670,53 @@ export const approveAttendanceRequest = async (req, res) => {
                 }
             }
 
+            // ───────── CALCULATE WORKING HOURS ─────────
+            const effectivePunchIn = punchIn || existingAttendance?.punchIn;
+            const effectivePunchOut = punchOut || existingAttendance?.punchOut;
+
+            if (effectivePunchIn && effectivePunchOut) {
+                // Calculate working hours and work summary
+                const workingHoursData = calculateWorkingHours(
+                    effectivePunchIn,
+                    effectivePunchOut,
+                    existingAttendance
+                );
+
+                // Set total working hours
+                updateFields.totalWorkingHours = workingHoursData.totalWorkingHours;
+
+                // Set work summary
+                updateFields.workSummary = workingHoursData.workSummary;
+
+                // Update late by minutes
+                updateFields.lateByMinutes = workingHoursData.lateByMinutes;
+
+                // Update status based on working hours
+                if (workingHoursData.totalWorkingHours > 0) {
+                    updateFields.status = "present";
+                }
+            } else if (effectivePunchIn && !effectivePunchOut) {
+                // Only punch-in, no punch-out yet
+                updateFields.status = "pending_approval";
+            }
+
             // ───────── AUDIT LOG ─────────
             const editLog = {
                 editedBy: adminId,
                 reason: request.reason,
                 oldValue: {
                     punchIn: existingAttendance?.punchIn || null,
-                    punchOut: existingAttendance?.punchOut || null
+                    punchOut: existingAttendance?.punchOut || null,
+                    totalWorkingHours: existingAttendance?.totalWorkingHours || 0,
+                    workSummary: existingAttendance?.workSummary || {},
+                    status: existingAttendance?.status || null
                 },
                 newValue: {
-                    punchIn:
-                        updateFields.punchIn ||
-                        existingAttendance?.punchIn ||
-                        null,
-                    punchOut:
-                        updateFields.punchOut ||
-                        existingAttendance?.punchOut ||
-                        null
+                    punchIn: updateFields.punchIn || existingAttendance?.punchIn || null,
+                    punchOut: updateFields.punchOut || existingAttendance?.punchOut || null,
+                    totalWorkingHours: updateFields.totalWorkingHours || existingAttendance?.totalWorkingHours || 0,
+                    workSummary: updateFields.workSummary || existingAttendance?.workSummary || {},
+                    status: updateFields.status || existingAttendance?.status || "present"
                 },
                 editedAt: new Date()
             };
@@ -582,9 +731,7 @@ export const approveAttendanceRequest = async (req, res) => {
                 {
                     $set: {
                         ...updateFields,
-                        ...(existingAttendance
-                            ? {}
-                            : { geoLocation, date: start })
+                        ...(existingAttendance ? {} : { geoLocation, date: start })
                     },
                     $push: { editLogs: editLog }
                 },
@@ -626,37 +773,6 @@ export const approveAttendanceRequest = async (req, res) => {
     }
 };
 
-
-export const parseValidDate = (value, fieldName = "date") => {
-    if (!value) return null;
-
-    const parsed = new Date(value);
-
-    if (isNaN(parsed.getTime())) {
-        return null;
-    }
-
-    return parsed;
-};
-
-export const resolvePunchBaseDate = (punchDetails = {}) => {
-    // Priority order
-    let baseDate =
-        parseValidDate(punchDetails.date) ||
-        parseValidDate(punchDetails.punchInTime) ||
-        parseValidDate(punchDetails.punchOutTime);
-
-    return baseDate;
-};
-
-export const getDayBounds = (date) => {
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date(start.getTime() + 86400000);
-
-    return { start, end };
-};
 /*
 ====================================
 5. REJECT REQUEST
@@ -669,8 +785,7 @@ export const rejectAttendanceRequest = async (req, res) => {
     try {
         const { requestId } = req.params;
         const { reason } = req.body;
-        let adminId
-        adminId = req.user._id || req.user.id;
+        let adminId = req.user._id || req.user.id;
         const role = req.user?.role || req.user?.type;
         if (role === 'user') {
             adminId = req.user?.companyId || req.user?.companyId;
@@ -771,7 +886,6 @@ export const cancelAttendanceRequest = async (req, res) => {
         const { requestId, companyId } = req.params;
         const userId = req.user._id;
 
-
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             return res.status(400).json({
                 success: false,
@@ -844,7 +958,6 @@ export const updateAttendanceRequest = async (req, res) => {
     try {
         const { requestId, companyId } = req.params;
         const userId = req.user._id;
-
         const updates = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
@@ -1006,9 +1119,67 @@ export const bulkApproveRequests = async (req, res) => {
                                 $set: {
                                     status: "leave",
                                     approvalStatus: "approved",
+                                    totalWorkingHours: 0,
+                                    workSummary: {
+                                        totalMinutes: 0,
+                                        payableMinutes: 0,
+                                        overtimeMinutes: 0,
+                                        lateMinutes: 0,
+                                        earlyLeaveMinutes: 0
+                                    },
                                     remarks: `Leave approved via bulk action`
                                 }
                             },
+                            { upsert: true, session }
+                        );
+                    }
+                }
+
+                // Handle punch requests in bulk
+                if (["punch_in", "punch_in_out", "punch_in_and_out"].includes(request.requestType)) {
+                    const baseDate = resolvePunchBaseDate(request?.punchDetails);
+                    
+                    if (baseDate) {
+                        const { start, end } = getDayBounds(baseDate);
+                        const existingAttendance = await Attendance.findOne({
+                            companyId: request.companyId,
+                            employeeId: request.employeeId,
+                            date: { $gte: start, $lt: end }
+                        }).session(session);
+
+                        const punchIn = parseValidDate(request?.punchDetails?.punchInTime);
+                        const punchOut = parseValidDate(request?.punchDetails?.punchOutTime);
+                        
+                        const effectivePunchIn = punchIn || existingAttendance?.punchIn;
+                        const effectivePunchOut = punchOut || existingAttendance?.punchOut;
+
+                        let updateFields = {
+                            status: "present",
+                            approvalStatus: "approved",
+                            remarks: `Punch corrected via bulk action`
+                        };
+
+                        if (punchIn) updateFields.punchIn = punchIn;
+                        if (punchOut) updateFields.punchOut = punchOut;
+
+                        if (effectivePunchIn && effectivePunchOut) {
+                            const workingHoursData = calculateWorkingHours(
+                                effectivePunchIn,
+                                effectivePunchOut,
+                                existingAttendance
+                            );
+                            updateFields.totalWorkingHours = workingHoursData.totalWorkingHours;
+                            updateFields.workSummary = workingHoursData.workSummary;
+                            updateFields.lateByMinutes = workingHoursData.lateByMinutes;
+                        }
+
+                        await Attendance.findOneAndUpdate(
+                            {
+                                companyId: request.companyId,
+                                employeeId: request.employeeId,
+                                date: { $gte: start, $lt: end }
+                            },
+                            { $set: updateFields },
                             { upsert: true, session }
                         );
                     }

@@ -167,8 +167,12 @@ const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], s
 
 /**
  * Determine Late / Early-leave status given shift & punch times.
+ * Returns empty array for flexible shifts
  */
-const getLateEarlyTags = (shiftStart, shiftEnd, punchIn, punchOut, graceIn = 10, graceOut = 10) => {
+const getLateEarlyTags = (shiftStart, shiftEnd, punchIn, punchOut, graceIn = 10, graceOut = 10, isFlexible = false) => {
+    // For flexible shifts, ignore late/early rules
+    if (isFlexible) return [];
+    
     const tags = [];
     if (punchIn) {
         const inMins = timeStrToMinutes(formatTime(punchIn));
@@ -242,6 +246,11 @@ function formatWorkingHours(minutes) {
     return `${hours}:${mins.toString().padStart(2, '0')}`;
 }
 
+// Helper to check if shift is flexible
+const isFlexibleShift = (employee) => {
+    return employee?.shift?.shiftType === "flexible";
+};
+
 const resolveCompanyId = (req) => {
     let id = req.user._id || req.user?.id;
     if ((req.user?.role || req.user?.type) === "user") id = req.user?.companyId;
@@ -263,19 +272,19 @@ const buildAttendanceMap = (records) => {
     return map;
 };
 
-/** Returns { code, label, punchIn, punchOut, hours, breakInfo } for one day */
-const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEnd = "18:00", graceIn = 10, graceOut = 10) => {
-    if (isWeeklyOff) return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
-    if (!attendance) return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
+/** Returns { code, label, punchIn, punchOut, hours, breakInfo, isFlexible, isAutoPunchOut } for one day */
+const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEnd = "18:00", graceIn = 10, graceOut = 10, isFlexible = false) => {
+    if (isWeeklyOff) return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+    if (!attendance) return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
 
     const pi = formatTime(attendance.punchIn);
     const po = formatTime(attendance.punchOut);
 
     switch (attendance.status) {
-        case "leave": return { code: "L", label: "Leave", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
-        case "holiday": return { code: "H", label: "Holiday", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
-        case "week_off": return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
-        case "absent": return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "" };
+        case "leave": return { code: "L", label: "Leave", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+        case "holiday": return { code: "H", label: "Holiday", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+        case "week_off": return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+        case "absent": return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         default: {
             let hrs = "0:00";
             let breakInfo = "";
@@ -296,7 +305,30 @@ const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEn
             }
 
             if (attendance.status === "half_day") {
-                return { code: "HD", label: "Half Day", punchIn: pi || "—", punchOut: po || "—", hours: hrs, breakInfo };
+                return { 
+                    code: "HD", 
+                    label: "Half Day", 
+                    punchIn: pi || "—", 
+                    punchOut: po || "—", 
+                    hours: hrs, 
+                    breakInfo,
+                    isFlexible: isFlexible,
+                    isAutoPunchOut: attendance.isAutoPunchOut || false
+                };
+            }
+
+            // For flexible shifts, always mark as Present regardless of time
+            if (isFlexible) {
+                return { 
+                    code: "P", 
+                    label: "Present", 
+                    punchIn: pi || "—", 
+                    punchOut: po || "—", 
+                    hours: hrs, 
+                    breakInfo,
+                    isFlexible: true,
+                    isAutoPunchOut: attendance.isAutoPunchOut || false
+                };
             }
 
             let tag = "P";
@@ -310,7 +342,16 @@ const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEn
                 if (shiftOut - outMin > graceOut) tag = tag === "PL" ? "PLE" : "PE";
             }
             const labels = { P: "Present", PL: "Late", PE: "Early Exit", PLE: "Late+Early" };
-            return { code: tag, label: labels[tag] || "Present", punchIn: pi || "—", punchOut: po || "—", hours: hrs, breakInfo };
+            return { 
+                code: tag, 
+                label: labels[tag] || "Present", 
+                punchIn: pi || "—", 
+                punchOut: po || "—", 
+                hours: hrs, 
+                breakInfo,
+                isFlexible: false,
+                isAutoPunchOut: attendance.isAutoPunchOut || false
+            };
         }
     }
 };
@@ -533,6 +574,7 @@ export const generateAttendanceCSV = async (req, res) => {
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
             const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
             const shiftBreaks = emp.shift?.breaks || [];
+            const isFlexible = isFlexibleShift(emp);
 
             for (const date of dateRange) {
                 const dateKey = date.toISOString().split("T")[0];
@@ -570,24 +612,32 @@ export const generateAttendanceCSV = async (req, res) => {
                     breakDetails = summary || "No breaks";
                     
                     overtimeMinutes = attendance.workSummary?.overtimeMinutes || 0;
-                    lateMinutes = formatLateTime(attendance.workSummary?.lateMinutes) || 0;
-                    earlyLeaveMinutes = attendance.workSummary?.earlyLeaveMinutes || 0;
+                    
+                    // For flexible shifts, skip late/early calculations
+                    if (!isFlexible) {
+                        lateMinutes = attendance.workSummary?.lateMinutes || 0;
+                        earlyLeaveMinutes = attendance.workSummary?.earlyLeaveMinutes || 0;
+                        
+                        if (lateMinutes === 0 && earlyLeaveMinutes === 0 && attendance.punchIn) {
+                            const inMins = timeStrToMinutes(formatTime(attendance.punchIn));
+                            const shiftInMins = timeStrToMinutes(shiftStart);
+                            if (inMins - shiftInMins > graceIn) lateMinutes = inMins - shiftInMins;
+
+                            if (attendance.punchOut) {
+                                const outMins = timeStrToMinutes(formatTime(attendance.punchOut));
+                                const shiftOutMins = timeStrToMinutes(shiftEnd);
+                                if (shiftOutMins - outMins > graceOut) earlyLeaveMinutes = shiftOutMins - outMins;
+                            }
+                        }
+                    } else {
+                        lateMinutes = "—";
+                        earlyLeaveMinutes = "—";
+                    }
+                    
                     locationVerified = attendance.geoLocation?.verified ? "Yes" : "No";
                     remarks = attendance.remarks || "";
                     autoMarked = attendance.isAutoMarked ? "Yes" : "No";
                     suspicious = attendance.isSuspicious ? "Yes" : "No";
-
-                    if (lateMinutes === 0 && earlyLeaveMinutes === 0 && attendance.punchIn) {
-                        const inMins = timeStrToMinutes(formatTime(attendance.punchIn));
-                        const shiftInMins = timeStrToMinutes(shiftStart);
-                        if (inMins - shiftInMins > graceIn) lateMinutes = inMins - shiftInMins;
-
-                        if (attendance.punchOut) {
-                            const outMins = timeStrToMinutes(formatTime(attendance.punchOut));
-                            const shiftOutMins = timeStrToMinutes(shiftEnd);
-                            if (shiftOutMins - outMins > graceOut) earlyLeaveMinutes = shiftOutMins - outMins;
-                        }
-                    }
 
                     switch (attendance.status) {
                         case "leave": statusLabel = "Leave"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;
@@ -596,8 +646,12 @@ export const generateAttendanceCSV = async (req, res) => {
                         case "week_off": statusLabel = "Week Off"; break;
                         case "absent": statusLabel = "Absent"; break;
                         default: {
-                            const tags = getLateEarlyTags(shiftStart, shiftEnd, attendance.punchIn, attendance.punchOut, graceIn, graceOut);
-                            statusLabel = tags.length ? tags.join(" + ") : "Present";
+                            if (isFlexible) {
+                                statusLabel = "Present";
+                            } else {
+                                const tags = getLateEarlyTags(shiftStart, shiftEnd, attendance.punchIn, attendance.punchOut, graceIn, graceOut);
+                                statusLabel = tags.length ? tags.join(" + ") : "Present";
+                            }
                         }
                     }
                 }
@@ -606,7 +660,7 @@ export const generateAttendanceCSV = async (req, res) => {
                     "Emp Code": emp.empCode || "—",
                     "Emp Name": emp.user_name || "N/A",
                     "Department": emp.jobInfo?.department || "N/A",
-                    "Shift": shiftName,
+                    "Shift": isFlexible ? `${shiftName} (Flexible)` : shiftName,
                     "Date": dateKey,
                     "Day": dayOfWeek,
                     "Punch In": punchInTime,
@@ -867,6 +921,7 @@ export const generateAttendanceCSV = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to generate attendance report", error: error.message });
     }
 };
+
 /* ─────────────────────────────────────────
    MATRIX EXPORT WITH BREAK INFO
 ───────────────────────────────────────── */
@@ -974,6 +1029,7 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             const shiftEnd = emp.shift?.endTime || "18:00";
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
             const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
+            const isFlexible = isFlexibleShift(emp);
 
             const dataRow = ws.addRow([]);
             const rowNum = dataRow.number;
@@ -1002,7 +1058,8 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
                 const att = attMap.get(`${emp._id}_${dateKey}`);
                 const isWO = weeklyOff.includes(dayName);
 
-                const { code, label, punchIn, punchOut, hours, breakInfo } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
+                const { code, label, punchIn, punchOut, hours, breakInfo, isFlexible: flexShift, isAutoPunchOut } = 
+                    resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
 
                 const cell = ws.getCell(rowNum, 5 + di);
                 cell.value = `${code}\n${hours}`;
@@ -1013,8 +1070,14 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
                 cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: STATUS_FILL[code] || "FFFFFFFF" } };
                 cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
                 
-                // Enhanced tooltip with break info
+                // Enhanced tooltip with break info and flexible shift indicator
                 let tooltipText = `${label}\nIn:  ${punchIn}\nOut: ${punchOut}\nHrs: ${hours}`;
+                if (flexShift) {
+                    tooltipText += `\n(Flexible Shift)`;
+                    if (isAutoPunchOut) {
+                        tooltipText += `\nAuto Punch-Out`;
+                    }
+                }
                 if (breakInfo) {
                     tooltipText += `\nBreaks: ${breakInfo}`;
                 }
@@ -1082,13 +1145,15 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
             const shiftName = emp.shift?.shiftName || `Default (${shiftStart}–${shiftEnd})`;
             const shiftBreaks = emp.shift?.breaks || [];
+            const isFlexible = isFlexibleShift(emp);
 
             for (const date of dateRange) {
                 const dateKey = date.toISOString().split("T")[0];
                 const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const att = attMap.get(`${emp._id}_${dateKey}`);
                 const isWO = weeklyOff.includes(dayName);
-                const { code, label, punchIn, punchOut, hours, breakInfo } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
+                const { code, label, punchIn, punchOut, hours, breakInfo, isFlexible: flexShift } = 
+                    resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
 
                 let grossHrs = "0:00";
                 let breakDeducted = "0:00";
@@ -1110,7 +1175,7 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
                 const isAlt = seq % 2 === 0;
                 const vals = [
                     seq++, emp.empCode || "—", emp.user_name || "N/A", 
-                    emp.jobInfo?.department || "N/A", shiftName, 
+                    emp.jobInfo?.department || "N/A", isFlexible ? `${shiftName} (Flexible)` : shiftName, 
                     dateKey, dayName.slice(0, 3), punchIn, punchOut,
                     grossHrs, hours, breakDeducted, breakInfo || "—",
                     label, overtimeDisplay, att?.remarks || ""
@@ -1200,18 +1265,24 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
             const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
             const shiftBreaks = emp.shift?.breaks || [];
+            const isFlexible = isFlexibleShift(emp);
 
             let present = 0, absent = 0, leave = 0, weekOff = 0, halfDay = 0;
             let holiday = 0, late = 0, earlyExit = 0;
             let totalWorkMin = 0, totalOTMin = 0, totalLateMin = 0;
             let totalBreakMin = 0, totalBreakDeductedMin = 0, totalGrossMin = 0;
+            
+            // For flexible shifts with auto punch-out, track separately for avg calculation
+            let totalWorkMinForAvg = 0;
+            let presentDaysForAvg = 0;
 
             for (const date of dateRange) {
                 const dateKey = date.toISOString().split("T")[0];
                 const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const att = attMap.get(`${emp._id}_${dateKey}`);
                 const isWO = weeklyOff.includes(dayName);
-                const { code } = resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut);
+                const { code, isFlexible: flexShift, isAutoPunchOut } = 
+                    resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
 
                 switch (code) {
                     case "WO": weekOff++; break;
@@ -1229,13 +1300,25 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                             totalBreakMin += workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
                             totalBreakDeductedMin += workCalc.breakDeductedMinutes;
                             totalOTMin += att.workSummary?.overtimeMinutes || 0;
-                            totalLateMin += att.workSummary?.lateMinutes || 0;
+                            
+                            // Only count in average if not auto punch-out for flexible shifts
+                            if (!isFlexible || !isAutoPunchOut) {
+                                totalWorkMinForAvg += workCalc.payableMinutes;
+                                presentDaysForAvg++;
+                            }
+                            
+                            // Skip late minutes for flexible shifts
+                            if (!isFlexible) {
+                                totalLateMin += att.workSummary?.lateMinutes || 0;
+                            }
                         }
                         break;
                     default:
                         present++;
-                        if (code === "PL" || code === "PLE") late++;
-                        if (code === "PE" || code === "PLE") earlyExit++;
+                        if (!isFlexible) {
+                            if (code === "PL" || code === "PLE") late++;
+                            if (code === "PE" || code === "PLE") earlyExit++;
+                        }
                         if (att) {
                             const workCalc = calculateWorkingHoursWithBreaks(
                                 att.punchIn, att.punchOut, att.breaks, shiftBreaks
@@ -1245,21 +1328,36 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                             totalBreakMin += workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
                             totalBreakDeductedMin += workCalc.breakDeductedMinutes;
                             totalOTMin += att.workSummary?.overtimeMinutes || 0;
-                            totalLateMin += att.workSummary?.lateMinutes || 0;
+                            
+                            // Only count in average if not auto punch-out for flexible shifts
+                            if (!isFlexible || !isAutoPunchOut) {
+                                totalWorkMinForAvg += workCalc.payableMinutes;
+                                presentDaysForAvg++;
+                            }
+                            
+                            // Skip late minutes for flexible shifts
+                            if (!isFlexible) {
+                                totalLateMin += att.workSummary?.lateMinutes || 0;
+                            }
                         }
                 }
             }
 
             const presentableDays = totalDays - weekOff - holiday;
             const attPct = presentableDays > 0 ? (present / presentableDays) * 100 : 0;
-            const avgHrs = present > 0 ? totalWorkMin / present / 60 : 0;
+            
+            // Calculate average only using non-auto-punch-out days for flexible shifts
+            const avgHrs = presentDaysForAvg > 0 ? totalWorkMinForAvg / presentDaysForAvg / 60 : 
+                          present > 0 ? totalWorkMin / present / 60 : 0;
 
             summaryRows.push({
                 empCode: emp.empCode || "—",
                 empName: emp.user_name || "N/A",
                 department: emp.jobInfo?.department || "N/A",
                 designation: emp.jobInfo?.designation || "N/A",
-                shift: emp.shift?.shiftName || `${shiftStart}–${shiftEnd}`,
+                shift: isFlexible 
+                    ? `${emp.shift?.shiftName || 'Flexible'} (Flexible)` 
+                    : emp.shift?.shiftName || `${shiftStart}–${shiftEnd}`,
                 totalDays,
                 weekOff,
                 holiday,
@@ -1268,15 +1366,15 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 halfDay,
                 absent,
                 leave,
-                late,
-                earlyExit,
+                late: isFlexible ? 0 : late,
+                earlyExit: isFlexible ? 0 : earlyExit,
                 totalGrossHrs: parseFloat((totalGrossMin / 60).toFixed(2)),
                 totalWorkHrs: parseFloat((totalWorkMin / 60).toFixed(2)),
                 totalBreakHrs: parseFloat((totalBreakMin / 60).toFixed(2)),
                 totalDeductedHrs: parseFloat((totalBreakDeductedMin / 60).toFixed(2)),
                 avgWorkHrs: parseFloat(avgHrs.toFixed(2)),
                 totalOTHrs: parseFloat((totalOTMin / 60).toFixed(2)),
-                totalLateHrs: parseFloat((totalLateMin / 60).toFixed(2)),
+                totalLateHrs: isFlexible ? 0 : parseFloat((totalLateMin / 60).toFixed(2)),
                 attPct: parseFloat(attPct.toFixed(2)),
                 basic: isPremium ? (emp.salaryStructure?.basic || 0) : "—",
                 hra: isPremium ? (emp.salaryStructure?.hra || 0) : "—",
@@ -1285,6 +1383,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 perDay: isPremium ? (emp.salaryStructure?.perDay || 0) : "—",
                 perHour: isPremium ? (emp.salaryStructure?.perHour || 0) : "—",
                 overtimeRate: isPremium ? (emp.salaryStructure?.overtimeRate || 0) : "—",
+                isFlexible: isFlexible,
             });
         }
 
@@ -1350,7 +1449,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const mHeaders = [
                 "#", "ReferalCode", "Emp Code", "Emp Name", "Department", "Designation",
                 "Employment Status", "Weekly Off",
-                "Shift Name", "Shift Start", "Shift End",
+                "Shift Name", "Shift Start", "Shift End", "Shift Type",
                 "Grace (Late Entry)", "Grace (Early Exit)",
                 "Email", "Phone", "Date of Joining",
                 "basic", "HRA", "DA", "Bonus", "PerDay", "PerHour", "OvertimeRate",
@@ -1373,6 +1472,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const shiftName = emp.shift?.shiftName || "N/A";
                 const shiftStart = emp.shift?.startTime || "09:00";
                 const shiftEnd = emp.shift?.endTime || "18:00";
+                const shiftType = emp.shift?.shiftType || "fixed";
                 const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
                 const graceOut = emp.shift?.gracePeriod?.earlyExit ?? 10;
 
@@ -1380,7 +1480,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     idx + 1, emp.referalCode || '_', emp.empCode || "—",
                     emp.user_name || "N/A", emp.jobInfo?.department || "N/A",
                     emp.jobInfo?.designation || "N/A", emp.employmentStatus || "N/A",
-                    weeklyOff, shiftName, shiftStart, shiftEnd,
+                    weeklyOff, shiftName, shiftStart, shiftEnd, shiftType,
                     `${graceIn} min`, `${graceOut} min`,
                     emp.email || emp.userId?.email || "N/A",
                     emp.phone || emp.userId?.phone || "N/A",
@@ -1397,6 +1497,12 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     c.font = { name: "Arial", size: 9, bold: i <= 1 };
                     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
                     c.alignment = { horizontal: (i >= 2 && i <= 4) || i === 12 || i === 13 ? "left" : "center", vertical: "middle" };
+                    
+                    // Highlight flexible shifts
+                    if (i === 11 && v === "flexible") {
+                        c.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF0B5394" } };
+                        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD0E4F7" } };
+                    }
                 });
             });
 
@@ -1483,6 +1589,12 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 c.font = { name: "Arial", size: 9, bold: i <= 1, color: { argb: isDummy ? "FF888888" : "FF000000" } };
                 c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
                 c.alignment = { horizontal: (i === 2 || i === 3 || i === 4) ? "left" : "center", vertical: "middle" };
+                
+                // Highlight flexible shifts in shift column
+                if (!isDummy && i === 4 && r.isFlexible) {
+                    c.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF0B5394" } };
+                }
+                
                 if (!isDummy && typeof v === "number") {
                     if (i >= 14 && i <= 21) c.numFmt = "0.00";
                     if (i >= 24) c.numFmt = "#,##0.00";
