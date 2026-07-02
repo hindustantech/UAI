@@ -142,12 +142,19 @@ router.get(
 // In your routes/payroll.js or wherever you define payroll routes
 
 // Delete a single payroll record
-router.delete('/:payrollId', authMiddleware, deletePayroll);
+router.delete('/:payrollId', authMiddleware,
+    requireActiveSubscription,
+    requirePaidPlan,
+    deletePayroll);
 
 // Delete all payroll records for a company (with optional filters)
-router.delete('/company/:companyId', requireActiveSubscription, deleteAllPayrollByCompany);
+router.delete('/company/:companyId', authMiddleware,
+    requireActiveSubscription,
+    requirePaidPlan, deleteAllPayrollByCompany);
 
 // Delete all payroll records for a specific employee in a company
-router.delete('/company/:companyId/employee/:employeeId', requirePaidPlan, deleteEmployeePayroll);
+router.delete('/company/:companyId/employee/:employeeId', authMiddleware,
+    requireActiveSubscription,
+    requirePaidPlan, deleteEmployeePayroll);
 
 export default router;
