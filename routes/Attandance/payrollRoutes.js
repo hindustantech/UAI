@@ -9,7 +9,8 @@ import {
     updatePayrollStatus,
     downloadCompanyExcel,
     downloadSalarySlipPDF,
-    getAllPayrollByCompany, getPayrollByEmployeeAndCompany
+    getAllPayrollByCompany, getPayrollByEmployeeAndCompany,
+    deletePayroll, deleteAllPayrollByCompany, deleteEmployeePayroll
 } from "../../controllers/payrollController.js";
 
 import { requireActiveSubscription, requirePaidPlan } from "../../middlewares/subscription.js";
@@ -137,5 +138,16 @@ router.get(
     downloadSalarySlipPDF
 );
 
+
+// In your routes/payroll.js or wherever you define payroll routes
+
+// Delete a single payroll record
+router.delete('/:payrollId', authMiddleware, deletePayroll);
+
+// Delete all payroll records for a company (with optional filters)
+router.delete('/company/:companyId', requireActiveSubscription, deleteAllPayrollByCompany);
+
+// Delete all payroll records for a specific employee in a company
+router.delete('/company/:companyId/employee/:employeeId', requirePaidPlan, deleteEmployeePayroll);
 
 export default router;

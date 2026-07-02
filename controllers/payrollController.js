@@ -615,3 +615,205 @@ export const downloadSalarySlipPDF = async (req, res) => {
         return res.status(500).json({ success: false, message: err.message });
     }
 };
+
+
+
+
+// Add these to your existing payrollController.js
+
+/* ═══════════════════════════════════════════════════════════════
+   8.  DELETE /api/payroll/:payrollId
+       Delete a single payroll record
+═══════════════════════════════════════════════════════════════ */
+export const deletePayroll = async (req, res) => {
+    try {
+        const { payrollId } = req.params;
+        let companyId;
+        if (req.user.type === 'partner') {
+            companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(payrollId)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Invalid payrollId." 
+            });
+        }
+
+        const payroll = await Payroll.findOne({ 
+            _id: payrollId, 
+            companyId 
+        });
+
+        if (!payroll) {
+            return res.status(404).json({ 
+                success: false, 
+                message: "Payroll record not found." 
+            });
+        }
+
+        // Optional: Prevent deletion of paid/approved payrolls
+        if (payroll.status === 'paid') {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Cannot delete a paid payroll record. Consider cancelling it instead." 
+            });
+        }
+
+        await Payroll.findByIdAndDelete(payrollId);
+
+        return res.status(200).json({ 
+            success: true, 
+            message: "Payroll record deleted successfully.",
+            data: {
+                deletedPayrollId: payrollId,
+                employeeName: payroll.employeeSnapshot?.name,
+                period: `${payroll.payPeriod.month}/${payroll.payPeriod.year}`
+            }
+        });
+
+    } catch (err) {
+        console.error("[deletePayroll]", err);
+        return res.status(500).json({ 
+            success: false, 
+            message: err.message 
+        });
+    }
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   9.  DELETE /api/payroll/company/:companyId
+       Delete ALL payroll records for a company
+       (with optional filters for month/year/status)
+═══════════════════════════════════════════════════════════════ */
+export const deleteAllPayrollByCompany = async (req, res) => {
+    try {
+        let companyId;
+        if (req.user.type === 'partner') {
+            companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
+        }
+        const { month, year, status } = req.query;
+
+        // Build filter
+        const filter = { companyId };
+        if (month) filter["payPeriod.month"] = Number(month);
+        if (year) filter["payPeriod.year"] = Number(year);
+        if (status) filter.status = status;
+
+        // First, get count of records to be deleted
+        const count = await Payroll.countDocuments(filter);
+
+        if (count === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: "No payroll records found matching the criteria." 
+            });
+        }
+
+        // Delete the records
+        const result = await Payroll.deleteMany(filter);
+
+        return res.status(200).json({ 
+            success: true, 
+            message: `Successfully deleted ${result.deletedCount} payroll record(s).`,
+            data: {
+                deletedCount: result.deletedCount,
+                filters: {
+                    companyId,
+                    month: month || 'all',
+                    year: year || 'all',
+                    status: status || 'all'
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error("[deleteAllPayrollByCompany]", err);
+        return res.status(500).json({ 
+            success: false, 
+            message: err.message 
+        });
+    }
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   10. DELETE /api/payroll/company/:companyId/employee/:employeeId
+       Delete all payroll records for a specific employee
+       (with optional month/year filters)
+═══════════════════════════════════════════════════════════════ */
+export const deleteEmployeePayroll = async (req, res) => {
+    try {
+        const { companyId, employeeId } = req.params;
+        const { month, year } = req.query;
+
+        if (!mongoose.Types.ObjectId.isValid(companyId) || 
+            !mongoose.Types.ObjectId.isValid(employeeId)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Invalid companyId or employeeId." 
+            });
+        }
+
+        // Find the employee first
+        const employee = await Employee.findOne({
+            _id: employeeId,
+            companyId
+        });
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "Employee not found in this company."
+            });
+        }
+
+        // Build filter
+        const filter = { 
+            companyId, 
+            employeeId: employee._id 
+        };
+        if (month) filter["payPeriod.month"] = Number(month);
+        if (year) filter["payPeriod.year"] = Number(year);
+
+        // Get count before deletion
+        const count = await Payroll.countDocuments(filter);
+
+        if (count === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: "No payroll records found for this employee." 
+            });
+        }
+
+        // Delete records
+        const result = await Payroll.deleteMany(filter);
+
+        return res.status(200).json({ 
+            success: true, 
+            message: `Successfully deleted ${result.deletedCount} payroll record(s) for ${employee.name || employee.empCode}.`,
+            data: {
+                deletedCount: result.deletedCount,
+                employee: {
+                    id: employee._id,
+                    name: employee.name,
+                    empCode: employee.empCode
+                },
+                filters: {
+                    month: month || 'all',
+                    year: year || 'all'
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error("[deleteEmployeePayroll]", err);
+        return res.status(500).json({ 
+            success: false, 
+            message: err.message 
+        });
+    }
+};
