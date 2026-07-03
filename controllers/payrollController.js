@@ -760,7 +760,7 @@ export const deleteEmployeePayroll = async (req, res) => {
 
         // Find the employee first
         const employee = await Employee.findOne({
-            _id: employeeId,
+            userId: employeeId,
             companyId
         });
 
