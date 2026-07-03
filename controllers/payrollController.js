@@ -24,6 +24,48 @@ if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
    HELPER — build attendance summary from Attendance collection
    for a given employee + month + year
 ═══════════════════════════════════════════════════════════════ */
+// async function getAttendanceSummary(employeeId, month, year) {
+//     const start = new Date(year, month - 1, 1);
+//     const end = new Date(year, month, 0, 23, 59, 59);
+
+//     const records = await Attendance.find({
+//         employeeId,
+//         date: { $gte: start, $lte: end }
+//     }).lean();
+
+//     let presentDays = 0;
+//     let absentDays = 0;
+//     let leaveDays = 0;
+//     let holidays = 0;
+//     let weeklyOffDays = 0;
+//     let halfDays = 0;
+//     let lateDays = 0;
+
+//     for (const rec of records) {
+//         switch (rec.status) {
+//             case "present":
+//                 presentDays++;
+//                 if (rec.workSummary?.lateMinutes > 0) lateDays++;
+//                 break;
+//             case "half_day":
+//                 halfDays++;
+//                 presentDays += 0.5;
+//                 break;
+//             case "absent": absentDays++; break;
+//             case "leave": leaveDays++; break;
+//             case "holiday": holidays++; break;
+//             case "week_off": weeklyOffDays++; break;
+//             default: break;
+//         }
+//     }
+
+//     return { presentDays, absentDays, leaveDays, holidays, weeklyOffDays, halfDays, lateDays };
+// }
+// controllers/payrollController.js - Updated generate functions
+
+/* ═══════════════════════════════════════════════════════════════
+   ENHANCED: Get attendance summary with full records
+═══════════════════════════════════════════════════════════════ */
 async function getAttendanceSummary(employeeId, month, year) {
     const start = new Date(year, month - 1, 1);
     const end = new Date(year, month, 0, 23, 59, 59);
@@ -59,8 +101,18 @@ async function getAttendanceSummary(employeeId, month, year) {
         }
     }
 
-    return { presentDays, absentDays, leaveDays, holidays, weeklyOffDays, halfDays, lateDays };
+    return {
+        presentDays,
+        absentDays,
+        leaveDays,
+        holidays,
+        weeklyOffDays,
+        halfDays,
+        lateDays,
+        records // Full records for detailed calculations
+    };
 }
+
 
 
 
@@ -229,8 +281,8 @@ export const getPayrollByEmployeeAndCompany = async (req, res) => {
 };
 
 /* ═══════════════════════════════════════════════════════════════
-   1.  POST /api/payroll/generate
-       Generate & save payroll for ONE employee
+   ENHANCED: POST /api/payroll/generate
+   Generate & save payroll for ONE employee
 ═══════════════════════════════════════════════════════════════ */
 export const generatePayroll = async (req, res) => {
     try {
@@ -243,16 +295,26 @@ export const generatePayroll = async (req, res) => {
         }
 
         if (!employeeId || !month || !year) {
-            return res.status(400).json({ success: false, message: "employeeId, month, and year are required." });
+            return res.status(400).json({
+                success: false,
+                message: "employeeId, month, and year are required."
+            });
         }
         if (month < 1 || month > 12) {
-            return res.status(400).json({ success: false, message: "month must be 1–12." });
+            return res.status(400).json({
+                success: false,
+                message: "month must be 1–12."
+            });
         }
 
+        // Check for existing payroll
         const exists = await Payroll.findOne({
-            companyId, employeeId,
-            "payPeriod.month": month, "payPeriod.year": year
+            companyId,
+            employeeId,
+            "payPeriod.month": month,
+            "payPeriod.year": year
         });
+
         if (exists) {
             return res.status(409).json({
                 success: false,
@@ -261,46 +323,101 @@ export const generatePayroll = async (req, res) => {
             });
         }
 
-        const employee = await Employee.findOne({ _id: employeeId, companyId }).lean();
-        if (!employee) return res.status(404).json({ success: false, message: "Employee not found." });
-        if (employee.employmentStatus === "inactive") {
-            return res.status(400).json({ success: false, message: "Employee is inactive." });
-        }
-        if (!employee.salaryStructure?.basic) {
-            return res.status(400).json({ success: false, message: "Employee salary structure is not configured." });
+        // Get employee
+        const employee = await Employee.findOne({
+            _id: employeeId,
+            companyId
+        }).lean();
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "Employee not found."
+            });
         }
 
-        /* ── Rules are OPTIONAL — null is fine ── */
+        if (employee.employmentStatus === "inactive") {
+            return res.status(400).json({
+                success: false,
+                message: "Employee is inactive."
+            });
+        }
+
+        // Validate salary structure
+        const hasBasic = !!(employee.salaryStructure?.basic && employee.salaryStructure.basic > 0);
+        const hasPerDay = !!(employee.salaryStructure?.perDay && employee.salaryStructure.perDay > 0);
+        const hasPerHour = !!(employee.salaryStructure?.perHour && employee.salaryStructure.perHour > 0);
+
+        if (!hasBasic && !hasPerDay && !hasPerHour) {
+            return res.status(400).json({
+                success: false,
+                message: "Employee salary structure is not configured. Please set basic, perDay, or perHour salary."
+            });
+        }
+
+        /* ── Get Rules (optional) ── */
         const [salaryRule, payrollRule] = await Promise.all([
             SalaryRule.findOne({ companyId }).lean(),
             PayrollRule.findOne({ companyId, isActive: true }).lean()
         ]);
 
-        const attendance = overrideAttendance ?? await getAttendanceSummary(employeeId, month, year);
-        const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+        /* ── Get Attendance ── */
+        const attendanceData = overrideAttendance ?? await getAttendanceSummary(employeeId, month, year);
+        const attendanceRecords = attendanceData.records || [];
+
+        const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", {
+            month: "long",
+            year: "numeric"
+        });
         const startDate = new Date(year, month - 1, 1);
         const endDate = new Date(year, month, 0);
 
+        /* ── Calculate Salary ── */
         const payrollData = calculateSalary({
-            employee, attendance, salaryRule, payrollRule,
-            payPeriod: { month, year, label: monthLabel, startDate, endDate },
+            employee,
+            attendance: {
+                presentDays: attendanceData.presentDays,
+                absentDays: attendanceData.absentDays,
+                leaveDays: attendanceData.leaveDays,
+                holidays: attendanceData.holidays,
+                weeklyOffDays: attendanceData.weeklyOffDays,
+                halfDays: attendanceData.halfDays,
+                lateDays: attendanceData.lateDays
+            },
+            salaryRule,
+            payrollRule,
+            payPeriod: {
+                month,
+                year,
+                label: monthLabel,
+                startDate,
+                endDate
+            },
             payDate: payDate ? new Date(payDate) : endDate,
-            generatedBy: req.user._id
+            generatedBy: req.user._id,
+            attendanceRecords // Pass full records for OT and break calculations
         });
 
         const payroll = await Payroll.create(payrollData);
-        return res.status(201).json({ success: true, message: "Payroll generated successfully.", data: payroll });
+
+        return res.status(201).json({
+            success: true,
+            message: "Payroll generated successfully.",
+            data: payroll
+        });
 
     } catch (err) {
         console.error("[generatePayroll]", err);
-        return res.status(500).json({ success: false, message: err.message });
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 
-
 /* ═══════════════════════════════════════════════════════════════
-   2.  POST /api/payroll/generate-bulk
-       Generate & save payroll for ALL active employees
+   ENHANCED: POST /api/payroll/generate-bulk
+   Generate & save payroll for ALL active employees
 ═══════════════════════════════════════════════════════════════ */
 export const generateBulkPayroll = async (req, res) => {
     try {
@@ -313,21 +430,34 @@ export const generateBulkPayroll = async (req, res) => {
         }
 
         if (!month || !year) {
-            return res.status(400).json({ success: false, message: "month and year are required." });
+            return res.status(400).json({
+                success: false,
+                message: "month and year are required."
+            });
         }
 
-        const employees = await Employee.find({ companyId, employmentStatus: "active" }).lean();
+        const employees = await Employee.find({
+            companyId,
+            employmentStatus: "active"
+        }).lean();
+
         if (!employees.length) {
-            return res.status(404).json({ success: false, message: "No active employees found." });
+            return res.status(404).json({
+                success: false,
+                message: "No active employees found."
+            });
         }
 
-        /* ── Rules are OPTIONAL ── */
+        /* ── Get Rules (optional) ── */
         const [salaryRule, payrollRule] = await Promise.all([
             SalaryRule.findOne({ companyId }).lean(),
             PayrollRule.findOne({ companyId, isActive: true }).lean()
         ]);
 
-        const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+        const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", {
+            month: "long",
+            year: "numeric"
+        });
         const startDate = new Date(year, month - 1, 1);
         const endDate = new Date(year, month, 0);
         const resolvedPayDate = payDate ? new Date(payDate) : endDate;
@@ -336,32 +466,81 @@ export const generateBulkPayroll = async (req, res) => {
 
         for (const employee of employees) {
             try {
+                // Check for existing payroll
                 const exists = await Payroll.exists({
-                    companyId, employeeId: employee._id,
-                    "payPeriod.month": month, "payPeriod.year": year
+                    companyId,
+                    employeeId: employee._id,
+                    "payPeriod.month": month,
+                    "payPeriod.year": year
                 });
+
                 if (exists) {
-                    results.skipped.push({ employeeId: employee._id, empCode: employee.empCode, reason: "Already exists" });
-                    continue;
-                }
-                if (!employee.salaryStructure?.basic) {
-                    results.failed.push({ employeeId: employee._id, empCode: employee.empCode, reason: "No salary structure" });
+                    results.skipped.push({
+                        employeeId: employee._id,
+                        empCode: employee.empCode,
+                        reason: "Already exists"
+                    });
                     continue;
                 }
 
-                const attendance = await getAttendanceSummary(employee._id, month, year);
+                // Validate salary structure
+                const hasBasic = !!(employee.salaryStructure?.basic && employee.salaryStructure.basic > 0);
+                const hasPerDay = !!(employee.salaryStructure?.perDay && employee.salaryStructure.perDay > 0);
+                const hasPerHour = !!(employee.salaryStructure?.perHour && employee.salaryStructure.perHour > 0);
+
+                if (!hasBasic && !hasPerDay && !hasPerHour) {
+                    results.failed.push({
+                        employeeId: employee._id,
+                        empCode: employee.empCode,
+                        reason: "No salary structure configured"
+                    });
+                    continue;
+                }
+
+                // Get attendance with full records
+                const attendanceData = await getAttendanceSummary(employee._id, month, year);
+                const attendanceRecords = attendanceData.records || [];
+
                 const payrollData = calculateSalary({
-                    employee, attendance, salaryRule, payrollRule,
-                    payPeriod: { month, year, label: monthLabel, startDate, endDate },
+                    employee,
+                    attendance: {
+                        presentDays: attendanceData.presentDays,
+                        absentDays: attendanceData.absentDays,
+                        leaveDays: attendanceData.leaveDays,
+                        holidays: attendanceData.holidays,
+                        weeklyOffDays: attendanceData.weeklyOffDays,
+                        halfDays: attendanceData.halfDays,
+                        lateDays: attendanceData.lateDays
+                    },
+                    salaryRule,
+                    payrollRule,
+                    payPeriod: {
+                        month,
+                        year,
+                        label: monthLabel,
+                        startDate,
+                        endDate
+                    },
                     payDate: resolvedPayDate,
-                    generatedBy: req.user._id
+                    generatedBy: req.user._id,
+                    attendanceRecords
                 });
 
                 const payroll = await Payroll.create(payrollData);
-                results.created.push({ employeeId: employee._id, empCode: employee.empCode, payrollId: payroll._id, netSalary: payroll.netSalary });
+                results.created.push({
+                    employeeId: employee._id,
+                    empCode: employee.empCode,
+                    payrollId: payroll._id,
+                    netSalary: payroll.netSalary,
+                    salaryType: payroll.ratesUsed.salaryType
+                });
 
             } catch (empErr) {
-                results.failed.push({ employeeId: employee._id, empCode: employee.empCode, reason: empErr.message });
+                results.failed.push({
+                    employeeId: employee._id,
+                    empCode: employee.empCode,
+                    reason: empErr.message
+                });
             }
         }
 
@@ -373,7 +552,10 @@ export const generateBulkPayroll = async (req, res) => {
 
     } catch (err) {
         console.error("[generateBulkPayroll]", err);
-        return res.status(500).json({ success: false, message: err.message });
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 
@@ -542,7 +724,7 @@ export const downloadCompanyExcel = async (req, res) => {
         }
         const { month, year } = req.query;
         // Basic check
-       
+
 
         const records = await Payroll.find({
             companyId,
@@ -587,7 +769,7 @@ export const downloadSalarySlipPDF = async (req, res) => {
         }
 
         // Basic check
-      
+
 
 
         if (!mongoose.Types.ObjectId.isValid(payrollId)) {
@@ -636,36 +818,36 @@ export const deletePayroll = async (req, res) => {
         }
 
         if (!mongoose.Types.ObjectId.isValid(payrollId)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Invalid payrollId." 
+            return res.status(400).json({
+                success: false,
+                message: "Invalid payrollId."
             });
         }
 
-        const payroll = await Payroll.findOne({ 
-            _id: payrollId, 
-            companyId 
+        const payroll = await Payroll.findOne({
+            _id: payrollId,
+            companyId
         });
 
         if (!payroll) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "Payroll record not found." 
+            return res.status(404).json({
+                success: false,
+                message: "Payroll record not found."
             });
         }
 
         // Optional: Prevent deletion of paid/approved payrolls
         if (payroll.status === 'paid') {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Cannot delete a paid payroll record. Consider cancelling it instead." 
+            return res.status(400).json({
+                success: false,
+                message: "Cannot delete a paid payroll record. Consider cancelling it instead."
             });
         }
 
         await Payroll.findByIdAndDelete(payrollId);
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             message: "Payroll record deleted successfully.",
             data: {
                 deletedPayrollId: payrollId,
@@ -676,9 +858,9 @@ export const deletePayroll = async (req, res) => {
 
     } catch (err) {
         console.error("[deletePayroll]", err);
-        return res.status(500).json({ 
-            success: false, 
-            message: err.message 
+        return res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };
@@ -708,17 +890,17 @@ export const deleteAllPayrollByCompany = async (req, res) => {
         const count = await Payroll.countDocuments(filter);
 
         if (count === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "No payroll records found matching the criteria." 
+            return res.status(404).json({
+                success: false,
+                message: "No payroll records found matching the criteria."
             });
         }
 
         // Delete the records
         const result = await Payroll.deleteMany(filter);
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             message: `Successfully deleted ${result.deletedCount} payroll record(s).`,
             data: {
                 deletedCount: result.deletedCount,
@@ -733,9 +915,9 @@ export const deleteAllPayrollByCompany = async (req, res) => {
 
     } catch (err) {
         console.error("[deleteAllPayrollByCompany]", err);
-        return res.status(500).json({ 
-            success: false, 
-            message: err.message 
+        return res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };
@@ -750,11 +932,11 @@ export const deleteEmployeePayroll = async (req, res) => {
         const { companyId, employeeId } = req.params;
         const { month, year } = req.query;
 
-        if (!mongoose.Types.ObjectId.isValid(companyId) || 
+        if (!mongoose.Types.ObjectId.isValid(companyId) ||
             !mongoose.Types.ObjectId.isValid(employeeId)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Invalid companyId or employeeId." 
+            return res.status(400).json({
+                success: false,
+                message: "Invalid companyId or employeeId."
             });
         }
 
@@ -772,9 +954,9 @@ export const deleteEmployeePayroll = async (req, res) => {
         }
 
         // Build filter
-        const filter = { 
-            companyId, 
-            employeeId: employee._id 
+        const filter = {
+            companyId,
+            employeeId: employee._id
         };
         if (month) filter["payPeriod.month"] = Number(month);
         if (year) filter["payPeriod.year"] = Number(year);
@@ -783,17 +965,17 @@ export const deleteEmployeePayroll = async (req, res) => {
         const count = await Payroll.countDocuments(filter);
 
         if (count === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "No payroll records found for this employee." 
+            return res.status(404).json({
+                success: false,
+                message: "No payroll records found for this employee."
             });
         }
 
         // Delete records
         const result = await Payroll.deleteMany(filter);
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             message: `Successfully deleted ${result.deletedCount} payroll record(s) for ${employee.name || employee.empCode}.`,
             data: {
                 deletedCount: result.deletedCount,
@@ -811,9 +993,9 @@ export const deleteEmployeePayroll = async (req, res) => {
 
     } catch (err) {
         console.error("[deleteEmployeePayroll]", err);
-        return res.status(500).json({ 
-            success: false, 
-            message: err.message 
+        return res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };

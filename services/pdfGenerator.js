@@ -39,6 +39,10 @@ export async function generateSalarySlipPDF(payroll, filePath) {
     const BAD       = "#C53030"; // deductions red
     const BAD_BG    = "#FBEDED";
     const WHITE     = "#FFFFFF";
+    const TEAL      = "#00695C"; // overtime
+    const TEAL_BG   = "#E0F2F1";
+    const PURPLE    = "#6A1B9A"; // break deductions
+    const PURPLE_BG = "#F3E5F5";
 
     const PAGE_W = doc.page.width;     // 595.28
     const MARGIN = 48;
@@ -54,6 +58,9 @@ export async function generateSalarySlipPDF(payroll, filePath) {
     const rul = payroll.salaryRuleDeductions ?? {};
     const lop = payroll.lossOfPay            ?? {};
     const per = payroll.payPeriod            ?? {};
+    const ot  = payroll.overtime             ?? {};
+    const brk = payroll.breakDeductions      ?? {};
+    const rates = payroll.ratesUsed          ?? {};
 
     const fmtDate = (d) =>
       d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
@@ -123,6 +130,28 @@ export async function generateSalarySlipPDF(payroll, filePath) {
 
     y = Math.max(bottomL, bottomR) + 14;
 
+    /* ───────────────────── SALARY TYPE & RATES STRIP ───────────────────── */
+    const rateH = 52;
+    doc.roundedRect(MARGIN, y, CW, rateH, 6).fill(PANEL);
+    
+    let salaryTypeLabel = "Monthly Salary (30-Day Standard)";
+    if (rates.salaryType === 'per_day') salaryTypeLabel = "Per Day Rate";
+    if (rates.salaryType === 'per_hour') salaryTypeLabel = "Per Hour Rate";
+    
+    doc.fillColor(INK).font("Helvetica-Bold").fontSize(8.5)
+       .text("SALARY CALCULATION BASIS", MARGIN + 14, y + 8, { characterSpacing: 0.5 });
+    doc.fillColor(ACCENT).font("Helvetica-Bold").fontSize(10)
+       .text(salaryTypeLabel, MARGIN + 14, y + 22);
+    
+    doc.fillColor(SLATE).font("Helvetica").fontSize(8)
+       .text(
+         `Per Day Rate: ${INR(rates.perDayRate ?? 0)}  |  ` +
+         `Per Hour Rate: ${INR(rates.perHourRate ?? 0)}  |  ` +
+         `Standard: ${rates.standardDays ?? STD_DAYS} days / ${rates.standardHours ?? 8} hrs`,
+         MARGIN + 14, y + 36, { width: CW - 28 }
+       );
+    y += rateH + 12;
+
     /* ───────────────────── SALARY RULE STRIP ───────────────────── */
     const ruleH = 40;
     doc.roundedRect(MARGIN, y, CW, ruleH, 6).fill(PANEL);
@@ -130,8 +159,8 @@ export async function generateSalarySlipPDF(payroll, filePath) {
        .text("ATTENDANCE RULE ADJUSTMENTS", MARGIN + 14, y + 8, { characterSpacing: 0.4 });
     doc.fillColor(SLATE).font("Helvetica").fontSize(8)
        .text(
-         `Late arrivals: ${att.lateDays ?? 0} -> ${rul.lateCutDays ?? 0} day(s) cut   ·   ` +
-         `Half days: ${att.halfDays ?? 0} -> ${rul.halfDayCutDays ?? 0} day(s) cut   ·   ` +
+         `Late arrivals: ${att.lateDays ?? 0} → ${rul.lateCutDays ?? 0} day(s) cut   ·   ` +
+         `Half days: ${att.halfDays ?? 0} → ${rul.halfDayCutDays ?? 0} day(s) cut   ·   ` +
          `Total cut: ${rul.totalCutDays ?? 0} day(s)`,
          MARGIN + 14, y + 21, { width: CW - 28 }
        );
@@ -146,12 +175,44 @@ export async function generateSalarySlipPDF(payroll, filePath) {
       doc.fillColor(WARN).font("Helvetica-Bold").fontSize(8.5)
          .text(`Loss of Pay`, MARGIN + 14, y + 10);
       doc.fillColor(WARN).font("Helvetica").fontSize(8.5)
-         .text(`${lopDays} absent day(s) × per-day rate`, MARGIN + 90, y + 10.5);
+         .text(`${lopDays} absent day(s) × ${INR(rates.perDayRate ?? 0)}/day`, MARGIN + 90, y + 10.5);
       doc.fillColor(WARN).font("Helvetica-Bold").fontSize(9)
          .text(INR(lopAmount), MARGIN, y + 9.5, { width: CW - 14, align: "right" });
       y += lopH + 14;
     } else {
       y += 2;
+    }
+
+    /* ───────────────────── OVERTIME STRIP ───────────────────── */
+    if (ot.hours > 0 && ot.amount > 0) {
+      const otH = 30;
+      doc.roundedRect(MARGIN, y, CW, otH, 6).fill(TEAL_BG);
+      doc.fillColor(TEAL).font("Helvetica-Bold").fontSize(8.5)
+         .text("OVERTIME EARNED", MARGIN + 14, y + 10);
+      doc.fillColor(TEAL).font("Helvetica").fontSize(8.5)
+         .text(
+           `${ot.hours} hrs × ${INR(ot.rate ?? 0)}/hr (${ot.calculationType === 'custom_rate' ? 'Custom Rate' : 'Standard Rate'})`,
+           MARGIN + 130, y + 10.5
+         );
+      doc.fillColor(TEAL).font("Helvetica-Bold").fontSize(9)
+         .text(INR(ot.amount), MARGIN, y + 9.5, { width: CW - 14, align: "right" });
+      y += otH + 14;
+    }
+
+    /* ───────────────────── BREAK DEDUCTIONS STRIP ───────────────────── */
+    if (brk.hours > 0 && brk.amount > 0) {
+      const brkH = 30;
+      doc.roundedRect(MARGIN, y, CW, brkH, 6).fill(PURPLE_BG);
+      doc.fillColor(PURPLE).font("Helvetica-Bold").fontSize(8.5)
+         .text("UNPAID BREAK DEDUCTIONS", MARGIN + 14, y + 10);
+      doc.fillColor(PURPLE).font("Helvetica").fontSize(8.5)
+         .text(
+           `${brk.hours} hrs × ${INR(rates.perHourRate ?? 0)}/hr`,
+           MARGIN + 160, y + 10.5
+         );
+      doc.fillColor(PURPLE).font("Helvetica-Bold").fontSize(9)
+         .text(INR(brk.amount), MARGIN, y + 9.5, { width: CW - 14, align: "right" });
+      y += brkH + 14;
     }
 
     /* ───────────────── EARNINGS / DEDUCTIONS TABLE ───────────────── */
@@ -188,12 +249,18 @@ export async function generateSalarySlipPDF(payroll, filePath) {
       ["Professional Tax", oth.professionalTax],
       ...(oth.additionalLines ?? []).map((d) => [d.name, d.amount]),
       ...(lopAmount > 0 ? [[`Loss of Pay (${lopDays}d)`, lopAmount]] : []),
+      ...(brk.amount > 0 ? [[`Unpaid Breaks (${brk.hours}hrs)`, brk.amount]] : []),
     ].filter(([, v]) => (v ?? 0) > 0);
 
-    const drawLineRow = (label, val, x, w, rowY, isLOP = false) => {
-      doc.fillColor(isLOP ? WARN : SLATE).font("Helvetica").fontSize(9)
+    const drawLineRow = (label, val, x, w, rowY, isSpecial = false, specialColor = WARN) => {
+      const isLOP = String(label).startsWith("Loss of Pay");
+      const isBreak = String(label).startsWith("Unpaid Breaks");
+      const textColor = isLOP ? WARN : (isBreak ? PURPLE : (isSpecial ? specialColor : SLATE));
+      
+      doc.fillColor(textColor).font("Helvetica").fontSize(9)
          .text(label, x + 12, rowY + 5, { width: w * 0.6 });
-      doc.fillColor(isLOP ? WARN : INK).font(isLOP ? "Helvetica-Bold" : "Helvetica").fontSize(9)
+      doc.fillColor(isLOP || isBreak ? textColor : INK)
+         .font(isLOP || isBreak ? "Helvetica-Bold" : "Helvetica").fontSize(9)
          .text(INR(val ?? 0), x + 12, rowY + 5, { width: w - 24, align: "right" });
       doc.moveTo(x + 12, rowY + rowH - 1).lineTo(x + w - 12, rowY + rowH - 1)
          .strokeColor(LINE).lineWidth(0.5).stroke();
@@ -202,10 +269,12 @@ export async function generateSalarySlipPDF(payroll, filePath) {
     const maxR = Math.max(earnRows.length, dedRows.length);
     for (let i = 0; i < maxR; i++) {
       const rowY = tableTop + i * rowH;
-      if (earnRows[i]) drawLineRow(earnRows[i][0], earnRows[i][1], earX, halfW, rowY);
+      if (earnRows[i]) {
+        const isOT = String(earnRows[i][0]) === "Overtime";
+        drawLineRow(earnRows[i][0], earnRows[i][1], earX, halfW, rowY, isOT, TEAL);
+      }
       if (dedRows[i]) {
-        const isLOPRow = String(dedRows[i][0]).startsWith("Loss of Pay");
-        drawLineRow(dedRows[i][0], dedRows[i][1], dedX, halfW, rowY, isLOPRow);
+        drawLineRow(dedRows[i][0], dedRows[i][1], dedX, halfW, rowY);
       }
     }
     let tableBottom = tableTop + maxR * rowH;
@@ -238,6 +307,18 @@ export async function generateSalarySlipPDF(payroll, filePath) {
              MARGIN + 20, y + 36);
 
     y += netH + 22;
+
+    /* ───────────────────── SALARY TYPE FOOTNOTE ───────────────────── */
+    const footnoteH = 24;
+    doc.roundedRect(MARGIN, y, CW, footnoteH, 6).fill(PANEL);
+    doc.fillColor(FAINT).font("Helvetica").fontSize(7.5)
+       .text(
+         `Salary calculated on: ${salaryTypeLabel} | ` +
+         `Per Day: ${INR(rates.perDayRate ?? 0)} | ` +
+         `Per Hour: ${INR(rates.perHourRate ?? 0)}`,
+         MARGIN + 14, y + 8, { width: CW - 28 }
+       );
+    y += footnoteH + 12;
 
     /* ───────────────────────── FOOTER ───────────────────────── */
     doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).strokeColor(LINE).lineWidth(1).stroke();
