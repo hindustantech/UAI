@@ -151,6 +151,11 @@ const salesSessionSchema = new Schema({
             type: String,
             default: ""
         },
+        type: {
+            type: String,
+            enum: ["retail", "wholesale", "corporate",'customer','agent'],
+            default: "retail"
+        },
 
         companyName: {
             type: String,

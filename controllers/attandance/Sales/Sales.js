@@ -1484,6 +1484,12 @@ export const getSessions = async (req, res) => {
       singleDate,
       companyId,
 
+      // CUSTOMER FILTERS
+      customerType,
+      customerName,
+      customerPhone,
+      customerId,
+
       // FILTERS
       filterType, // today | yesterday | week | month
 
@@ -1531,6 +1537,36 @@ export const getSessions = async (req, res) => {
     // ================= SALES STATUS FILTER =================
     if (SalesStatus && ["open", "closed", "follow_up"].includes(SalesStatus)) {
       query.SalesStatus = SalesStatus;
+    }
+
+    // ================= CUSTOMER FILTERS =================
+    // Customer Type Filter
+    if (customerType) {
+      const validTypes = ["retail", "wholesale", "corporate", "customer", "agent"];
+      if (validTypes.includes(customerType)) {
+        query["customer.type"] = customerType;
+      }
+    }
+
+    // Customer Name Filter (Case-insensitive partial match)
+    if (customerName) {
+      query["customer.companyName"] = {
+        $regex: customerName,
+        $options: "i"
+      };
+    }
+
+    // Customer Phone Filter
+    if (customerPhone) {
+      query["customer.phoneNumber"] = {
+        $regex: customerPhone,
+        $options: "i"
+      };
+    }
+
+    // Customer ID Filter (exact match)
+    if (customerId) {
+      query["customer.customerId"] = customerId;
     }
 
     // ================= DATE FIELD VALIDATION =================
@@ -1657,7 +1693,9 @@ export const getSessions = async (req, res) => {
       "updatedAt",
       "totalDistance",
       "duration",
-      "status"
+      "status",
+      "customer.companyName",
+      "customer.phoneNumber"
     ];
 
     const finalSortField = validSortFields.includes(sortBy) ? sortBy : "punchInTime";
@@ -1738,6 +1776,7 @@ export const getSessions = async (req, res) => {
         // CUSTOMER
         customer: {
           customerId: session.customer?.customerId || "",
+          type: session.customer?.type || "",
           companyName: session.customer?.companyName || "",
           contactName: session.customer?.contactName || "",
           phone: session.customer?.phoneNumber || "",
@@ -1886,6 +1925,12 @@ export const getSessions = async (req, res) => {
           field: selectedDateField,
           start: start || null,
           end: end || null
+        },
+        customer: {
+          type: customerType || null,
+          name: customerName || null,
+          phone: customerPhone || null,
+          id: customerId || null
         }
       }
     });
@@ -2533,7 +2578,13 @@ export const getTodaySessionsAll = async (req, res) => {
       salesPersonId,
       status,
       page = 1,
-      limit = 10
+      limit = 10,
+
+      // ================= CUSTOMER FILTERS =================
+      customerType,
+      customerName,
+      customerPhone,
+      customerId
     } = req.query;
 
     // ================= VALIDATION =================
@@ -2585,13 +2636,44 @@ export const getTodaySessionsAll = async (req, res) => {
       query.status = status;
     }
 
+    // ================= CUSTOMER FILTERS =================
+    // Customer Type Filter
+    if (customerType) {
+      const validTypes = ["retail", "wholesale", "corporate", "customer", "agent"];
+      if (validTypes.includes(customerType)) {
+        query["customer.type"] = customerType;
+      }
+    }
+
+    // Customer Name Filter (Case-insensitive partial match)
+    if (customerName) {
+      query["customer.companyName"] = {
+        $regex: customerName,
+        $options: "i"
+      };
+    }
+
+    // Customer Phone Filter (Case-insensitive partial match)
+    if (customerPhone) {
+      query["customer.phoneNumber"] = {
+        $regex: customerPhone,
+        $options: "i"
+      };
+    }
+
+    // Customer ID Filter (exact match)
+    if (customerId) {
+      query["customer.customerId"] = customerId;
+    }
+
     const skip = (page - 1) * limit;
 
     // ================= DB CALL =================
     const [sessions, total, statsRaw] = await Promise.all([
       SalesSession.find(query)
-        .populate("employeeId", "name email")
+        .populate("employeeId", "name email phone")
         .populate("companyId", "name")
+        .populate("assignedTo", "name email")
         .sort({ punchInTime: -1 })
         .skip(skip)
         .limit(limit)
@@ -2623,6 +2705,127 @@ export const getTodaySessionsAll = async (req, res) => {
       if (s._id === "completed") stats.completed = s.count;
     });
 
+    // ================= FORMAT DATE =================
+    const formatDate = (date) => {
+      if (!date) return "-";
+
+      try {
+        return new Date(date).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true
+        });
+      } catch (err) {
+        console.error("Date format error:", err);
+        return "-";
+      }
+    };
+
+    // ================= EXTRACT GEO =================
+    const extractGeo = (geo) => {
+      if (!geo || !geo.coordinates || geo.coordinates.length !== 2) {
+        return null;
+      }
+
+      return {
+        latitude: geo.coordinates[1],
+        longitude: geo.coordinates[0],
+        type: geo.type || "Point"
+      };
+    };
+
+    // ================= FORMAT SESSIONS =================
+    const formattedSessions = sessions.map((session) => ({
+      // SESSION ID
+      id: session.sessionId,
+
+      // STATUS
+      status: session.status,
+      SalesStatus: session.SalesStatus,
+      formCompleted: session.formCompleted,
+
+      // CUSTOMER
+      customer: {
+        customerId: session.customer?.customerId || "",
+        type: session.customer?.type || "",
+        companyName: session.customer?.companyName || "",
+        contactName: session.customer?.contactName || "",
+        phone: session.customer?.phoneNumber || "",
+        address: session.customer?.address || "",
+        landmark: session.customer?.landmark || "",
+        location: extractGeo(session.customer?.location),
+        shopPhoto: session.customer?.shopPhoto?.length > 0
+          ? session.customer.shopPhoto.map(photo => ({
+            url: photo.url,
+            fileName: photo.fileName,
+            uploadedAt: formatDate(photo.uploadedAt)
+          }))
+          : []
+      },
+
+      // EMPLOYEE
+      employee: {
+        _id: session.employeeId?._id,
+        name: session.employeeId?.name,
+        email: session.employeeId?.email,
+        phone: session.employeeId?.phone
+      },
+
+      // COMPANY
+      company: session.companyId,
+
+      // ASSIGNED TO
+      assignedTo: session.assignedTo || [],
+
+      // PUNCH DETAILS
+      punch: {
+        inTime: formatDate(session.punchInTime),
+        outTime: formatDate(session.punchOutTime),
+        inLocation: extractGeo(session.punchInLocation),
+        outLocation: extractGeo(session.punchOutLocation),
+        outAddress: session.punchOutAddress || "",
+        lastPunchAt: formatDate(session.lastPunchAt)
+      },
+
+      // STATS
+      stats: {
+        totalDistance: session.totalDistance || 0,
+        duration: session.duration || 0,
+        visits: session.visitLogs?.length || 0,
+        sales: session.salesLogs?.length || 0,
+        meetings: session.meetingLogs?.length || 0,
+        notes: session.visitNotes?.length || 0
+      },
+
+      // NEXT MEETING
+      nextMeeting: session.nextMeeting?.decided ? {
+        decided: session.nextMeeting.decided,
+        date: formatDate(session.nextMeeting.date),
+        time: session.nextMeeting.time,
+        notes: session.nextMeeting.notes
+      } : null,
+
+      // EVIDENCE
+      evidence: {
+        visitNotes: session.evidence?.visitNotes || "",
+        visitPhoto: session.evidence?.visitPhoto ? {
+          url: session.evidence.visitPhoto.url,
+          fileName: session.evidence.visitPhoto.fileName,
+          uploadedAt: formatDate(session.evidence.visitPhoto.uploadedAt)
+        } : null
+      },
+
+      // TIMESTAMPS
+      timestamps: {
+        createdAt: formatDate(session.createdAt),
+        updatedAt: formatDate(session.updatedAt)
+      }
+    }));
+
     // ================= RESPONSE =================
     return res.status(200).json({
       success: true,
@@ -2635,9 +2838,22 @@ export const getTodaySessionsAll = async (req, res) => {
         total,
         page,
         limit,
-        pages: Math.ceil(total / limit)
+        pages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1
       },
-      data: sessions
+      filters: {
+        companyId,
+        employeeId: salesPersonId || null,
+        status: status || null,
+        customer: {
+          type: customerType || null,
+          name: customerName || null,
+          phone: customerPhone || null,
+          id: customerId || null
+        }
+      },
+      data: formattedSessions
     });
 
   } catch (error) {
