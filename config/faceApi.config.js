@@ -12,6 +12,7 @@ export const ENDPOINTS = {
   VERIFY: '/api/v1/face-recognition/verify',
   IDENTIFY: '/api/v1/face-recognition/identify',
   HEALTH: '/health',
+  DOCS: '/api/docs',
 };
 
 export const TIMEOUT_MS = parseInt(process.env.FACE_API_TIMEOUT_MS || '20000', 10);

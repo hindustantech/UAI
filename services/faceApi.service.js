@@ -182,6 +182,16 @@ export async function checkHealth() {
     throw shapeError(err);
   }
 }
+export async function getDocs() {
+  try {
+    const { data } = await client.get(ENDPOINTS.DOCS);
+    return data;
+  }
+  catch (err) {
+    throw shapeError(err);
+  }
+}
+
 
 export default {
   detectFace,
