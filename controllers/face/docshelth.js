@@ -2,7 +2,7 @@ import * as faceApiService from '../../services/faceApi.service.js';
 
 export async function getHealthStatus(req, res, next) {
     try {
-        const healthStatus = await faceApiService.getHealthStatus();    
+        const healthStatus = await faceApiService.checkHealth();    
 
         return res.status(200).json({
             success: true,
