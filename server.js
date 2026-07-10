@@ -42,6 +42,7 @@ import customorder from './routes/orderRoutes.js'
 import slabpricing from './routes/pricingRules.js'
 import blogPost from './routes/Blog/blogRoutes.js'
 import categoryblog from './routes/Blog/categoryRoutes.js'
+import faceRoutes from './routes/face/index.js'; // Import the face routes
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
@@ -120,7 +121,7 @@ app.use('/api/attendance/report', attendanceReportRoute);
 app.use('/api/salesR', salesR);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/today/pi', TodayAttendanceRoute);
-
+app.use('/api/face', faceRoutes); // Mount the face routes at /api/face
 // Add this after your existing middleware setup
 app.use('/uploads', express.static('uploads'));
 
