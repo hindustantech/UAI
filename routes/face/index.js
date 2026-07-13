@@ -8,13 +8,6 @@ import errorHandler from '../../middlewares/errorHandler.middleware.js';
 
 const router = express.Router();
 
-// Final paths (mounted at /api in server.js):
-//   POST /api/face/detect
-//   POST /api/face/train/single
-//   POST /api/face/train/batch
-//   GET  /api/face/train/status/:employeeId
-//   POST /api/face/verify
-//   POST /api/face/identify
 router.use('/face', faceDetectionRoutes);
 router.use('/face', faceTrainingRoutes);
 router.use('/face', faceRecognitionRoutes);
