@@ -47,12 +47,6 @@ router.post('/reminders', (req, res, next) => {
     // Set even longer timeout for this specific route if needed
     req.setTimeout(20 * 60 * 1000); // 20 minutes
     res.setTimeout(20 * 60 * 1000);
-
-    // Send immediate headers to keep connection alive
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders(); // Send headers immediately
-
     next();
 }, sendBulkReminder);
 

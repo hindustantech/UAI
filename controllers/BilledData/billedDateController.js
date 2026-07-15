@@ -994,7 +994,7 @@ export const uploadCSVFile = async (req, res) => {
 // _____________NEW IMPLEMENTATION WITH RATE LIMITING AND RETRY LOGIC_____________
 
 const WHATSAPP_API_URL = "https://whatsapp.quickhub.ai/public/whatsapp/send-template";
-const RATE_LIMIT = 20; // messages per minute
+const RATE_LIMIT = 40; // messages per minute
 const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute in milliseconds
 const BATCH_SIZE = 10; // Reduced batch size for better control
 const BATCH_DELAY_MS = 1500; // 1.5 seconds between batches (40 msgs/min = 1.5 sec per msg)
