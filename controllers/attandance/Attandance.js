@@ -15,6 +15,7 @@ import { resolveDateRange } from "../../utils/dateRangeResolver.js";
 import Shift from "../../models/Attandance/Shift.js";
 import logger from '../../utils/logger.js';
 import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
+import * as faceApiService from '../../services/faceApi.service.js';
 
 
 
@@ -71,7 +72,7 @@ export const dailyAttendanceEmp = async (req, res) => {
  * @param {Date|string} date - Input date
  * @returns {Date} Date object normalized to IST
  */
-const convertToIST = (date) => {
+export const convertToIST = (date) => {
     const d = new Date(date);
     // Get UTC time and add 5:30 for IST
     const istOffset = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
@@ -83,7 +84,7 @@ const convertToIST = (date) => {
 /**
  * Normalize date to midnight in IST
  */
-const normalizeDateIST = (date) => {
+export const normalizeDateIST = (date) => {
     const istDate = convertToIST(date);
     istDate.setUTCHours(0, 0, 0, 0);
     // Adjust back to UTC for storage
@@ -93,7 +94,7 @@ const normalizeDateIST = (date) => {
 };
 
 
-const isFlexibleShift = (shiftData) => {
+export const isFlexibleShift = (shiftData) => {
     return shiftData?.shiftType === "flexible";
     console.log(` 43 : Shift Type: ${shiftData.shiftType} | Is Flexible: ${shiftData?.shiftType === "flexible"}`);
 };
@@ -104,7 +105,7 @@ const isFlexibleShift = (shiftData) => {
  * @param {string} timeString - "09:00" (IST)
  * @returns {Date} Date object in UTC
  */
-const createDateTimeIST = (dateString, timeString) => {
+export const createDateTimeIST = (dateString, timeString) => {
     if (!dateString || !timeString) return null;
 
     const [hours, minutes] = timeString.split(":").map(Number);
@@ -125,7 +126,7 @@ const createDateTimeIST = (dateString, timeString) => {
  * @param {Date} punchTime - Punch time in UTC
  * @returns {Date} Punch time in IST
  */
-const getPunchTimeIST = (punchTime) => {
+export const getPunchTimeIST = (punchTime) => {
     if (!punchTime) return null;
     const istOffset = 5.5 * 60 * 60 * 1000;
     const utcTime = new Date(punchTime).getTime();
@@ -135,7 +136,7 @@ const getPunchTimeIST = (punchTime) => {
 /**
  * Normalize date to UTC midnight (00:00:00) - Keep for backward compatibility
  */
-const normalizeDate = (date) => {
+export const normalizeDate = (date) => {
     const d = new Date(date);
     d.setUTCHours(0, 0, 0, 0);
     return d;
@@ -144,14 +145,14 @@ const normalizeDate = (date) => {
 /**
  * Calculate minutes difference between two dates
  */
-const diffMinutes = (start, end) => {
+export const diffMinutes = (start, end) => {
     return Math.round((end - start) / (1000 * 60));
 };
 
 /**
  * Calculate distance between two geo coordinates (Haversine formula)
  */
-const getDistance = (lat1, lng1, lat2, lng2) => {
+export const getDistance = (lat1, lng1, lat2, lng2) => {
     const R = 6371000; // Earth radius in meters
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLng = ((lng2 - lng1) * Math.PI) / 180;
@@ -172,7 +173,7 @@ const getDistance = (lat1, lng1, lat2, lng2) => {
  * @param {number} gracePeriod - Grace period in minutes
  * @returns {number} Late minutes after grace period
  */
-const applyGracePeriod = (actualTime, shiftStartTime, gracePeriod) => {
+export const applyGracePeriod = (actualTime, shiftStartTime, gracePeriod) => {
     if (actualTime <= shiftStartTime) return 0;
 
     const lateMinutes = diffMinutes(shiftStartTime, actualTime);
@@ -190,7 +191,7 @@ const applyGracePeriod = (actualTime, shiftStartTime, gracePeriod) => {
  * @param {number} afterAbsentMarkGrace - Grace period in minutes
  * @returns {object} { isWithinGrace: boolean, minutesAfterShiftStart: number }
  */
-const checkAfterAbsentMarkGrace = (punchTime, shiftStartTime, afterAbsentMarkGrace) => {
+export const checkAfterAbsentMarkGrace = (punchTime, shiftStartTime, afterAbsentMarkGrace) => {
     // If punch is before shift start, not after
     if (punchTime <= shiftStartTime) {
         return {
@@ -215,7 +216,7 @@ const checkAfterAbsentMarkGrace = (punchTime, shiftStartTime, afterAbsentMarkGra
  * @param {number} earlyPunchLimit - Maximum minutes allowed before shift (default: 60)
  * @returns {object} { isValid: boolean, minutesBeforeShift: number, message: string }
  */
-const checkEarlyPunch = (punchTime, shiftStartTime, earlyPunchLimit = 60) => {
+export const checkEarlyPunch = (punchTime, shiftStartTime, earlyPunchLimit = 60) => {
     if (punchTime >= shiftStartTime) {
         return {
             isValid: true,
@@ -239,7 +240,7 @@ const checkEarlyPunch = (punchTime, shiftStartTime, earlyPunchLimit = 60) => {
 /**
  * Calculate payable minutes (work time minus unpaid breaks)
  */
-const calculatePayableMinutes = (totalMinutes, breaks) => {
+export const calculatePayableMinutes = (totalMinutes, breaks) => {
     let breakMinutes = 0;
 
     if (breaks && Array.isArray(breaks)) {
@@ -256,7 +257,7 @@ const calculatePayableMinutes = (totalMinutes, breaks) => {
 /**
  * Determine attendance status based on work hours
  */
-const determineStatus = (payableMinutes, shiftMinutes, isHoliday) => {
+export const determineStatus = (payableMinutes, shiftMinutes, isHoliday) => {
     if (isHoliday) return "holiday";
 
     // Half day threshold (less than 50% of shift)
@@ -270,7 +271,7 @@ const determineStatus = (payableMinutes, shiftMinutes, isHoliday) => {
 /**
  * Helper to abort transaction and send error response
  */
-const abortAndRespond = async (session, res, statusCode, errorCode, message, data = null) => {
+export const abortAndRespond = async (session, res, statusCode, errorCode, message, data = null) => {
     try {
         await session.abortTransaction();
     } catch (e) {
@@ -1201,6 +1202,927 @@ export const markAttendance = async (req, res) => {
         });
     }
 };
+
+
+
+
+
+
+
+
+// ---------------------------------face Attendance---------------------------------
+export const markFaceAttendance = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        /* ===========================
+           1. AUTHENTICATION & BODY VALIDATION
+        =========================== */
+
+        const u_id = req.user._id;
+
+        const {
+            date,
+            punchIn,
+            punchOut,
+            breaks,
+            geoLocation,
+            deviceInfo,
+            shift: shiftId,
+            remarks,
+            token
+        } = req.body;
+
+        // Token validation
+        if (!token) {
+            return abortAndRespond(session, res, 401, "TOKEN_MISSING", "Attendance token required");
+        }
+
+        // Required fields
+        if (!date) {
+            return abortAndRespond(session, res, 400, "DATE_MISSING", "Date is required");
+        }
+
+        if (!geoLocation?.coordinates || geoLocation.coordinates.length !== 2) {
+            return abortAndRespond(
+                session, res, 400, "GEOLOCATION_INVALID",
+                "Valid geoLocation coordinates required"
+            );
+        }
+
+        if (!punchIn && !punchOut) {
+            return abortAndRespond(
+                session, res, 400, "PUNCH_MISSING",
+                "Either punchIn or punchOut is required"
+            );
+        }
+
+        /* ===========================
+           2. JWT VERIFICATION
+        =========================== */
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+            logger.info(`JWT decoded successfully for user ${decoded.userId}`);
+        } catch (err) {
+            logger.error(`JWT verification failed: ${err.message}`);
+            return abortAndRespond(
+                session, res, 401, "TOKEN_INVALID",
+                "Invalid or expired token"
+            );
+        }
+
+        if (!decoded?.userId) {
+            return abortAndRespond(
+                session, res, 401, "TOKEN_PAYLOAD_INVALID",
+                "Invalid token payload"
+            );
+        }
+
+        const companyUser = await User
+            .findById(decoded.userId)
+            .select("-password -otp -__v")
+            .session(session);
+
+        logger.info(`Company user fetched: ${companyUser ? companyUser._id : 'Not found'}`);
+        if (!companyUser) {
+            return abortAndRespond(
+                session, res, 401, "USER_NOT_FOUND",
+                "Company user not found"
+            );
+        }
+
+        const companyId = companyUser._id;
+
+        const subscription = await Subscription.findOne({
+            company: companyId,
+            status: "ACTIVE",
+            isActive: true,
+            endDate: { $gte: new Date() }
+        });
+
+        if (!subscription) {
+
+            return res.status(403).json({
+                success: false,
+                message: "No active subscription",
+                error: "No active subscription found for this company"
+            });
+        }
+        /* ===========================
+           3. EMPLOYEE VALIDATION
+        =========================== */
+
+        const employee = await Employee.findOne({
+            userId: u_id,
+            employmentStatus: "active"
+        }).session(session);
+
+        if (!employee) {
+            return abortAndRespond(
+                session, res, 404, "EMPLOYEE_NOT_FOUND",
+                "Active employee not found"
+            );
+        }
+
+        // Verify employee belongs to company
+        if (employee.companyId.toString() !== companyId.toString()) {
+            return abortAndRespond(
+                session, res, 403, "UNAUTHORIZED_COMPANY",
+                "Unauthorized company access"
+            );
+        }
+
+        /* ===========================
+           4. SHIFT RESOLUTION - CRITICAL
+        =========================== */
+
+        let shiftData = null;
+
+        // Priority 1: Use provided shift ID
+        if (shiftId) {
+            shiftData = await Shift.findOne({
+                _id: shiftId,
+                companyId,
+                isDeleted: false
+            }).session(session);
+
+            if (!shiftData) {
+                return abortAndRespond(
+                    session, res, 404, "SHIFT_NOT_FOUND",
+                    "Provided shift not found or has been deleted"
+                );
+            }
+        }
+        // Priority 2: Use employee's assigned shift
+        else if (employee.shift) {
+            shiftData = await Shift.findOne({
+                _id: employee.shift,
+                companyId,
+                isDeleted: false
+            }).session(session);
+
+            if (!shiftData) {
+                return abortAndRespond(
+                    session, res, 404, "EMPLOYEE_SHIFT_NOT_FOUND",
+                    "Employee's assigned shift not found or has been deleted. Please update shift assignment."
+                );
+            }
+        }
+        // Priority 3: No shift available
+        else {
+            return abortAndRespond(
+                session, res, 400, "NO_SHIFT_ASSIGNED",
+                "No shift assigned to employee. Please assign a shift first.",
+                {
+                    employeeId: employee._id,
+                    empCode: employee.empCode,
+                    action: "Assign a shift to this employee"
+                }
+            );
+        }
+
+        console.log(`✓ Shift Resolved: ${shiftData.shiftName} (${shiftData.shiftCode}) for employee ${employee.empCode}`);
+
+        /* ===========================
+           5. NORMALIZE DATE & CHECK HOLIDAY
+        =========================== */
+
+        // Convert input date to IST midnight for consistent comparison
+        const attendanceDateIST = new Date(date);
+        const dateString = attendanceDateIST.toISOString().split("T")[0];
+        console.log(`📅 Attendance Date (IST): ${dateString}`);
+
+        const holiday = await Holiday.findOne({
+            companyId,
+            date: attendanceDateIST
+        }).session(session);
+
+        let baseStatus = holiday ? "holiday" : "present";
+
+        if (holiday) {
+            console.log(`✓ Holiday Detected: ${holiday.name || 'Holiday'} on ${dateString}`);
+        }
+
+        /* ===========================
+           6. GEO-FENCE VALIDATION
+        =========================== */
+
+        let geoVerified = false;
+
+        if (
+            employee.officeLocation?.coordinates &&
+            employee.officeLocation.coordinates.length === 2
+        ) {
+            const [officeLng, officeLat] = employee.officeLocation.coordinates;
+            const [userLng, userLat] = geoLocation.coordinates;
+
+            const distance = getDistance(officeLat, officeLng, userLat, userLng);
+            const allowedRadius = employee.officeLocation.radius || 500;
+
+            if (distance > allowedRadius) {
+                return abortAndRespond(
+                    session, res, 403, "OUTSIDE_OFFICE_RADIUS",
+                    `You are outside the allowed office location range (${Math.round(distance)}m from office).`,
+                    {
+                        allowedRadius,
+                        currentDistance: Math.round(distance),
+                        unit: "meters"
+                    }
+                );
+            }
+
+            geoVerified = true;
+            console.log(`✓ Geo-Location Verified: ${Math.round(distance)}m from office`);
+        } else {
+            console.log(`⚠ Geo-Location: No office location set for employee`);
+        }
+
+        /* ===========================
+           7. FIND EXISTING ATTENDANCE
+        =========================== */
+
+        let attendance = await Attendance.findOne({
+            companyId,
+            employeeId: employee._id,
+            date: attendanceDateIST
+        }).session(session);
+
+        /* ===========================
+           8. CONVERT PUNCH TIMES TO IST FOR COMPARISON
+        =========================== */
+
+        let punchInTimeIST = null;
+        let punchOutTimeIST = null;
+
+        if (punchIn) {
+            const punchInUTC = new Date(punchIn);
+            punchInTimeIST = getPunchTimeIST(punchInUTC);
+            console.log(`🕐 Punch In Time (IST): ${punchInTimeIST.toISOString()}`);
+        }
+
+        if (punchOut) {
+            const punchOutUTC = new Date(punchOut);
+            punchOutTimeIST = getPunchTimeIST(punchOutUTC);
+            console.log(`🕑 Punch Out Time (IST): ${punchOutTimeIST.toISOString()}`);
+        }
+
+        /* ===========================
+           9. CREATE SHIFT TIMES IN IST
+        =========================== */
+
+        const shiftStartTimeIST = createDateTimeIST(dateString, shiftData.startTime);
+        const shiftEndTimeIST = createDateTimeIST(dateString, shiftData.endTime);
+        const shiftDurationMinutes = diffMinutes(shiftStartTimeIST, shiftEndTimeIST);
+
+        console.log(`📍 Shift Start Time (IST): ${shiftStartTimeIST.toISOString()}`);
+        console.log(`📍 Shift End Time (IST): ${shiftEndTimeIST.toISOString()}`);
+        console.log(`⏱️  Shift Duration: ${shiftDurationMinutes} minutes`);
+
+        /* ===========================
+           10. CHECK SHIFT TYPE
+        =========================== */
+
+        const isFlexible = isFlexibleShift(shiftData);
+        const earlyPunchLimit = shiftData.earlyPunchLimit || 60;
+        const afterAbsentMarkGrace = shiftData.gracePeriod?.afterAbsentMark || 30;
+
+        console.log(`📌 Shift Type: ${isFlexible ? 'FLEXIBLE' : 'REGULAR'}`);
+        console.log(`⏱️  After Absent Mark Grace: ${afterAbsentMarkGrace} mins`);
+
+        /* ===========================
+           11. EARLY PUNCH-IN VALIDATION (Only for Regular Shifts)
+        =========================== */
+
+        if (punchInTimeIST && !isFlexible) {
+            const earlyPunchCheck = checkEarlyPunch(punchInTimeIST, shiftStartTimeIST, earlyPunchLimit);
+
+            console.log(`🔍 Early Punch Check:`);
+            console.log(`   Minutes before shift: ${earlyPunchCheck.minutesBeforeShift}`);
+            console.log(`   Is valid: ${earlyPunchCheck.isValid}`);
+
+            if (!earlyPunchCheck.isValid) {
+                return abortAndRespond(
+                    session, res, 400, "EARLY_PUNCH_NOT_ALLOWED",
+                    earlyPunchCheck.message,
+                    {
+                        punchTime: punchInTimeIST,
+                        shiftStartTime: shiftStartTimeIST,
+                        minutesBeforeShift: earlyPunchCheck.minutesBeforeShift,
+                        allowedEarlyMinutes: earlyPunchLimit,
+                        suggestion: `Please punch in between ${shiftData.startTime} or maximum ${earlyPunchLimit} minutes before shift start`
+                    }
+                );
+            }
+        }
+
+        /* ===========================
+           12. PUNCH IN (NEW ATTENDANCE)
+        =========================== */
+
+        let responseData = null;
+
+        if (!attendance) {
+            console.log(`→ Creating NEW attendance record for ${dateString}`);
+
+            if (!punchInTimeIST) {
+                return abortAndRespond(
+                    session, res, 400, "PUNCH_IN_REQUIRED",
+                    "Punch In time is required for new attendance record"
+                );
+            }
+
+            const inTimeUTC = new Date(punchIn);
+            const outTimeUTC = punchOut ? new Date(punchOut) : null;
+
+            // ========== FLEXIBLE SHIFT HANDLING ==========
+            if (isFlexible) {
+                console.log("🟢 FLEXIBLE SHIFT DETECTED - No absent checks, always allowed");
+
+                let finalStatus = baseStatus === "holiday" ? "holiday" : "present";
+                console.log(`  ✅ Flexible shift punch-in - Status: ${finalStatus}`);
+
+                let totalMinutes = 0;
+                let overtimeMinutes = 0;
+                let earlyLeaveMinutes = 0;
+
+                if (outTimeUTC) {
+                    totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+
+                    if (punchOutTimeIST > shiftEndTimeIST) {
+                        overtimeMinutes = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
+                        console.log(`  Overtime: ${overtimeMinutes} mins`);
+                    }
+
+                    if (punchOutTimeIST < shiftEndTimeIST) {
+                        earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
+                        console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
+                    }
+                }
+
+                const finalPayableMinutes = calculatePayableMinutes(totalMinutes, breaks || []);
+
+                attendance = new Attendance({
+                    companyId,
+                    employeeId: employee._id,
+                    date: attendanceDateIST,
+                    punchIn: inTimeUTC,
+                    punchOut: outTimeUTC,
+                    shift: {
+                        name: shiftData.shiftName,
+                        startTime: shiftData.startTime,
+                        endTime: shiftData.endTime,
+                        shiftMinutes: shiftDurationMinutes
+                    },
+                    breaks: breaks || [],
+                    status: finalStatus,
+                    geoLocation: {
+                        type: "Point",
+                        coordinates: geoLocation.coordinates,
+                        accuracy: geoLocation.accuracy,
+                        verified: geoVerified,
+                        source: geoLocation.source || "gps"
+                    },
+                    deviceInfo,
+                    workSummary: {
+                        totalMinutes: Math.max(0, totalMinutes),
+                        payableMinutes: Math.max(0, finalPayableMinutes),
+                        overtimeMinutes: Math.max(0, overtimeMinutes),
+                        lateMinutes: 0,
+                        earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                    },
+                    lateByMinutes: 0,
+                    totalWorkingHours: Math.max(0, totalMinutes / 60),
+                    remarks: remarks || "Flexible shift - Punch-in recorded",
+                    isSuspicious: false,
+                    punchHistory: outTimeUTC ? [{
+                        punchOut: outTimeUTC,
+                        geoLocation: {
+                            type: "Point",
+                            coordinates: geoLocation.coordinates,
+                            accuracy: geoLocation.accuracy,
+                            verified: geoVerified,
+                            source: geoLocation.source || "gps"
+                        },
+                        deviceInfo,
+                        source: deviceInfo?.source || "mobile"
+                    }] : [],
+                    lastPunchAt: outTimeUTC || inTimeUTC,
+                    approvalStatus: "pending"
+                });
+
+                await attendance.save({ session });
+                await session.commitTransaction();
+                session.endSession();
+
+                const punchInISTResponse = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
+                const punchOutISTResponse = attendance.punchOut ? getPunchTimeIST(attendance.punchOut) : null;
+
+                return res.status(201).json({
+                    success: true,
+                    message: `Flexible shift: Punch-in recorded successfully`,
+                    data: {
+                        attendanceId: attendance._id,
+                        employeeId: employee._id,
+                        employeeCode: employee.empCode,
+                        employeeName: employee.user_name,
+                        date: attendanceDateIST,
+                        status: attendance.status,
+                        punchIn: punchInISTResponse,
+                        punchOut: punchOutISTResponse,
+                        shift: {
+                            name: attendance.shift.name,
+                            startTime: attendance.shift.startTime,
+                            endTime: attendance.shift.endTime
+                        },
+                        workSummary: attendance.workSummary,
+                        geoVerified: attendance.geoLocation?.verified,
+                        isSuspicious: attendance.isSuspicious,
+                        approvalStatus: attendance.approvalStatus,
+                        remarks: attendance.remarks
+                    }
+                });
+            }
+
+            // ========== REGULAR SHIFT HANDLING ==========
+            else {
+                console.log("🔴 REGULAR SHIFT DETECTED - Applying strict attendance rules");
+
+                const minutesAfterShiftStart = diffMinutes(shiftStartTimeIST, punchInTimeIST);
+                console.log(`  Minutes after shift start: ${minutesAfterShiftStart}`);
+
+                // Check if punch is too late
+                if (minutesAfterShiftStart > afterAbsentMarkGrace) {
+                    const shiftStartTimeFormatted = shiftData.startTime;
+
+                    console.log(`❌ PUNCH REJECTED - Too late by ${minutesAfterShiftStart} minutes`);
+
+                    return abortAndRespond(
+                        session,
+                        res,
+                        400,
+                        "PUNCH_TOO_LATE",
+                        `❌ You are too late! You are ${minutesAfterShiftStart} minutes late for your shift. Shift starts at ${shiftStartTimeFormatted}. Maximum allowed delay is ${afterAbsentMarkGrace} minutes. Please contact your manager.`,
+                        {
+                            minutesLate: minutesAfterShiftStart,
+                            maxAllowedDelay: afterAbsentMarkGrace,
+                            shiftStartTime: shiftStartTimeFormatted,
+                            shiftEndTime: shiftData.endTime,
+                            currentTime: punchInTimeIST,
+                            suggestion: "Contact your manager or apply for leave"
+                        }
+                    );
+                }
+
+                // Calculate late minutes after grace period
+                const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
+                let lateMinutes = Math.max(0, minutesAfterShiftStart - gracePeriodLate);
+
+                // Format late minutes for remarks
+                const lateRemarks = lateMinutes > 0 ? ` (Late by ${lateMinutes} minutes after ${gracePeriodLate}min grace)` : "";
+
+                console.log(`  Late Minutes (after ${gracePeriodLate} mins grace): ${lateMinutes}`);
+
+                let totalMinutes = 0;
+                let overtimeMinutes = 0;
+                let earlyLeaveMinutes = 0;
+                let isSuspicious = false;
+
+                // ✅ FIX: For punch-in only, status is "present"
+                let finalStatus = baseStatus === "holiday" ? "holiday" : "present";
+
+                // Only calculate if punch-out is provided
+                if (outTimeUTC) {
+                    totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+
+                    if (punchOutTimeIST > shiftEndTimeIST) {
+                        const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
+                        const rawOvertime = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
+                        overtimeMinutes = Math.max(0, rawOvertime - earlyExitGrace);
+
+                        const maxOvertimeMinutes = (shiftData.overtime?.maxHoursPerDay || 4) * 60;
+                        if (overtimeMinutes > maxOvertimeMinutes && !shiftData.overtime?.allowed) {
+                            isSuspicious = true;
+                            console.log(`  ⚠ Overtime exceeds limit: ${overtimeMinutes} mins`);
+                        }
+                    }
+
+                    if (punchOutTimeIST < shiftEndTimeIST) {
+                        earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
+                        console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
+                    }
+
+                    const finalPayableMinutes = calculatePayableMinutes(totalMinutes, breaks || []);
+                    finalStatus = determineStatus(
+                        finalPayableMinutes,
+                        shiftDurationMinutes,
+                        baseStatus === "holiday"
+                    );
+                    console.log(`  Final Status (after punch-out): ${finalStatus}`);
+                } else {
+                    console.log(`  ✅ Punch-in only - Status set to: PRESENT`);
+                }
+
+                console.log(`  Final Status: ${finalStatus}`);
+
+                // ✅ Create remarks based on punch-in only or with punch-out
+                let finalRemarks = remarks || "";
+                if (!finalRemarks) {
+                    if (!outTimeUTC) {
+                        finalRemarks = `Punch-in recorded at ${shiftData.startTime} shift start${lateRemarks}`;
+                    } else {
+                        finalRemarks = `Punch-in and punch-out completed${lateRemarks}`;
+                    }
+                }
+
+                attendance = new Attendance({
+                    companyId,
+                    employeeId: employee._id,
+                    date: attendanceDateIST,
+                    punchIn: inTimeUTC,
+                    punchOut: outTimeUTC,
+                    shift: {
+                        name: shiftData.shiftName,
+                        startTime: shiftData.startTime,
+                        endTime: shiftData.endTime,
+                        shiftMinutes: shiftDurationMinutes
+                    },
+                    breaks: breaks || [],
+                    status: finalStatus,
+                    geoLocation: {
+                        type: "Point",
+                        coordinates: geoLocation.coordinates,
+                        accuracy: geoLocation.accuracy,
+                        verified: geoVerified,
+                        source: geoLocation.source || "gps"
+                    },
+                    deviceInfo,
+                    workSummary: {
+                        totalMinutes: Math.max(0, totalMinutes),
+                        payableMinutes: Math.max(0, calculatePayableMinutes(totalMinutes, breaks || [])),
+                        overtimeMinutes: Math.max(0, overtimeMinutes),
+                        lateMinutes: lateMinutes,
+                        earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                    },
+                    lateByMinutes: lateMinutes,
+                    totalWorkingHours: Math.max(0, totalMinutes / 60) || 0,
+                    remarks: finalRemarks,
+                    isSuspicious: outTimeUTC ? isSuspicious : false, // ✅ false for punch-in only
+                    punchHistory: outTimeUTC ? [{
+                        punchOut: outTimeUTC,
+                        geoLocation: {
+                            type: "Point",
+                            coordinates: geoLocation.coordinates,
+                            accuracy: geoLocation.accuracy,
+                            verified: geoVerified,
+                            source: geoLocation.source || "gps"
+                        },
+                        deviceInfo,
+                        source: deviceInfo?.source || "mobile"
+                    }] : [],
+                    lastPunchAt: outTimeUTC || inTimeUTC,
+                    approvalStatus: "pending"
+                });
+
+                await attendance.save({ session });
+                await session.commitTransaction();
+                session.endSession();
+
+                console.log(`✓ New attendance created for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
+
+                const punchInISTResponse = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
+                const punchOutISTResponse = attendance.punchOut ? getPunchTimeIST(attendance.punchOut) : null;
+
+                responseData = {
+                    attendanceId: attendance._id,
+                    employeeId: employee._id,
+                    employeeCode: employee.empCode,
+                    employeeName: employee.user_name,
+                    date: attendanceDateIST,
+                    status: attendance.status,
+                    punchIn: punchInISTResponse,
+                    punchOut: punchOutISTResponse,
+                    shift: {
+                        name: attendance.shift.name,
+                        startTime: attendance.shift.startTime,
+                        endTime: attendance.shift.endTime
+                    },
+                    workSummary: attendance.workSummary,
+                    geoVerified: attendance.geoLocation?.verified,
+                    isSuspicious: attendance.isSuspicious,
+                    approvalStatus: attendance.approvalStatus,
+                    remarks: attendance.remarks
+                };
+
+                const responseMessage = !outTimeUTC
+                    ? `Punch-in recorded successfully. Final status will be updated on punch-out.`
+                    : `Attendance marked as ${finalStatus} successfully`;
+
+                return res.status(201).json({
+                    success: true,
+                    message: responseMessage,
+                    data: responseData
+                });
+            }
+        }
+
+        /* ===========================
+           13. PUNCH OUT (EXISTING ATTENDANCE)
+        =========================== */
+        else {
+            console.log(`→ Updating EXISTING attendance record for ${dateString}`);
+
+
+            if (!punchOutTimeIST) {
+                // Enhanced error message with context
+                let errorMessage = "Punch Out time is required";
+                let errorDetails = {};
+
+                // Add context based on attendance status
+                if (attendance.status === "holiday") {
+                    errorMessage = "Cannot punch out on a holiday. This day is already marked as holiday.";
+                    errorDetails = {
+                        date: dateString,
+                        status: attendance.status,
+                        action: "Holiday detected - No punch-out required"
+                    };
+                } else if (attendance.status === "weekly_off") {
+                    errorMessage = "Cannot punch out on a weekly off. This day is already marked as weekly off.";
+                    errorDetails = {
+                        date: dateString,
+                        status: attendance.status,
+                        action: "Weekly off detected - No punch-out required"
+                    };
+                } else if (attendance.punchIn && !attendance.punchOut) {
+                    errorMessage = "Punch Out time is required to complete your attendance";
+                    errorDetails = {
+                        punchInTime: attendance.punchIn,
+                        currentStatus: "pending_punch_out",
+                        suggestion: "Please provide punchOut time to mark attendance as complete"
+                    };
+                }
+
+                return abortAndRespond(
+                    session, res, 400, "PUNCH_OUT_REQUIRED",
+                    errorMessage,
+                    errorDetails
+                );
+            }
+
+
+            const outTimeUTC = new Date(punchOut);
+
+            console.log("=== PUNCH OUT DEBUG ===");
+            console.log("Current attendance.status:", attendance.status);
+            console.log("Current attendance.remarks:", attendance.remarks);
+            console.log("Shift type:", isFlexible ? "FLEXIBLE" : "REGULAR");
+
+            /* Anti-spam check */
+            const lastPunch = attendance.punchHistory?.[attendance.punchHistory.length - 1];
+            if (lastPunch && lastPunch.punchOut) {
+                const lastPunchTimeIST = getPunchTimeIST(new Date(lastPunch.punchOut));
+                const gap = diffMinutes(lastPunchTimeIST, punchOutTimeIST);
+                if (gap < 3) {
+                    return abortAndRespond(
+                        session, res, 429, "PUNCH_TOO_FREQUENT",
+                        "Punch registered too soon. Please wait 3 minutes before trying again.",
+                        {
+                            lastPunchTime: lastPunch.punchOut,
+                            minimumGapMinutes: 3,
+                            currentGapMinutes: gap
+                        }
+                    );
+                }
+            }
+
+            /* Add to punch history */
+            attendance.punchHistory.push({
+                punchOut: outTimeUTC,
+                geoLocation: {
+                    type: "Point",
+                    coordinates: geoLocation.coordinates,
+                    accuracy: geoLocation.accuracy,
+                    verified: geoVerified,
+                    source: geoLocation.source || "gps"
+                },
+                deviceInfo,
+                source: deviceInfo?.source || "mobile",
+                createdAt: new Date()
+            });
+
+            attendance.lastPunchAt = outTimeUTC;
+            attendance.punchOut = outTimeUTC;
+
+            /* Recalculate all metrics */
+            const inTimeUTC = new Date(attendance.punchIn);
+            const inTimeIST = getPunchTimeIST(inTimeUTC);
+            let totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+            let isSuspicious = attendance.isSuspicious || false;
+
+            console.log(`  Punch Out (IST): ${punchOutTimeIST.toISOString()}`);
+            console.log(`  Total Work Time: ${totalMinutes} mins`);
+
+            /* Handle based on shift type */
+            if (isFlexible) {
+                console.log("🟢 Flexible shift punch-out - Calculating final status");
+
+                let overtimeMinutes = 0;
+                let earlyLeaveMinutes = 0;
+
+                if (punchOutTimeIST > shiftEndTimeIST) {
+                    overtimeMinutes = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
+                    console.log(`  Overtime: ${overtimeMinutes} mins`);
+                }
+
+                if (punchOutTimeIST < shiftEndTimeIST) {
+                    earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
+                    console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
+                }
+
+                const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
+                const finalStatus = totalMinutes > 0 ? "present" : "absent";
+
+                console.log(`  Total minutes: ${totalMinutes}`);
+                console.log(`  Final status: ${finalStatus}`);
+
+                attendance.status = finalStatus;
+                attendance.workSummary = {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: Math.max(0, payableMinutes),
+                    overtimeMinutes: Math.max(0, overtimeMinutes),
+                    lateMinutes: 0,
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                };
+                attendance.lateByMinutes = 0;
+                attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+                attendance.remarks = `Punch-out completed. Total work: ${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+            }
+            else {
+                console.log("🔴 Regular shift punch-out - Calculating final metrics");
+
+                const minutesAfterShiftStart = diffMinutes(shiftStartTimeIST, inTimeIST);
+                const gracePeriodLate = shiftData.gracePeriod?.lateEntry || 10;
+                const lateMinutes = Math.max(0, minutesAfterShiftStart - gracePeriodLate);
+
+                let overtimeMinutes = 0;
+                let earlyLeaveMinutes = 0;
+
+                if (punchOutTimeIST > shiftEndTimeIST) {
+                    const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
+                    const rawOvertime = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
+                    overtimeMinutes = Math.max(0, rawOvertime - earlyExitGrace);
+
+                    const maxOvertimeMinutes = (shiftData.overtime?.maxHoursPerDay || 4) * 60;
+                    if (overtimeMinutes > maxOvertimeMinutes && !shiftData.overtime?.allowed) {
+                        isSuspicious = true;
+                        console.log(`  ⚠ Overtime exceeds limit: ${overtimeMinutes} mins`);
+                    }
+                }
+
+                if (punchOutTimeIST < shiftEndTimeIST) {
+                    earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
+                    console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
+                }
+
+                const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
+
+                // ✅ Calculate final status based on actual work done
+                let finalStatus;
+                const percentageWorked = (payableMinutes / shiftDurationMinutes) * 100;
+
+                console.log(`  Percentage of shift completed: ${percentageWorked.toFixed(1)}%`);
+
+                if (punchOutTimeIST >= shiftEndTimeIST) {
+                    finalStatus = "present";
+                    console.log(`  ✅ Completed full shift - Status: PRESENT`);
+                }
+                else if (percentageWorked >= 50) {
+                    finalStatus = "present";
+                    console.log(`  ✅ Worked ${percentageWorked.toFixed(1)}% of shift - Status: PRESENT`);
+                }
+                else if (percentageWorked > 0 && percentageWorked < 50) {
+                    finalStatus = "half_day";
+                    console.log(`  ⚠ Worked only ${percentageWorked.toFixed(1)}% of shift - Status: HALF_DAY`);
+                }
+                else {
+                    finalStatus = "absent";
+                    console.log(`  ❌ No work done - Status: ABSENT`);
+                }
+
+                // Format remarks
+                const workDurationStr = `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+                let statusRemark = "";
+
+                if (finalStatus === "half_day") {
+                    statusRemark = `Half day - Worked ${percentageWorked.toFixed(1)}% of shift (${workDurationStr} / ${Math.floor(shiftDurationMinutes / 60)}h ${shiftDurationMinutes % 60}m)`;
+                } else if (finalStatus === "present" && punchOutTimeIST < shiftEndTimeIST) {
+                    statusRemark = `Present - Left early (${workDurationStr} worked)`;
+                } else if (finalStatus === "present" && punchOutTimeIST >= shiftEndTimeIST) {
+                    statusRemark = `Present - Completed full shift (${workDurationStr})`;
+                } else {
+                    statusRemark = `Punch-out completed. Total work: ${workDurationStr}`;
+                }
+
+                if (lateMinutes > 0) {
+                    statusRemark += ` (Late by ${lateMinutes} minutes)`;
+                }
+
+                attendance.remarks = statusRemark;
+                console.log(`  Remarks: ${statusRemark}`);
+
+                attendance.status = finalStatus;
+                attendance.workSummary = {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: Math.max(0, payableMinutes),
+                    overtimeMinutes: Math.max(0, overtimeMinutes),
+                    lateMinutes: Math.max(0, lateMinutes),
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                };
+                attendance.lateByMinutes = Math.max(0, lateMinutes);
+                attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+
+                /* Device fraud detection */
+                if (
+                    attendance.deviceInfo?.deviceId &&
+                    deviceInfo?.deviceId &&
+                    attendance.deviceInfo.deviceId !== deviceInfo.deviceId
+                ) {
+                    isSuspicious = true;
+                    console.log(`  ⚠ Device change detected`);
+                }
+
+                attendance.isSuspicious = isSuspicious;
+            }
+
+            // Save the updated attendance
+            await attendance.save({ session });
+            await session.commitTransaction();
+            session.endSession();
+
+            // Re-fetch to verify
+            const savedAttendance = await Attendance.findById(attendance._id).lean();
+            console.log(`✓ Attendance updated | Status: ${savedAttendance.status}`);
+
+            const punchInISTResponse = savedAttendance.punchIn ? getPunchTimeIST(savedAttendance.punchIn) : null;
+            const punchOutISTResponse = savedAttendance.punchOut ? getPunchTimeIST(savedAttendance.punchOut) : null;
+
+            responseData = {
+                attendanceId: savedAttendance._id,
+                employeeId: employee._id,
+                employeeCode: employee.empCode,
+                employeeName: employee.user_name,
+                date: attendanceDateIST,
+                status: savedAttendance.status,
+                punchIn: punchInISTResponse,
+                punchOut: punchOutISTResponse,
+                shift: {
+                    name: savedAttendance.shift?.name,
+                    startTime: savedAttendance.shift?.startTime,
+                    endTime: savedAttendance.shift?.endTime
+                },
+                workSummary: savedAttendance.workSummary,
+                geoVerified: savedAttendance.geoLocation?.verified,
+                isSuspicious: savedAttendance.isSuspicious,
+                approvalStatus: savedAttendance.approvalStatus,
+                remarks: savedAttendance.remarks
+            };
+
+            let successMessage = `Punch-out recorded successfully. `;
+            if (savedAttendance.status === "half_day") {
+                successMessage += `Marked as HALF DAY because you worked less than 50% of shift duration.`;
+            } else if (savedAttendance.status === "present") {
+                successMessage += `Marked as PRESENT.`;
+            }
+
+            return res.status(201).json({
+                success: true,
+                message: successMessage,
+                data: responseData
+            });
+        }
+
+    } catch (error) {
+        try {
+            await session.abortTransaction();
+        } catch (e) {
+            console.error("Error aborting transaction:", e);
+        } finally {
+            session.endSession();
+        }
+
+        console.error("❌ Attendance Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            errorCode: "ATTENDANCE_ERROR",
+            message: "Failed to process attendance",
+            error: process.env.NODE_ENV === "development" ? error.message : undefined
+        });
+    }
+};
+
 
 // ─── DTO helpers (defined once, reused) ──────────────────────────────────────
 
