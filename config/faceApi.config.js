@@ -14,6 +14,8 @@ export const ENDPOINTS = {
   TRAIN_SINGLE: '/api/v1/face-training/single',
   TRAIN_BATCH: '/api/v1/face-training/batch',
   TRAIN_STATUS: (employeeId) => `/api/v1/face-training/status/${employeeId}`,
+  TRAIN_DELETE_IMAGE: '/api/v1/face-training/image',
+  TRAIN_DELETE_ALL: (employeeId) => `/api/v1/face-training/${employeeId}`,
 
   VERIFY: '/api/v1/face-recognition/verify',           // Supports both 1:1 and 1:N
   VERIFY_EMPLOYEE: '/api/v1/face-recognition/verify-employee',  // Explicit 1:1
@@ -44,11 +46,11 @@ export const DETECTION_SETTINGS = {
   SPOOFING_CHECK_ENABLED: process.env.ENABLE_ANTI_SPOOFING === 'true' || false,
 };
 
-export default { 
-  BASE_URL, 
-  API_KEY, 
-  ENDPOINTS, 
-  TIMEOUT_MS, 
+export default {
+  BASE_URL,
+  API_KEY,
+  ENDPOINTS,
+  TIMEOUT_MS,
   BATCH_TIMEOUT_MS,
   DEFAULT_FACE_MATCH_THRESHOLD,
   DEFAULT_IDENTIFY_MAX_RESULTS,

@@ -10,5 +10,6 @@ const router = express.Router();
 router.post('/train/single', uploadSingle, faceTrainingController.trainSingle);
 router.post('/train/batch', uploadBatch, faceTrainingController.trainBatch);
 router.get('/train/status/:employeeId', faceTrainingController.getStatus);
-
+router.delete('/train/deleteImage', faceTrainingController.deleteImage);
+router.delete('/train/all', faceTrainingController.deleteAll);
 export default router;

@@ -274,6 +274,52 @@ export async function getTrainingStatus(employeeId, companyId) {
   }
 }
 
+
+
+
+
+/**
+ * Delete a single training image for an employee.
+ * Removes it from Cloudinary and from the face profile on the Python service.
+ * @param {Object} params
+ * @param {string} params.employeeId - Employee identifier
+ * @param {string} params.companyId - Company identifier
+ * @param {string} params.cloudinaryPublicId - Cloudinary public_id of the image to delete
+ * @returns {Promise<Object>} Deletion result
+ */
+export async function deleteTrainingImage({ employeeId, companyId, cloudinaryPublicId }) {
+  try {
+    const { data } = await client.delete(ENDPOINTS.TRAIN_DELETE_IMAGE, {
+      params: {
+        employee_id: employeeId,
+        company_id: companyId,
+        cloudinary_public_id: cloudinaryPublicId,
+      },
+    });
+    return data;
+  } catch (err) {
+    throw shapeError(err);
+  }
+}
+ 
+/**
+ * Delete ALL training data for an employee — wipes every Cloudinary image
+ * and the entire face profile. Irreversible. Use for full re-enrollment
+ * resets or offboarding / consent withdrawal.
+ * @param {string} employeeId - Employee identifier
+ * @param {string} companyId - Company identifier
+ * @returns {Promise<Object>} Deletion result
+ */
+export async function deleteAllTrainingData(employeeId, companyId) {
+  try {
+    const { data } = await client.delete(ENDPOINTS.TRAIN_DELETE_ALL(employeeId), {
+      params: { company_id: companyId },
+    });
+    return data;
+  } catch (err) {
+    throw shapeError(err);
+  }
+}
 /* ------------------------------------------------------------------ */
 /* 3. RECOGNITION — match against enrolled faces                      */
 /* ------------------------------------------------------------------ */

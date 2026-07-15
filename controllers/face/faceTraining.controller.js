@@ -94,3 +94,43 @@ export async function getStatus(req, res, next) {
     next(err);
   }
 }
+
+
+
+export async function deleteImage(req, res, next) {
+  try {
+    const { employeeId, companyId } = req.body;
+    
+    if (!employeeId || !companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'employeeId and companyId are required',
+      });
+    }
+
+    const result = await faceApiService.deleteTrainingImage(employeeId, companyId);
+    return res.status(200).json(result);
+  }
+  catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteAll(req, res, next) {
+  try {
+    const { employeeId, companyId } = req.body;
+    
+    if (!employeeId || !companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'employeeId and companyId are required',
+      });
+    }
+    
+    const result = await faceApiService.deleteAllTrainingData(employeeId, companyId);
+    return res.status(200).json(result);
+  }
+  catch (err) {
+    next(err);
+  }
+}
