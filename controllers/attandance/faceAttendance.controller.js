@@ -24,6 +24,22 @@
 // original markFaceAttendance logic, untouched, and is now shared by both
 // endpoints via processAttendanceForEmployee() so it isn't duplicated.
 //
+// -------------------------------------------------------------------
+// FIX (this version): the routes use multer memoryStorage + upload.single,
+// which means the request is multipart/form-data. With multipart bodies,
+// EVERY field in req.body arrives as a plain STRING — including
+// geoLocation and breaks, even if the client sends JSON-looking text for
+// them. Only deviceInfo was being JSON-parsed before use; geoLocation and
+// breaks were being validated/used as if they were already objects/arrays,
+// which made geoLocation?.coordinates always undefined and produced the
+// "GEOLOCATION_INVALID" error even when the client sent valid JSON.
+//
+// Fix applied: reuse the existing safe-parse helper (renamed to
+// parseJsonField for clarity) on geoLocation and breaks as well, in BOTH
+// markAttendanceWithFaceVerify and markAttendanceWithFaceIdentify, before
+// any validation or use of those fields.
+// -------------------------------------------------------------------
+//
 // Assumes your existing project already exports these (same imports your
 // original controller used) — adjust paths to match your project:
 //   Employee, Subscription, Shift, Holiday, Attendance (mongoose models)
@@ -81,15 +97,22 @@ function getUploadedFile(req) {
   };
 }
 
-function parseDeviceInfo(raw) {
-  if (!raw) return {};
-  if (typeof raw === 'object') return raw;
+// Generic safe-JSON-parse helper for any multipart/form-data field that is
+// expected to be an object/array (geoLocation, deviceInfo, breaks, ...).
+// multipart bodies always deliver strings, so any field the client sends
+// as JSON.stringify(...) MUST be parsed back before you touch its shape.
+function parseJsonField(raw, fallback = {}) {
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  if (typeof raw === 'object') return raw; // already parsed (e.g. JSON request instead of multipart)
   try {
     return JSON.parse(raw);
   } catch {
-    return {};
+    return fallback;
   }
 }
+
+// Kept as an alias so nothing else that imports/uses parseDeviceInfo breaks.
+const parseDeviceInfo = (raw) => parseJsonField(raw, {});
 
 /* ================================================================== */
 /* 1) 1:1 — VERIFY A KNOWN EMPLOYEE                                    */
@@ -107,11 +130,18 @@ export const markAttendanceWithFaceVerify = async (req, res) => {
       date,
       punchIn,
       punchOut,
-      breaks,
-      geoLocation,
-      deviceInfo,
+      breaks: rawBreaks,
+      geoLocation: rawGeoLocation,
+      deviceInfo: rawDeviceInfo,
       remarks
     } = req.body;
+
+    // Parse multipart string fields back into real objects/arrays.
+    const geoLocation = parseJsonField(rawGeoLocation, null);
+    const deviceInfo = parseJsonField(rawDeviceInfo, {});
+    const breaks = Array.isArray(rawBreaks)
+      ? rawBreaks
+      : (parseJsonField(rawBreaks, []) || []);
 
     if (!date) {
       return abortAndRespond(session, res, 400, 'DATE_MISSING', 'Date is required');
@@ -201,7 +231,7 @@ export const markAttendanceWithFaceVerify = async (req, res) => {
         fileBuffer: uploaded.fileBuffer,
         fileName: uploaded.fileName,
         mimeType: uploaded.mimeType,
-        deviceInfo: parseDeviceInfo(deviceInfo)
+        deviceInfo
       });
     } catch (err) {
       return abortAndRespond(session, res, err.statusCode || 502, 'FACE_VERIFY_FAILED', err.message);
@@ -227,7 +257,7 @@ export const markAttendanceWithFaceVerify = async (req, res) => {
     return processAttendanceForEmployee({
       session, res, employee, companyId,
       date, punchIn, punchOut, breaks, geoLocation,
-      deviceInfo: parseDeviceInfo(deviceInfo),
+      deviceInfo,
       remarks,
       faceMeta: {
         verificationType: '1:1',
@@ -271,11 +301,18 @@ export const markAttendanceWithFaceIdentify = async (req, res) => {
       date,
       punchIn,
       punchOut,
-      breaks,
-      geoLocation,
-      deviceInfo,
+      breaks: rawBreaks,
+      geoLocation: rawGeoLocation,
+      deviceInfo: rawDeviceInfo,
       remarks
     } = req.body;
+
+    // Parse multipart string fields back into real objects/arrays.
+    const geoLocation = parseJsonField(rawGeoLocation, null);
+    const deviceInfo = parseJsonField(rawDeviceInfo, {});
+    const breaks = Array.isArray(rawBreaks)
+      ? rawBreaks
+      : (parseJsonField(rawBreaks, []) || []);
 
     if (!date) {
       return abortAndRespond(session, res, 400, 'DATE_MISSING', 'Date is required');
@@ -397,7 +434,7 @@ export const markAttendanceWithFaceIdentify = async (req, res) => {
     return processAttendanceForEmployee({
       session, res, employee, companyId,
       date, punchIn, punchOut, breaks, geoLocation,
-      deviceInfo: parseDeviceInfo(deviceInfo),
+      deviceInfo,
       remarks,
       faceMeta: {
         verificationType: '1:N',
