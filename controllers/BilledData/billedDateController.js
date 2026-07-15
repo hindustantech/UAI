@@ -1120,14 +1120,17 @@ const sendWhatsAppReminder = async (bill) => {
     }
 };
 
+// In-memory job store. Swap for Redis/DB if you run multiple instances or need persistence.
+const bulkJobs = new Map();
+// Shape: { id, status: 'processing'|'completed'|'failed', total, processed, sent, failed, results, startedAt, finishedAt }
+
+function makeJobId() {
+    return `bulk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// POST /bills/bulk-reminder  -> kicks off the job, responds immediately
 export const sendBulkReminder = async (req, res) => {
     const { bills } = req.body;
-
-    // Avoid the platform/proxy default socket timeout killing a long-running
-    // bulk job. This does NOT send any headers/bytes, so res.json() later
-    // is still completely safe to call.
-    req.setTimeout(15 * 60 * 1000);  // 15 minutes
-    res.setTimeout(15 * 60 * 1000);
 
     if (!bills?.length) {
         return res.status(400).json({
@@ -1153,73 +1156,114 @@ export const sendBulkReminder = async (req, res) => {
         }
     }
 
-    const results = [];
-    const startTime = Date.now();
+    const jobId = makeJobId();
+    const job = {
+        id: jobId,
+        status: 'processing',
+        total: billDocuments.length,
+        processed: 0,
+        sent: 0,
+        failed: 0,
+        results: [],
+        startedAt: Date.now(),
+        finishedAt: null
+    };
+    bulkJobs.set(jobId, job);
 
-    console.log(`Starting bulk send for ${billDocuments.length} customers. Rate limit: ${RATE_LIMIT}/min`);
+    // Respond immediately — the HTTP connection is closed here, so no
+    // timeout anywhere in the chain can interfere with it.
+    res.status(202).json({
+        success: true,
+        message: "Bulk reminder job started",
+        jobId,
+        total: job.total,
+        statusUrl: `/bills/bulk-reminder/status/${jobId}`
+    });
 
-    try {
-        // Process bills sequentially to maintain rate limit
-        for (let i = 0; i < billDocuments.length; i++) {
-            const bill = billDocuments[i];
+    // Run the actual work after the response has been sent.
+    runBulkJob(job, billDocuments).catch(error => {
+        console.error(`Bulk job ${jobId} crashed:`, error);
+        job.status = 'failed';
+        job.error = error.message;
+        job.finishedAt = Date.now();
+    });
+};
 
-            try {
-                const result = await sendWhatsAppReminder(bill);
-                results.push({
-                    billId: bill.bill_id,
-                    phone: bill.phone,
-                    name: bill.customerName,
-                    success: true,
-                    remark: result.remark,
-                    index: i + 1
-                });
+async function runBulkJob(job, billDocuments) {
+    console.log(`Starting bulk send for ${billDocuments.length} customers. Rate limit: ${RATE_LIMIT}/min [job ${job.id}]`);
 
-                console.log(`✅ Sent reminder to ${bill.customerName} (${bill.phone})`);
+    for (let i = 0; i < billDocuments.length; i++) {
+        const bill = billDocuments[i];
 
-            } catch (error) {
-                results.push({
-                    billId: bill.bill_id,
-                    phone: bill.phone,
-                    name: bill.customerName,
-                    success: false,
-                    error: error.response?.data?.message || error.message,
-                    status: error.response?.status,
-                    index: i + 1
-                });
-
-                console.log(`❌ Failed reminder for ${bill.customerName} (${bill.phone})`);
-            }
-
-            // Progress logging (server-side only — no response writes)
-            if ((i + 1) % 10 === 0 || i === billDocuments.length - 1) {
-                const elapsedMinutes = (Date.now() - startTime) / 60000;
-                const progress = ((i + 1) / billDocuments.length * 100).toFixed(1);
-                console.log(`Progress: ${i + 1}/${billDocuments.length} (${progress}%) - ${elapsedMinutes.toFixed(1)} min elapsed`);
-            }
+        try {
+            const result = await sendWhatsAppReminder(bill);
+            job.results.push({
+                billId: bill.bill_id,
+                phone: bill.phone,
+                name: bill.customerName,
+                success: true,
+                remark: result.remark,
+                index: i + 1
+            });
+            job.sent++;
+            console.log(`✅ Sent reminder to ${bill.customerName} (${bill.phone})`);
+        } catch (error) {
+            job.results.push({
+                billId: bill.bill_id,
+                phone: bill.phone,
+                name: bill.customerName,
+                success: false,
+                error: error.response?.data?.message || error.message,
+                status: error.response?.status,
+                index: i + 1
+            });
+            job.failed++;
+            console.log(`❌ Failed reminder for ${bill.customerName} (${bill.phone})`);
         }
-    } catch (error) {
-        console.error('Bulk send interrupted:', error);
-        return res.status(500).json({
+
+        job.processed = i + 1;
+
+        if (job.processed % 10 === 0 || job.processed === billDocuments.length) {
+            const elapsedMinutes = (Date.now() - job.startedAt) / 60000;
+            const progress = (job.processed / billDocuments.length * 100).toFixed(1);
+            console.log(`Progress [job ${job.id}]: ${job.processed}/${billDocuments.length} (${progress}%) - ${elapsedMinutes.toFixed(1)} min elapsed`);
+        }
+    }
+
+    job.status = 'completed';
+    job.finishedAt = Date.now();
+
+    const totalTime = ((job.finishedAt - job.startedAt) / 60000).toFixed(1);
+    console.log(`Bulk job ${job.id} completed: ${job.sent} sent, ${job.failed} failed in ${totalTime} minutes`);
+}
+
+// GET /bills/bulk-reminder/status/:jobId  -> client polls this for progress/results
+export const getBulkReminderStatus = async (req, res) => {
+    const { jobId } = req.params;
+    const job = bulkJobs.get(jobId);
+
+    if (!job) {
+        return res.status(404).json({
             success: false,
-            error: error.message
+            message: "Job not found (it may have expired or the server restarted)"
         });
     }
 
-    const sent = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
-    const totalTime = ((Date.now() - startTime) / 60000).toFixed(1);
+    const elapsedMinutes = ((job.finishedAt || Date.now()) - job.startedAt) / 60000;
 
-    // Single, final response — safe because headers were never sent early
     return res.status(200).json({
         success: true,
-        total: billDocuments.length,
-        sent,
-        failed,
-        timeMinutes: totalTime,
-        estimatedTimeMinutes: Math.ceil(billDocuments.length / RATE_LIMIT),
-        results: results.slice(0, 100),
-        hasMoreResults: results.length > 100,
-        summaryRemark: `Bulk reminder completed: ${sent} sent, ${failed} failed in ${totalTime} minutes`
+        jobId: job.id,
+        status: job.status, // 'processing' | 'completed' | 'failed'
+        total: job.total,
+        processed: job.processed,
+        sent: job.sent,
+        failed: job.failed,
+        progress: `${((job.processed / job.total) * 100).toFixed(1)}%`,
+        timeMinutes: elapsedMinutes.toFixed(1),
+        results: job.status === 'completed' ? job.results.slice(0, 100) : undefined,
+        hasMoreResults: job.status === 'completed' ? job.results.length > 100 : undefined,
+        error: job.error
     });
 };
 
