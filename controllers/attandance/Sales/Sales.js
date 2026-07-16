@@ -433,6 +433,14 @@ export const punchIn = async (req, res) => {
     const now = new Date();
 
 
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: "Sorry for the inconvenience. Please logout and log in again.",
+        error: "Missing companyId in user context"
+      });
+    }
+
 
     // Step 2: Get active subscription
     const subscription = await Subscription.findOne({
