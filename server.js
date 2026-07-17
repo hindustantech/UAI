@@ -48,8 +48,10 @@ import SalesAnyRoutes from './routes/Attandance/Sales/sales.any.routes.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
+import { connectRedis } from './config/redis.js';
 dotenv.config();
 await connectDB();
+await connectRedis();
 // START BACKGROUND WORKER HERE
 
 const app = express();

@@ -1,42 +1,40 @@
-// config/redis.js
+import Redis from 'ioredis';
+import dotenv from 'dotenv';
 
-import Redis from "ioredis";
+dotenv.config();
 
-const redis = new Redis({
-  host: process.env.REDIS_HOST || "127.0.0.1",
-  port: Number(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
+let redisClient;
+let redisSubscriber;
 
-  maxRetriesPerRequest: null,
-  enableReadyCheck: true,
+const connectRedis = async () => {
+  try {
+    redisClient = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: process.env.REDIS_PORT || 6379,
+      password: process.env.REDIS_PASSWORD,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+    });
 
-  retryStrategy(times) {
-    return Math.min(times * 100, 3000);
-  },
+    redisSubscriber = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: process.env.REDIS_PORT || 6379,
+      password: process.env.REDIS_PASSWORD,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+    });
 
-  reconnectOnError() {
-    return true;
-  },
-});
+    await redisClient.ping();
+    console.log('✅ Redis connected successfully');
+    
+    return { redisClient, redisSubscriber };
+  } catch (error) {
+    console.error('❌ Redis connection error:', error);
+    process.exit(1);
+  }
+};
 
-redis.on("connect", () => {
-  console.log("✅ Redis Connected");
-});
+const getRedisClient = () => redisClient;
+const getRedisSubscriber = () => redisSubscriber;
 
-redis.on("ready", () => {
-  console.log("🚀 Redis Ready");
-});
-
-redis.on("error", (err) => {
-  console.error("❌ Redis Error:", err.message);
-});
-
-redis.on("close", () => {
-  console.log("⚠️ Redis Connection Closed");
-});
-
-redis.on("reconnecting", () => {
-  console.log("♻️ Redis Reconnecting...");
-});
-
-export default redis;
+export { connectRedis, getRedisClient, getRedisSubscriber };
