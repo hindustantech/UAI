@@ -44,6 +44,7 @@ import blogPost from './routes/Blog/blogRoutes.js'
 import categoryblog from './routes/Blog/categoryRoutes.js'
 import faceRoutes from './routes/face/index.js'; // Import the face routes
 import faceAttendanceRoutes from './routes/faceAttendance.routes.js'; // Import the face attendance routes
+import SalesAnyRoutes from './routes/Attandance/Sales/sales.any.routes.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
