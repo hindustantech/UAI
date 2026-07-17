@@ -48,8 +48,10 @@ import SalesAnyRoutes from './routes/Attandance/Sales/sales.any.routes.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
+import { connectRedis } from './config/redis.js';
 dotenv.config();
 await connectDB();
+await connectRedis();
 // START BACKGROUND WORKER HERE
 
 const app = express();
@@ -88,10 +90,10 @@ app.use(
 
 
 
-app.use('/api/v1/slab/',slabpricing)
-app.use('/api/v1/blogPost',blogPost)
-app.use('/api/v1/categoryblog/',categoryblog)
-app.use('/api/v1/customorder',customorder)
+app.use('/api/v1/slab/', slabpricing)
+app.use('/api/v1/blogPost', blogPost)
+app.use('/api/v1/categoryblog/', categoryblog)
+app.use('/api/v1/customorder', customorder)
 app.use('/api/usermanagement', usermanagement);
 app.use('/api/permissionRoutes', permissionRoutes);
 app.use('/api/v1/payrollrule', payrollrule)
