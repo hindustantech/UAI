@@ -154,7 +154,11 @@ const salesSessionSchema = new Schema({
         type: {
             type: String,
             enum: ["retail", "wholesale", "corporate",'customer','agent'],
-            default: "retail"
+            default: "customer"
+        },
+        isActive: {
+            type: Boolean,
+            default: true
         },
 
         companyName: {

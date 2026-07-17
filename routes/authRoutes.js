@@ -5,11 +5,11 @@ import {
 
     updateUserLocation,
     UpdateManualAddress,
-  
-  
+
+
     resendOtp,
     signout,
-  
+
     updateProfile,
     getProfileData,
     uploadProfileImage,
@@ -32,7 +32,9 @@ import {
     generateTheQRCode,
     startAdminAuth, completeAdminOtp,
     oauthAuthController,
-    UpdatePhone
+    UpdatePhone,
+
+    createOrUpdateEmployee, getAllEmployees, getEmployeeById
 } from '../controllers/authController.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import profileUploadMiddleware from '../middlewares/profileUploadMiddleware.js';
@@ -57,6 +59,15 @@ router.get('/exportUsersByLocation', exportUsersByLocation);
 router.get('/updateProfileImage', authMiddleware, upload.single('profileImage'), updateProfileImage);
 
 // router.post('/signout', signout);
+
+// Create or Update Employee (POST because it can create)
+router.post('/manul/createOrUpdateEmployee', authMiddleware, createOrUpdateEmployee);
+
+// Get all employees with pagination and filters
+router.get('/manul/getAllEmployees', authMiddleware, getAllEmployees);
+
+// Get single employee by ID
+router.get('/manul/getEmployeeById/:employeeId', authMiddleware, getEmployeeById);
 
 
 router.post('/resendOtp', resendOtp);

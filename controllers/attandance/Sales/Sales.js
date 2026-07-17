@@ -661,7 +661,9 @@ export const completeSalesForm = async (req, res) => {
       companyName,
       contactName,
       phoneNumber,
-      address
+      address,
+      type,
+      isActive
     } = parsedCustomer;
 
     const errors = {};
@@ -676,6 +678,17 @@ export const completeSalesForm = async (req, res) => {
       errors.phoneNumber = "Phone number is required";
     } else if (typeof phoneNumber === 'string' && !/^[6-9]\d{9}$/.test(phoneNumber)) {
       errors.phoneNumber = "Invalid phone number format";
+    }
+
+    // Customer type validation
+    const allowedTypes = ["retail", "wholesale", "corporate", "customer", "agent"];
+    if (type !== undefined && type !== null && !allowedTypes.includes(type)) {
+      errors.type = `Invalid customer type. Must be one of: ${allowedTypes.join(", ")}`;
+    }
+
+    // isActive validation (only check type if it's actually provided)
+    if (isActive !== undefined && typeof isActive !== "boolean") {
+      errors.isActive = "isActive must be a boolean value";
     }
 
     if (Object.keys(errors).length > 0) {
@@ -696,13 +709,6 @@ export const completeSalesForm = async (req, res) => {
         error: "At least 1 shop image is required"
       });
     }
-
-    // if (!visitFiles.length) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     error: "At least 1 visit image is required"
-    //   });
-    // }
 
     if (shopFiles.length > 4 || visitFiles.length > 4) {
       return res.status(400).json({
@@ -750,6 +756,8 @@ export const completeSalesForm = async (req, res) => {
             phoneNumber,
             address,
             landmark: parsedCustomer?.landmark || "",
+            type: type || "customer",
+            isActive: isActive !== undefined ? isActive : true,
             ...(location && { location })
           },
 
@@ -805,6 +813,8 @@ export const completeSalesForm = async (req, res) => {
         phoneNumber,
         address,
         landmark: parsedCustomer?.landmark || "",
+        type: type || session.customer?.type || "customer",
+        isActive: isActive !== undefined ? isActive : (session.customer?.isActive ?? true),
         ...(customerLocation && { location: customerLocation }),
         shopPhoto: shopPhotos
       };
@@ -891,6 +901,8 @@ export const completeSalesForm = async (req, res) => {
     });
   }
 };
+
+
 // ================= GEO BUILDER =================
 const buildGeoPoint = (location) => {
   if (!location) return null;

@@ -1561,7 +1561,258 @@ export const generateUniqueReferralCode = async () => {
 //   }
 // };
 
+// employeeController.js
 
+export const createOrUpdateEmployee = async (req, res) => {
+  try {
+    let companyId;
+    if (req.user.type === 'user') {
+      companyId = req.user.companyId;
+    } else {
+      companyId = req.user._id;
+    }
+
+    const { name, phone, employeeId } = req.body;
+
+    // Validate required fields
+    if (!name || !phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Name and phone are required."
+      });
+    }
+
+    // If employeeId is provided, update existing employee
+    if (employeeId) {
+      // Find existing employee
+      const existingEmployee = await User.findOne({
+        _id: employeeId,
+        createdBy: companyId,
+        type: 'user'
+      });
+
+      if (!existingEmployee) {
+        return res.status(404).json({
+          success: false,
+          message: "Employee not found or you don't have permission to update."
+        });
+      }
+
+      // Check if phone is being changed and if new phone already exists
+      if (phone !== existingEmployee.phone) {
+        const phoneExists = await User.findOne({
+          phone,
+          _id: { $ne: employeeId }
+        });
+
+        if (phoneExists) {
+          return res.status(409).json({
+            success: false,
+            message: "Phone number is already registered with another user."
+          });
+        }
+      }
+
+      // Update employee
+      const updatedEmployee = await User.findByIdAndUpdate(
+        employeeId,
+        {
+          name: name.trim(),
+          phone: phone.trim(),
+        },
+        { new: true, runValidators: true }
+      ).select('-password -devicetoken');
+
+      return res.status(200).json({
+        success: true,
+        message: "Employee updated successfully.",
+        data: updatedEmployee
+      });
+    }
+
+    // If no employeeId, create new employee
+    const existingUser = await User.findOne({ phone });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "Phone number is already registered."
+      });
+    }
+
+    // Generate unique referral code
+    const referalCode = await generateUniqueReferralCode();
+
+    const employee = await User.create({
+      name: name.trim(),
+      phone: phone.trim(),
+      referalCode,
+      type: "user",
+      createdBy: companyId,
+    });
+
+    // Remove sensitive fields from response
+    const employeeData = employee.toObject();
+    delete employeeData.password;
+    delete employeeData.devicetoken;
+
+    return res.status(201).json({
+      success: true,
+      message: "Employee created successfully.",
+      data: employeeData
+    });
+
+  } catch (error) {
+    console.error("Create/Update Employee Error:", error);
+
+    // Handle mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: messages.join(', ')
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to process employee."
+    });
+  }
+};
+
+
+export const getAllEmployees = async (req, res) => {
+  try {
+
+    let companyId;
+    if (req.user.type === 'user') {
+      companyId = req.user.companyId;
+    } else {
+      companyId = req.user._id;
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Optional filters
+    const { search, status, sortBy, sortOrder } = req.query;
+
+    // Build filter query
+    const filterQuery = {
+      createdBy: companyId,
+      type: 'user',
+      accountStatus: { $ne: 'DELETED' } // Exclude deleted employees
+    };
+
+    // Search by name or phone
+    if (search) {
+      filterQuery.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Filter by account status
+    if (status) {
+      filterQuery.accountStatus = status;
+    }
+
+    // Sort configuration
+    let sortConfig = { createdAt: -1 }; // Default sort by newest first
+    if (sortBy) {
+      const order = sortOrder === 'asc' ? 1 : -1;
+      sortConfig = { [sortBy]: order };
+    }
+
+    // Execute query with pagination
+    const [employees, totalCount] = await Promise.all([
+      User.find(filterQuery)
+        .select('-password -devicetoken -availedCouponsId')
+        .sort(sortConfig)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(filterQuery)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Employees retrieved successfully.",
+      data: {
+        employees,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(totalCount / limit),
+          totalCount,
+          limit,
+          hasNextPage: page < Math.ceil(totalCount / limit),
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Get All Employees Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to retrieve employees."
+    });
+  }
+};
+
+// Get a particular employee
+export const getEmployeeById = async (req, res) => {
+  try {
+    let companyId;
+    if (req.user.type === 'user') {
+      companyId = req.user.companyId;
+    } else {
+      companyId = req.user._id;
+    }
+    const { employeeId } = req.params;
+
+    // Find employee and ensure it was created by the current user
+    const employee = await User.findOne({
+      _id: employeeId,
+      createdBy: companyId,
+      type: 'user'
+    })
+      .select('-password -devicetoken')
+      .populate('createdCouponsId', 'title code discount status') // Optional: populate related data
+      .lean();
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found or you don't have permission to view."
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Employee retrieved successfully.",
+      data: employee
+    });
+
+  } catch (error) {
+    console.error("Get Employee By ID Error:", error);
+
+    // Handle invalid ObjectId format
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid employee ID format."
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to retrieve employee."
+    });
+  }
+};
 
 
 export const startAuth = async (req, res) => {

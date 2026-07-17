@@ -22,7 +22,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: false
   },
- 
+
   suspend: {
     type: Boolean,
     default: false
@@ -232,7 +232,11 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
-  
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
 
 
 }, {

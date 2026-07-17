@@ -94,6 +94,14 @@ export const exportSalesPersonReport = async (req, res) => {
 
         let dateFilter = {};
 
+        // FIX: hoisted so we can also apply these bounds per-visitLog below.
+        // Previously the date filter only restricted which SESSIONS were
+        // fetched (via session-level punchInTime), but a session can contain
+        // many visitLogs across different days, so out-of-range visit logs
+        // were still showing up in the export. We now also bound each log.
+        let fromDateBound = null;
+        let toDateBound = null;
+
         if (fromDate || toDate) {
             dateFilter.punchInTime = {};
 
@@ -105,9 +113,9 @@ export const exportSalesPersonReport = async (req, res) => {
                         message: "Invalid fromDate format"
                     });
                 }
-                dateFilter.punchInTime.$gte = new Date(
-                    fromDateObj.setHours(0, 0, 0, 0)
-                );
+                fromDateObj.setHours(0, 0, 0, 0);
+                dateFilter.punchInTime.$gte = fromDateObj;
+                fromDateBound = fromDateObj;
             }
 
             if (toDate) {
@@ -118,9 +126,9 @@ export const exportSalesPersonReport = async (req, res) => {
                         message: "Invalid toDate format"
                     });
                 }
-                dateFilter.punchInTime.$lte = new Date(
-                    toDateObj.setHours(23, 59, 59, 999)
-                );
+                toDateObj.setHours(23, 59, 59, 999);
+                dateFilter.punchInTime.$lte = toDateObj;
+                toDateBound = toDateObj;
             }
         }
 
@@ -195,6 +203,31 @@ export const exportSalesPersonReport = async (req, res) => {
                             log.userId.toString() !== salesPersonIdStr
                         ) {
                             continue;
+                        }
+
+                        /* ============================================================
+                        FIX: PER-LOG DATE RANGE CHECK
+                        The session-level query above only narrows down which
+                        SESSIONS are fetched. A single session can have visit
+                        logs spread across many days, so we must also check
+                        each individual log's punchInTime against fromDate/toDate,
+                        otherwise visits outside the requested range still appear.
+                        ============================================================ */
+
+                        if (fromDateBound || toDateBound) {
+                            const logPunchInForFilter = log?.punchInTime
+                                ? new Date(log.punchInTime)
+                                : null;
+
+                            if (!logPunchInForFilter || isNaN(logPunchInForFilter.getTime())) {
+                                continue;
+                            }
+                            if (fromDateBound && logPunchInForFilter < fromDateBound) {
+                                continue;
+                            }
+                            if (toDateBound && logPunchInForFilter > toDateBound) {
+                                continue;
+                            }
                         }
 
                         /* ============================================================
@@ -538,8 +571,10 @@ export const exportSalesReport = async (req, res) => {
 
         // ============================================
         // SECURITY: Extract company ID from authenticated user
+        // FIX: original code had a typo `re.use?.id` (undefined variable `re`)
+        // which would throw a ReferenceError whenever req.user?._id was falsy.
         // ============================================
-        const companyId = req.user?._id || re.use?.id;
+        const companyId = req.user?._id || req.user?.id;
         console.log("Authenticated User ID:", req.user?._id);
         console.log("Company ID:", companyId);
         if (!companyId) {
@@ -631,9 +666,9 @@ export const exportSalesReport = async (req, res) => {
             companyId: companyId  // Always filter by company first
         };
 
-        // CRITICAL FIX: Use $or to find sessions where employee appears ANYWHERE
-        // This will get ALL sales records associated with the employee(s)
-        query.$or = [
+        // Employee match condition - session belongs to an employee if they
+        // appear ANYWHERE (main employee, creator, assignee, or inside any log)
+        const employeeOrConditions = [
             { employeeId: { $in: targetEmployeeIds } },           // Main employee
             { createdBy: { $in: targetEmployeeIds } },            // Created by
             { assignedTo: { $in: targetEmployeeIds } },           // Assigned to
@@ -645,6 +680,16 @@ export const exportSalesReport = async (req, res) => {
         // ============================================
         // STEP 4: Date range filter (if provided)
         // ============================================
+        // FIX: The original code pushed the date conditions into the SAME
+        // $or array as the employee conditions:
+        //   query.$or = [...employee conditions...];
+        //   query.$or.push(...date conditions...);
+        // That made Mongo match documents where "ANY employee condition
+        // matches OR ANY date condition matches" instead of
+        // "employee matches AND date matches" — so the date range filter
+        // was effectively ignored (and could even leak in wrong employees).
+        // Fix: keep employee conditions and date conditions in their own
+        // $or blocks, and combine those two blocks with $and.
         if (startDate || endDate) {
             const dateFilter = {};
 
@@ -661,36 +706,19 @@ export const exportSalesReport = async (req, res) => {
             }
 
             // Check multiple date fields
-            query.$or.push(
+            const dateOrConditions = [
                 { punchInTime: dateFilter },
                 { createdAt: dateFilter },
                 { 'visitLogs.punchInTime': dateFilter }
-            );
-        }
+            ];
 
-        // ============================================
-        // STEP 5: Status filters
-        // ============================================
-        if (status) {
-            const validStatuses = ["open", "closed", "follow_up"];
-            if (!validStatuses.includes(status)) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
-                });
-            }
-            query.SalesStatus = status;
-        }
-
-        if (sessionStatus) {
-            const validSessionStatuses = ["in_progress", "completed"];
-            if (!validSessionStatuses.includes(sessionStatus)) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Invalid session status. Must be one of: ${validSessionStatuses.join(', ')}`
-                });
-            }
-            query.status = sessionStatus;
+            // Combine: (employee match) AND (date match)
+            query.$and = [
+                { $or: employeeOrConditions },
+                { $or: dateOrConditions }
+            ];
+        } else {
+            query.$or = employeeOrConditions;
         }
 
         console.log("Target Employee IDs:", targetEmployeeIds);
@@ -1000,10 +1028,6 @@ const createCompanyReportRow = (session, employeeData) => {
         totalDistance: session.totalDistance ? Math.round(session.totalDistance / 1000 * 100) / 100 : 0
     };
 };
-
-
-
-
 
 
 /* ============================================================
@@ -1511,8 +1535,3 @@ export const exportSalesPersonExitReport = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to generate exit report" });
     }
 };
-
-
-
-
-
