@@ -22,16 +22,27 @@ if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
 /* ═══════════════════════════════════════════════════════════════
    HELPER — build attendance summary from Attendance collection
-   for a given employee + month + year
+   for a given employee + month + year.
+   Reconciles against the FULL calendar month so days with no
+   punch-in record at all are correctly counted as absent
+   (unless they fall on the employee's weekly off).
 ═══════════════════════════════════════════════════════════════ */
-async function getAttendanceSummary(employeeId, month, year) {
+async function getAttendanceSummary(employeeId, month, year, employee) {
     const start = new Date(year, month - 1, 1);
     const end = new Date(year, month, 0, 23, 59, 59);
+    const totalDaysInMonth = end.getDate();
 
     const records = await Attendance.find({
         employeeId,
         date: { $gte: start, $lte: end }
     }).lean();
+
+    // Map records by day-of-month for quick lookup
+    const recordByDay = new Map();
+    for (const rec of records) {
+        const day = new Date(rec.date).getDate();
+        recordByDay.set(day, rec);
+    }
 
     let presentDays = 0;
     let absentDays = 0;
@@ -41,27 +52,54 @@ async function getAttendanceSummary(employeeId, month, year) {
     let halfDays = 0;
     let lateDays = 0;
 
-    for (const rec of records) {
-        switch (rec.status) {
-            case "present":
-                presentDays++;
-                if (rec.workSummary?.lateMinutes > 0) lateDays++;
-                break;
-            case "half_day":
-                halfDays++;
-                presentDays += 0.5;
-                break;
-            case "absent": absentDays++; break;
-            case "leave": leaveDays++; break;
-            case "holiday": holidays++; break;
-            case "week_off": weeklyOffDays++; break;
-            default: break;
+    const weeklyOffSet = new Set(
+        (employee?.weeklyOff && employee.weeklyOff.length) ? employee.weeklyOff : ["Sunday"]
+    );
+    const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+    for (let day = 1; day <= totalDaysInMonth; day++) {
+        const rec = recordByDay.get(day);
+
+        if (rec) {
+            switch (rec.status) {
+                case "present":
+                    presentDays++;
+                    if (rec.workSummary?.lateMinutes > 0) lateDays++;
+                    break;
+                case "half_day":
+                    halfDays++;
+                    presentDays += 0.5;
+                    break;
+                case "absent":
+                    absentDays++;
+                    break;
+                case "leave":
+                    leaveDays++;
+                    break;
+                case "holiday":
+                    holidays++;
+                    break;
+                case "week_off":
+                    weeklyOffDays++;
+                    break;
+                default:
+                    break;
+            }
+        } else {
+            // No attendance document at all for this day —
+            // treat as absent unless it's a scheduled weekly off.
+            const dateObj = new Date(year, month - 1, day);
+            const dowName = DOW[dateObj.getDay()];
+            if (weeklyOffSet.has(dowName)) {
+                weeklyOffDays++;
+            } else {
+                absentDays++;
+            }
         }
     }
 
     return { presentDays, absentDays, leaveDays, holidays, weeklyOffDays, halfDays, lateDays };
 }
-
 
 
 /**
@@ -276,7 +314,7 @@ export const generatePayroll = async (req, res) => {
             PayrollRule.findOne({ companyId, isActive: true }).lean()
         ]);
 
-        const attendance = overrideAttendance ?? await getAttendanceSummary(employeeId, month, year);
+        const attendance = overrideAttendance ?? await getAttendanceSummary(employeeId, month, year, employee);
         const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
         const startDate = new Date(year, month - 1, 1);
         const endDate = new Date(year, month, 0);
@@ -349,7 +387,7 @@ export const generateBulkPayroll = async (req, res) => {
                     continue;
                 }
 
-                const attendance = await getAttendanceSummary(employee._id, month, year);
+                const attendance = await getAttendanceSummary(employee._id, month, year, employee);
                 const payrollData = calculateSalary({
                     employee, attendance, salaryRule, payrollRule,
                     payPeriod: { month, year, label: monthLabel, startDate, endDate },
@@ -542,7 +580,7 @@ export const downloadCompanyExcel = async (req, res) => {
         }
         const { month, year } = req.query;
         // Basic check
-       
+
 
         const records = await Payroll.find({
             companyId,
@@ -587,7 +625,7 @@ export const downloadSalarySlipPDF = async (req, res) => {
         }
 
         // Basic check
-      
+
 
 
         if (!mongoose.Types.ObjectId.isValid(payrollId)) {
@@ -636,36 +674,36 @@ export const deletePayroll = async (req, res) => {
         }
 
         if (!mongoose.Types.ObjectId.isValid(payrollId)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Invalid payrollId." 
+            return res.status(400).json({
+                success: false,
+                message: "Invalid payrollId."
             });
         }
 
-        const payroll = await Payroll.findOne({ 
-            _id: payrollId, 
-            companyId 
+        const payroll = await Payroll.findOne({
+            _id: payrollId,
+            companyId
         });
 
         if (!payroll) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "Payroll record not found." 
+            return res.status(404).json({
+                success: false,
+                message: "Payroll record not found."
             });
         }
 
         // Optional: Prevent deletion of paid/approved payrolls
         if (payroll.status === 'paid') {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Cannot delete a paid payroll record. Consider cancelling it instead." 
+            return res.status(400).json({
+                success: false,
+                message: "Cannot delete a paid payroll record. Consider cancelling it instead."
             });
         }
 
         await Payroll.findByIdAndDelete(payrollId);
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             message: "Payroll record deleted successfully.",
             data: {
                 deletedPayrollId: payrollId,
@@ -676,9 +714,9 @@ export const deletePayroll = async (req, res) => {
 
     } catch (err) {
         console.error("[deletePayroll]", err);
-        return res.status(500).json({ 
-            success: false, 
-            message: err.message 
+        return res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };
@@ -708,17 +746,17 @@ export const deleteAllPayrollByCompany = async (req, res) => {
         const count = await Payroll.countDocuments(filter);
 
         if (count === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "No payroll records found matching the criteria." 
+            return res.status(404).json({
+                success: false,
+                message: "No payroll records found matching the criteria."
             });
         }
 
         // Delete the records
         const result = await Payroll.deleteMany(filter);
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             message: `Successfully deleted ${result.deletedCount} payroll record(s).`,
             data: {
                 deletedCount: result.deletedCount,
@@ -733,9 +771,9 @@ export const deleteAllPayrollByCompany = async (req, res) => {
 
     } catch (err) {
         console.error("[deleteAllPayrollByCompany]", err);
-        return res.status(500).json({ 
-            success: false, 
-            message: err.message 
+        return res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };
@@ -750,11 +788,11 @@ export const deleteEmployeePayroll = async (req, res) => {
         const { companyId, employeeId } = req.params;
         const { month, year } = req.query;
 
-        if (!mongoose.Types.ObjectId.isValid(companyId) || 
+        if (!mongoose.Types.ObjectId.isValid(companyId) ||
             !mongoose.Types.ObjectId.isValid(employeeId)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Invalid companyId or employeeId." 
+            return res.status(400).json({
+                success: false,
+                message: "Invalid companyId or employeeId."
             });
         }
 
@@ -772,9 +810,9 @@ export const deleteEmployeePayroll = async (req, res) => {
         }
 
         // Build filter
-        const filter = { 
-            companyId, 
-            employeeId: employee._id 
+        const filter = {
+            companyId,
+            employeeId: employee._id
         };
         if (month) filter["payPeriod.month"] = Number(month);
         if (year) filter["payPeriod.year"] = Number(year);
@@ -783,17 +821,17 @@ export const deleteEmployeePayroll = async (req, res) => {
         const count = await Payroll.countDocuments(filter);
 
         if (count === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "No payroll records found for this employee." 
+            return res.status(404).json({
+                success: false,
+                message: "No payroll records found for this employee."
             });
         }
 
         // Delete records
         const result = await Payroll.deleteMany(filter);
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             message: `Successfully deleted ${result.deletedCount} payroll record(s) for ${employee.name || employee.empCode}.`,
             data: {
                 deletedCount: result.deletedCount,
@@ -811,9 +849,9 @@ export const deleteEmployeePayroll = async (req, res) => {
 
     } catch (err) {
         console.error("[deleteEmployeePayroll]", err);
-        return res.status(500).json({ 
-            success: false, 
-            message: err.message 
+        return res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };
