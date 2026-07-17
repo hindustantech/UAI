@@ -1,5 +1,6 @@
 import express from "express";
 import { exportSalesReport, exportSalesPersonReport, exportDataSalesCSV, exportCrmReport, exportSalesPersonExitReport } from "../../../controllers/attandance/Sales/SalesReoptExport.js";
+import { exportSalesAnalyticsExcel } from "../../../controllers/attandance/Sales/exportSalesAnalyticsExcel.js";
 import authMiddleware from "../../../middlewares/authMiddleware.js";
 
 const router = express.Router();
@@ -12,5 +13,6 @@ router.get("/crm", authMiddleware, exportCrmReport);
 // GET /api/reports/sales-person-exit?personId=<id>&startDate=&endDate=
 router.get("/sales-person-exit", authMiddleware, exportSalesPersonExitReport);
 
+router.get("/api/reports/sales-analytics/export", authMiddleware, exportSalesAnalyticsExcel);
 
 export default router;
