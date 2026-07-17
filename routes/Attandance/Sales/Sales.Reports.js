@@ -13,6 +13,6 @@ router.get("/crm", authMiddleware, exportCrmReport);
 // GET /api/reports/sales-person-exit?personId=<id>&startDate=&endDate=
 router.get("/sales-person-exit", authMiddleware, exportSalesPersonExitReport);
 
-router.get("/api/reports/sales-analytics/export", authMiddleware, exportSalesAnalyticsExcel);
+router.get("/sales-analytics/export", authMiddleware, exportSalesAnalyticsExcel);
 
 export default router;

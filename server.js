@@ -125,7 +125,7 @@ app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/today/pi', TodayAttendanceRoute);
 app.use('/api/face', faceRoutes); // Mount the face routes at /api/face
 app.use('/api/face-attendance', faceAttendanceRoutes); // Mount the face attendance routes at /api/face-attendance
-
+app.use('/api/v1/sales-any', SalesAnyRoutes); // Mount the sales any routes at /api/v1/sales-any
 // Add this after your existing middleware setup
 app.use('/uploads', express.static('uploads'));
 
