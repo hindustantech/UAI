@@ -1967,7 +1967,7 @@ export const getSessions = async (req, res) => {
 };
 
 // ========== GET COMPANY LEADS ==========
-export const getCompanyLeads = async (req, res) => {
+export const getCompanyLeads = async (req, res) => {  
   try {
     const {
       companyId,

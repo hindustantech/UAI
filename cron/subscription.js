@@ -1,6 +1,8 @@
 import cron from "node-cron";
 import mongoose from "mongoose";
 import { Subscription } from "../models/Attandance/subscration/Subscription.js";
+import { NotificationService } from "../src/notification/services/NotificationService.js";
+import { scheduleSubscriptionReminders } from "../src/notification/scheduler/subscriptionReminder.js";
 const BATCH_SIZE = 500;
 
 /**
@@ -69,6 +71,27 @@ const expireBatch = async (ids) => {
             }
         }
     );
+
+    if (result.modifiedCount > 0) {
+        const expiredSubs = await Subscription.find({ _id: { $in: ids } })
+            .populate('company', 'email phone name')
+            .lean();
+
+        for (const sub of expiredSubs) {
+            try {
+                await NotificationService.sendSubscriptionExpired({
+                    companyId: sub.company?._id || sub.company,
+                    companyName: sub.company?.name || 'Customer',
+                    planName: sub.planSnapshot?.name || sub.plan?.name || 'Premium',
+                    endDate: sub.endDate?.toISOString(),
+                    email: sub.company?.email,
+                    phone: sub.company?.phone,
+                });
+            } catch (notifErr) {
+                console.error(`[NOTIFICATION] Failed to send expiry notice for sub ${sub._id}:`, notifErr.message);
+            }
+        }
+    }
 
     return result.modifiedCount || 0;
 };

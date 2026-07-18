@@ -48,11 +48,23 @@ import SalesAnyRoutes from './routes/Attandance/Sales/sales.any.routes.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
-import { connectRedis } from './config/redis.js';
+import { connectRedis, getRedisClient } from './config/redis.js';
+import { startAllWorkers, stopAllWorkers } from './src/notification/workers/index.js';
+import { initializeSchedulers } from './src/notification/scheduler/index.js';
+import { closeAllQueues } from './src/notification/queues/index.js';
+import adminNotificationRoutes from './src/notification/routes/adminNotificationRoutes.js';
 dotenv.config();
 await connectDB();
 await connectRedis();
-// START BACKGROUND WORKER HERE
+
+let notificationWorkers;
+try {
+  notificationWorkers = await startAllWorkers();
+  initializeSchedulers();
+  console.log('✅ Notification system initialized');
+} catch (error) {
+  console.warn('⚠️ Notification system initialization skipped (Redis may not be available):', error.message);
+}
 
 const app = express();
 
@@ -128,6 +140,7 @@ app.use('/api/today/pi', TodayAttendanceRoute);
 app.use('/api/face', faceRoutes); // Mount the face routes at /api/face
 app.use('/api/face-attendance', faceAttendanceRoutes); // Mount the face attendance routes at /api/face-attendance
 app.use('/api/v1/sales-any', SalesAnyRoutes); // Mount the sales any routes at /api/v1/sales-any
+app.use('/api/admin/notifications', adminNotificationRoutes);
 // Add this after your existing middleware setup
 app.use('/uploads', express.static('uploads'));
 
@@ -153,4 +166,27 @@ const server = app.listen(PORT, () => {
 server.timeout = 15 * 60 * 1000; // 15 minutes
 server.keepAliveTimeout = 16 * 60 * 1000; // 16 minutes (must be > timeout)
 server.headersTimeout = 17 * 60 * 1000; // 17 minutes (must be > keepAliveTimeout)
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('📴 SIGTERM received. Shutting down gracefully...');
+  try {
+    await stopAllWorkers();
+    await closeAllQueues();
+  } catch (e) {
+    console.warn('Worker shutdown warning:', e.message);
+  }
+  server.close(() => process.exit(0));
+});
+
+process.on('SIGINT', async () => {
+  console.log('📴 SIGINT received. Shutting down gracefully...');
+  try {
+    await stopAllWorkers();
+    await closeAllQueues();
+  } catch (e) {
+    console.warn('Worker shutdown warning:', e.message);
+  }
+  server.close(() => process.exit(0));
+});
+
 // Start cron AFTER server is alive

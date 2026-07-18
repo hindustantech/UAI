@@ -3,6 +3,8 @@ import cron from "node-cron";
 import Employee from "../models/Attandance/Employee.js";
 import Attendance from "../models/Attandance/Attendance.js";
 import Shift from "../models/Attandance/Shift.js";
+import User from "../models/userModel.js";
+import { NotificationService } from "../src/notification/services/NotificationService.js";
 
 
 
@@ -165,6 +167,20 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
                 });
 
                 markedCount++;
+
+                try {
+                    const companyUser = await User.findById(emp.companyId).select('email phone name').lean();
+                    await NotificationService.sendAbsentAlert({
+                        companyId: emp.companyId,
+                        employeeName: emp.user_name || emp._id.toString(),
+                        date: startOfDay.toISOString().split('T')[0],
+                        email: companyUser?.email,
+                        phone: companyUser?.phone,
+                    });
+                } catch (notifErr) {
+                    console.error(`[NOTIFICATION] Failed to send absent alert for emp ${emp._id}:`, notifErr.message);
+                }
+
                 console.log(`✅ Marked absent: emp ${emp._id} | shift ${shift.shiftCode} ended at ${shift.endTime}`);
 
             } catch (empErr) {
