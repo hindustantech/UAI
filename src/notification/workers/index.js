@@ -2,6 +2,7 @@ import { createEmailTierWorker } from './emailTierWorker.js';
 import { createWhatsAppTierWorker } from './whatsappTierWorker.js';
 import { createDeadLetterWorker } from './deadLetterWorker.js';
 import { createRetryWorker } from './retryWorker.js';
+import { createSchedulerWorker } from './schedulerWorker.js';
 import { TIER_SCORES, TIER_LABELS, CHANNELS } from '../priority/constants.js';
 import { evaluateCircuitBreaker, updateQueueDepth } from '../priority/loadShedder.js';
 import { getAllTierQueues } from '../queues/index.js';
@@ -52,6 +53,9 @@ export async function startAllWorkers() {
 
   const retryWorker = createRetryWorker();
   allWorkers.push(retryWorker);
+
+  const schedulerWorker = createSchedulerWorker();
+  allWorkers.push(schedulerWorker);
 
   setInterval(async () => {
     try {

@@ -1,5 +1,6 @@
 import { getTierQueue, notificationQueue } from '../queues/index.js';
 import { NOTIFICATION_TYPES, CHANNELS, PRIORITY, NOTIFICATION_DEFAULT_PRIORITY, NOTIFICATION_JOB_REMOVE_COMPLETE, NOTIFICATION_JOB_REMOVE_FAIL } from '../constants/index.js';
+import { getProvider } from '../providers/index.js';
 import { renderEmailTemplate, renderWhatsAppTemplate, getWhatsAppTemplateName } from '../templates/index.js';
 import { getTierScoreForType, TIER_SCORES } from '../priority/constants.js';
 import { notificationLogger } from '../index.js';
@@ -69,9 +70,16 @@ export class NotificationService {
       type, companyId, userId, channels, tierScore, delay, priority: resolvedPriority,
     });
 
+    const availableChannels = channels.filter(ch => getProvider(ch).isAvailable());
+
+    if (availableChannels.length === 0) {
+      notificationLogger.warn('No available channel for notification', { type, companyId });
+      return { results: [], idempotencyKey, tierScore, skipped: true, reason: 'all_channels_disabled' };
+    }
+
     const results = [];
 
-    for (const channel of channels) {
+    for (const channel of availableChannels) {
       let notificationRecord;
       try {
         notificationRecord = await Notification.create({

@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import { BaseProvider } from './baseProvider.js';
 import { notificationLogger } from '../index.js';
+import { isChannelEnabled } from '../utils/channelManager.js';
 
 class EmailProvider extends BaseProvider {
   constructor() {
@@ -110,6 +111,10 @@ class EmailProvider extends BaseProvider {
 
   getChannelName() {
     return 'email';
+  }
+
+  isAvailable() {
+    return isChannelEnabled('email');
   }
 }
 

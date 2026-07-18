@@ -7,6 +7,7 @@ import { getCircuitBreakerStatus } from '../priority/loadShedder.js';
 import DeadLetter from '../models/DeadLetter.js';
 import Notification from '../models/Notification.js';
 import { notificationLogger } from '../index.js';
+import { getChannelStatus, setChannelEnabled, syncChannelFromRedis } from '../utils/channelManager.js';
 
 const router = Router();
 
@@ -55,6 +56,35 @@ router.get('/circuit-breaker', requireAdmin, async (req, res) => {
 });
 
 
+
+router.get('/channels', requireAdmin, async (req, res) => {
+  try {
+    await Promise.all(['email', 'whatsapp', 'push'].map(syncChannelFromRedis));
+    const status = await getChannelStatus();
+    res.json({ success: true, data: status });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/channels/:channel/:action', requireAdmin, async (req, res) => {
+  try {
+    const { channel, action } = req.params;
+    const validChannels = ['email', 'whatsapp', 'push'];
+    if (!validChannels.includes(channel)) {
+      return res.status(400).json({ success: false, error: `Invalid channel: ${channel}. Valid: ${validChannels.join(', ')}` });
+    }
+    if (!['enable', 'disable'].includes(action)) {
+      return res.status(400).json({ success: false, error: 'Action must be "enable" or "disable"' });
+    }
+    const enabled = action === 'enable';
+    await setChannelEnabled(channel, enabled);
+    notificationLogger.info(`Channel ${action}d via admin API`, { channel });
+    res.json({ success: true, data: { channel, enabled } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 router.get('/failed', requireAdmin, async (req, res) => {
   try {

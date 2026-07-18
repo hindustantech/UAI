@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { BaseProvider } from './baseProvider.js';
 import { notificationLogger } from '../index.js';
+import { isChannelEnabled } from '../utils/channelManager.js';
 
 const DEFAULT_API_URL = 'https://whatsapp.quickhub.ai/public/whatsapp/send-template';
 
@@ -129,6 +130,10 @@ class WhatsAppProvider extends BaseProvider {
 
   getChannelName() {
     return 'whatsapp';
+  }
+
+  isAvailable() {
+    return isChannelEnabled('whatsapp');
   }
 }
 

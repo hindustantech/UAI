@@ -1,5 +1,6 @@
 import { BaseProvider } from './baseProvider.js';
 import { notificationLogger } from '../index.js';
+import { isChannelEnabled } from '../utils/channelManager.js';
 
 class PushProvider extends BaseProvider {
   constructor() {
@@ -137,6 +138,10 @@ class PushProvider extends BaseProvider {
 
   getChannelName() {
     return 'push';
+  }
+
+  isAvailable() {
+    return isChannelEnabled('push');
   }
 }
 
