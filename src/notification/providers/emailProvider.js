@@ -19,15 +19,15 @@ class EmailProvider extends BaseProvider {
         port: parseInt(process.env.SMTP_PORT) || 465,
         secure: (process.env.SMTP_PORT || '465') === '465',
         auth: {
-          user: process.env.SMTP_USER || process.env.EMAIL_USER,
-          pass: process.env.SMTP_PASS || process.env.EMAIL_PASS,
+          user: process.env.EMAIL_ID, // Your Gmail email
+          pass: process.env.EMAIL_LESS_SECURE_PASS, // Your Gmail password or App Password
         },
       });
 
       transporter.on('error', (err) => {
         // notificationLo   gger.error('SMTP transporter error', { error: err.message });
         if (this.transporter) {
-          this.transporter.close().catch(() => {});
+          this.transporter.close().catch(() => { });
         }
         this.transporter = null;
         this._initPromise = null;
