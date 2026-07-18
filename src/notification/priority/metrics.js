@@ -1,6 +1,6 @@
 import { getCircuitBreakerStatus } from './loadShedder.js';
 import { getRateLimitStatus } from './rateLimiter.js';
-import { TIER_SCORES, TIER_LABELS, CHANNELS } from './constants.js';
+import { TIER_SCORES, TIER_LABELS, CHANNELS, makeTierQueueName } from './constants.js';
 import { getAllQueueStats } from '../queues/index.js';
 
 export async function getPriorityMetrics() {
@@ -12,7 +12,7 @@ export async function getPriorityMetrics() {
     perTier[channel] = {};
     for (const [score, label] of Object.entries(TIER_LABELS)) {
       const tierScore = Number(score);
-      const queueName = `${channel}:${label}`;
+      const queueName = makeTierQueueName(channel, tierScore);
       const rateLimit = await getRateLimitStatus(channel, tierScore);
 
       perTier[channel][label] = {
