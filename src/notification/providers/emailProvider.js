@@ -24,7 +24,7 @@ class EmailProvider extends BaseProvider {
       });
 
       transporter.on('error', (err) => {
-        notificationLogger.error('SMTP transporter error', { error: err.message });
+        // notificationLo   gger.error('SMTP transporter error', { error: err.message });
         if (this.transporter) {
           this.transporter.close().catch(() => {});
         }
