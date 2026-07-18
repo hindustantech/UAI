@@ -1,6 +1,6 @@
 import { scheduleSubscriptionReminders, scheduleDailySubscriptionCheck } from './subscriptionReminder.js';
 import { initializeReportScheduler } from './reportScheduler.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 
 export function initializeSchedulers() {
   notificationLogger.info('Initializing notification schedulers...');

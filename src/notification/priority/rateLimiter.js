@@ -1,6 +1,6 @@
 import { getRedisClient } from '../../../config/redis.js';
 import { TIER_CONFIG } from './constants.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 
 const RATE_LIMITER_PREFIX = 'notification:ratelimit:';
 

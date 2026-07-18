@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { BaseProvider } from './baseProvider.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 
 const DEFAULT_API_URL = 'https://whatsapp.quickhub.ai/public/whatsapp/send-template';
 

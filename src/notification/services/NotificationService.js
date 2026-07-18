@@ -2,7 +2,7 @@ import { getTierQueue, notificationQueue } from '../queues/index.js';
 import { NOTIFICATION_TYPES, CHANNELS, PRIORITY, NOTIFICATION_DEFAULT_PRIORITY, NOTIFICATION_JOB_REMOVE_COMPLETE, NOTIFICATION_JOB_REMOVE_FAIL } from '../constants/index.js';
 import { renderEmailTemplate, renderWhatsAppTemplate, getWhatsAppTemplateName } from '../templates/index.js';
 import { getTierScoreForType, TIER_SCORES } from '../priority/constants.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 import { makeIdempotencyKey } from '../utils/idempotency.js';
 import Notification from '../models/Notification.js';
 import mongoose from 'mongoose';

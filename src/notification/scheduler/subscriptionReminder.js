@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { Subscription } from '../../../models/Attandance/subscration/Subscription.js';
 import User from '../../../models/userModel.js';
 import { schedulerQueue } from '../queues/index.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 import { acquireLock } from '../utils/redisLock.js';
 
 export async function scheduleSubscriptionReminders(subscription) {

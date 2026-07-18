@@ -1,5 +1,5 @@
 import { NOTIFICATION_TYPES } from '../constants/index.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 
 import { subscriptionActivatedEmail } from './email/subscriptionActivated.js';
 import { subscriptionExpiredEmail } from './email/subscriptionExpired.js';

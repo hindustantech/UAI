@@ -1,6 +1,6 @@
 import { getRedisClient } from '../../../config/redis.js';
 import config from '../config/index.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 
 const IDEMPOTENCY_STATUS = 'completed';
 

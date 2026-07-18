@@ -2,7 +2,7 @@ import { Worker } from 'bullmq';
 import { getRedisClient } from '../../../config/redis.js';
 import { getTierQueue } from '../queues/index.js';
 import { TIER_SCORES } from '../priority/constants.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 import DeadLetter from '../models/DeadLetter.js';
 import { calculateBackoff } from '../utils/retry.js';
 import config from '../config/index.js';

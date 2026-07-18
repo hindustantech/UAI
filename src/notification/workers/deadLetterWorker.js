@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq';
 import { getRedisClient } from '../../../config/redis.js';
 import { QUEUE_NAMES } from '../constants/index.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 import DeadLetter from '../models/DeadLetter.js';
 
 async function processDeadLetter(job) {

@@ -5,7 +5,7 @@ import { createRetryWorker } from './retryWorker.js';
 import { TIER_SCORES, TIER_LABELS, CHANNELS } from '../priority/constants.js';
 import { evaluateCircuitBreaker, updateQueueDepth } from '../priority/loadShedder.js';
 import { getAllTierQueues } from '../queues/index.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 import { getRedisClient } from '../../../config/redis.js';
 
 async function waitForRedis(retries = 3, delay = 2000) {

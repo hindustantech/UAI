@@ -1,6 +1,6 @@
 import { getRedisClient } from '../../../config/redis.js';
 import { TIER_SCORES } from './constants.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 
 const CIRCUIT_KEY = 'notification:circuit:state';
 const DEPTH_KEY = 'notification:circuit:critical_high_depth';

@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import { reportQueue } from '../queues/index.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 import { withLock } from '../utils/redisLock.js';
 
 const DAY_MAP = {

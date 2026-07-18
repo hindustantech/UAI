@@ -6,7 +6,7 @@ import { getCircuitBreakerStatus } from '../priority/loadShedder.js';
 
 import DeadLetter from '../models/DeadLetter.js';
 import Notification from '../models/Notification.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 
 const router = Router();
 

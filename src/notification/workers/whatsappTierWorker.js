@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq';
 import { getRedisClient } from '../../../config/redis.js';
 import { whatsappProvider } from '../providers/whatsappProvider.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 import { isPermanentError } from '../utils/retry.js';
 import { claimIdempotency } from '../utils/idempotency.js';
 import { TIER_CONFIG } from '../priority/constants.js';

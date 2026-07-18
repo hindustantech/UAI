@@ -1,5 +1,5 @@
 import { BaseProvider } from './baseProvider.js';
-import { notificationLogger } from '../logs/index.js';
+import { notificationLogger } from '../index.js';
 
 class SMSProvider extends BaseProvider {
   constructor() {
