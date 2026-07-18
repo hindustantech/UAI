@@ -7,7 +7,7 @@ import { evaluateCircuitBreaker, updateQueueDepth } from '../priority/loadShedde
 import { getAllTierQueues } from '../queues/index.js';
 import { notificationLogger } from '../index.js';
 import { getRedisClient } from '../../../config/redis.js';
-
+import { QUEUE_NAMES } from '../constants/index.js';
 async function waitForRedis(retries = 3, delay = 2000) {
   for (let i = 0; i < retries; i++) {
     try {
