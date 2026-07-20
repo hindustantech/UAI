@@ -24,7 +24,7 @@ async function processSchedulerJob(job) {
       return { skipped: true, reason: 'company_not_found' };
     }
 
-    const planName = subscription?.planSnapshot?.name || 'Premium';
+    const planName = subscription?.planSnapshot?.name || 'Premium'; 
     const daysLeft = Math.ceil((new Date(endDate) - new Date()) / (1000 * 60 * 60 * 24));
 
     if (daysLeft < 0) {
