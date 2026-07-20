@@ -3,7 +3,8 @@ import { Subscription } from '../../../models/Attandance/subscration/Subscriptio
 import User from '../../../models/userModel.js';
 import { schedulerQueue } from '../queues/index.js';
 import { notificationLogger } from '../index.js';
-import { acquireLock } from '../utils/redisLock.js';
+import { acquireLock, releaseLock } from '../utils/redisLock.js';
+import { getRedisClient } from '../../../config/redis.js';
 
 export async function scheduleSubscriptionReminders(subscription) {
   if (!subscription || !subscription.endDate) {
@@ -14,6 +15,8 @@ export async function scheduleSubscriptionReminders(subscription) {
   const endDate = new Date(subscription.endDate);
   const now = new Date();
   const daysUntilExpiry = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
+  const companyId = subscription.company || subscription.companyId;
+  const planName = subscription.planSnapshot?.name || 'Premium';
 
   const reminderPoints = [
     { daysBefore: 7, label: '7days' },
@@ -21,35 +24,49 @@ export async function scheduleSubscriptionReminders(subscription) {
     { daysBefore: 1, label: '1day' },
   ];
 
+  const redis = getRedisClient();
+
   for (const reminder of reminderPoints) {
     if (daysUntilExpiry >= reminder.daysBefore) {
       const delayMs = (endDate.getTime() - now.getTime()) - (reminder.daysBefore * 24 * 60 * 60 * 1000);
 
       if (delayMs < 0) continue;
 
-      const lockKey = `subscription-reminder-${subscription.company || subscription.companyId}-${reminder.label}`;
+      const dedupKey = `notification:reminder:sched:${companyId}:${reminder.label}`;
 
       try {
+        const alreadyScheduled = await redis.get(dedupKey);
+        if (alreadyScheduled) {
+          notificationLogger.debug('Reminder already scheduled, skipping', {
+            companyId, reminder: reminder.label,
+          });
+          continue;
+        }
+
         await schedulerQueue.add(
           'subscription_expiring_soon',
           {
             type: 'subscription_expiring_soon',
-            companyId: subscription.company || subscription.companyId,
+            companyId,
             planId: subscription.plan,
+            subscriptionId: String(subscription._id),
+            planName,
             endDate: subscription.endDate,
             reminderLabel: reminder.label,
           },
           { delay: delayMs, attempts: 1 },
         );
 
+        await redis.set(dedupKey, '1', 'PX', delayMs + 86400000, 'NX');
+
         notificationLogger.info('Subscription reminder scheduled', {
-          companyId: subscription.company || subscription.companyId,
+          companyId,
           reminder: reminder.label,
           delayMs,
         });
       } catch (error) {
         notificationLogger.error('Failed to schedule reminder', {
-          companyId: subscription.company || subscription.companyId,
+          companyId,
           error: error.message,
         });
       }
@@ -88,6 +105,8 @@ export function scheduleDailySubscriptionCheck() {
       });
     } catch (error) {
       notificationLogger.error('Daily subscription check failed', { error: error.message });
+    } finally {
+      await releaseLock(lockKey, lockValue);
     }
   }, {
     scheduled: true,

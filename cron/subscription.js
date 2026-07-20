@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { Subscription } from "../models/Attandance/subscration/Subscription.js";
 import { NotificationService } from "../src/notification/services/NotificationService.js";
 import { scheduleSubscriptionReminders } from "../src/notification/scheduler/subscriptionReminder.js";
+import { acquireLock, releaseLock } from "../src/notification/utils/redisLock.js";
 const BATCH_SIZE = 500;
 
 /**
@@ -11,6 +12,14 @@ const BATCH_SIZE = 500;
  */
 
 cron.schedule("58 23 * * *", async () => {
+    const lockKey = 'subscription-expiry-cron';
+    const lockValue = await acquireLock(lockKey, 600000);
+
+    if (!lockValue) {
+        console.log("[CRON] Expiry job skipped (another instance holds lock)");
+        return;
+    }
+
     const now = new Date();
 
     console.log("[CRON] Expiry job started:", now);
@@ -50,6 +59,8 @@ cron.schedule("58 23 * * *", async () => {
 
     } catch (err) {
         console.error("[CRON] Error:", err);
+    } finally {
+        await releaseLock(lockKey, lockValue);
     }
 }, {
     timezone: "Asia/Kolkata"

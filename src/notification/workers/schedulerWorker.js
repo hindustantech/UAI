@@ -7,24 +7,40 @@ import { Subscription } from '../../../models/Attandance/subscration/Subscriptio
 import User from '../../../models/userModel.js';
 
 async function processSchedulerJob(job) {
-  const { type, companyId, endDate, reminderLabel } = job.data;
+  const { type, companyId, endDate, reminderLabel, subscriptionId, planName: payloadPlanName } = job.data;
 
   notificationLogger.info('Processing scheduler job', {
     jobId: job.id, type, companyId, reminderLabel,
   });
 
   if (type === 'subscription_expiring_soon') {
-    const [company, subscription] = await Promise.all([
-      User.findById(companyId).select('name email phone').lean(),
-      Subscription.findOne({ company: companyId }).sort({ endDate: -1 }).lean(),
-    ]);
+    let company;
+    try {
+      company = await User.findById(companyId).select('name email phone').lean();
+    } catch (err) {
+      notificationLogger.error('Failed to fetch company', { companyId, jobId: job.id, error: err.message });
+      throw err;
+    }
 
     if (!company) {
       notificationLogger.warn('Company not found for reminder', { companyId, jobId: job.id });
       return { skipped: true, reason: 'company_not_found' };
     }
 
-    const planName = subscription?.planSnapshot?.name || 'Premium'; 
+    let planName = payloadPlanName || 'Premium';
+    if (subscriptionId) {
+      try {
+        const subscription = await Subscription.findById(subscriptionId).select('planSnapshot').lean();
+        if (subscription?.planSnapshot?.name) {
+          planName = subscription.planSnapshot.name;
+        }
+      } catch (err) {
+        notificationLogger.warn('Could not fetch subscription by id, using payload planName', {
+          subscriptionId, jobId: job.id, error: err.message,
+        });
+      }
+    }
+
     const daysLeft = Math.ceil((new Date(endDate) - new Date()) / (1000 * 60 * 60 * 24));
 
     if (daysLeft < 0) {
@@ -32,7 +48,7 @@ async function processSchedulerJob(job) {
       return { skipped: true, reason: 'already_expired' };
     }
 
-    await NotificationService.sendSubscriptionExpiringSoon({
+    const result = await NotificationService.sendSubscriptionExpiringSoon({
       companyId,
       companyName: company.name || 'Customer',
       planName,
@@ -44,6 +60,7 @@ async function processSchedulerJob(job) {
 
     notificationLogger.info('Subscription expiring soon notification sent', {
       companyId, daysLeft, reminderLabel, jobId: job.id,
+      notificationStatus: result?.results?.[0]?.status,
     });
 
     return { sent: true, daysLeft, reminderLabel };
