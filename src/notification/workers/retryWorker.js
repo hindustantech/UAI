@@ -6,7 +6,7 @@ import { notificationLogger } from '../index.js';
 import DeadLetter from '../models/DeadLetter.js';
 import { calculateBackoff } from '../utils/retry.js';
 import config from '../config/index.js';
-
+import { QUEUE_NAMES } from '../constants/index.js';
 async function processRetry(job) {
   const { deadLetterId } = job.data;
 
