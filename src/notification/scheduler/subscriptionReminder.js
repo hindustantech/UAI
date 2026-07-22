@@ -75,7 +75,7 @@ export async function scheduleSubscriptionReminders(subscription) {
 }
 
 export function scheduleDailySubscriptionCheck() {
-  cron.schedule('*/5 * * * *', async () => {
+  cron.schedule('0 0 * * *', async () => {
     const lockKey = 'subscription-daily-reminder-check';
     const lockValue = await acquireLock(lockKey, 300000);
 
