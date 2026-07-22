@@ -97,6 +97,7 @@ const expireBatch = async (ids) => {
                     endDate: sub.endDate?.toISOString(),
                     email: sub.company?.email,
                     phone: sub.company?.phone,
+                    subscriptionId: sub._id,
                 });
             } catch (notifErr) {
                 console.error(`[NOTIFICATION] Failed to send expiry notice for sub ${sub._id}:`, notifErr.message);

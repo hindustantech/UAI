@@ -208,14 +208,14 @@ export class NotificationService {
     });
   }
 
-  static async sendSubscriptionExpired({ companyId, companyName, planName, endDate, email, phone }) {
+  static async sendSubscriptionExpired({ companyId, companyName, planName, endDate, email, phone, subscriptionId }) {
     return NotificationService.send({
       type: NOTIFICATION_TYPES.SUBSCRIPTION_EXPIRED,
       companyId,
       userId: companyId,
       email,
       phone,
-      data: { companyName, planName, endDate },
+      data: { companyName, planName, endDate, subscriptionId: String(subscriptionId) },
     });
   }
 
@@ -226,7 +226,7 @@ export class NotificationService {
       userId: companyId,
       email,
       phone,
-      data: { companyName, planName, endDate, daysLeft: String(daysLeft) },
+      data: { companyName, planName, endDate, daysLeft },
     });
   }
 

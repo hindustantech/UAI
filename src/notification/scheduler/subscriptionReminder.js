@@ -14,8 +14,8 @@ export async function scheduleSubscriptionReminders(subscription) {
 
   const endDate = new Date(subscription.endDate);
   const now = new Date();
-  const daysUntilExpiry = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
-  const companyId = subscription.company || subscription.companyId;
+  const daysUntilExpiry = Math.floor((endDate - now) / (1000 * 60 * 60 * 24));
+  const companyId = subscription.company?._id || subscription.companyId;
   const planName = subscription.planSnapshot?.name || 'Premium';
 
   const reminderPoints = [
@@ -27,10 +27,8 @@ export async function scheduleSubscriptionReminders(subscription) {
   const redis = getRedisClient();
 
   for (const reminder of reminderPoints) {
-    if (daysUntilExpiry > reminder.daysBefore) {
+    if (daysUntilExpiry >= reminder.daysBefore) {
       const delayMs = (endDate.getTime() - now.getTime()) - (reminder.daysBefore * 24 * 60 * 60 * 1000);
-
-      if (delayMs < 0) continue;
 
       const dedupKey = `notification:reminder:sched:${companyId}:${reminder.label}`;
 

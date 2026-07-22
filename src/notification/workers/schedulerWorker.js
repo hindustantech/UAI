@@ -41,19 +41,14 @@ async function processSchedulerJob(job) {
       }
     }
 
-    const daysLeft = Math.ceil((new Date(endDate) - new Date()) / (1000 * 60 * 60 * 24));
-
-    if (daysLeft < 0) {
-      notificationLogger.info('Subscription already expired, skipping reminder', { companyId, jobId: job.id });
-      return { skipped: true, reason: 'already_expired' };
-    }
+    const daysLeft = Math.floor((new Date(endDate) - new Date()) / (1000 * 60 * 60 * 24));
 
     const result = await NotificationService.sendSubscriptionExpiringSoon({
       companyId,
       companyName: company.name || 'Customer',
       planName,
       endDate: new Date(endDate).toISOString(),
-      daysLeft: String(daysLeft),
+      daysLeft,
       email: company.email,
       phone: company.phone,
     });
