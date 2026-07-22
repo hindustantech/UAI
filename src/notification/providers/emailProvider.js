@@ -15,7 +15,7 @@ class EmailProvider extends BaseProvider {
 
     this._initPromise = (async () => {
       const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || process.env.SMTP_USER || 'smtp.gmail.com',
+        host: process.env.SMTP_HOST  || 'smtp.gmail.com',
         port: parseInt(process.env.SMTP_PORT) || 465,
         secure: (process.env.SMTP_PORT || '465') === '465',
         auth: {
