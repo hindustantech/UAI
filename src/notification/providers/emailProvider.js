@@ -15,9 +15,9 @@ class EmailProvider extends BaseProvider {
 
     this._initPromise = (async () => {
       const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST  || 'smtp.gmail.com',
-        port: parseInt(process.env.SMTP_PORT) || 465,
-        secure: (process.env.SMTP_PORT || '465') === '465',
+        host: 'smtp.gmail.com', // Correct hostname for Gmail's SMTP
+        port: 465, // Port for secure connections
+        secure: true,
         auth: {
           user: process.env.SMTP_USER, // Your Gmail email
           pass: process.env.SMTP_PASS, // Your Gmail password or App Password
