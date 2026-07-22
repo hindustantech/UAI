@@ -15,12 +15,12 @@ class EmailProvider extends BaseProvider {
 
     this._initPromise = (async () => {
       const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
+        host: process.env.SMTP_HOST || process.env.SMTP_USER || 'smtp.gmail.com',
         port: parseInt(process.env.SMTP_PORT) || 465,
         secure: (process.env.SMTP_PORT || '465') === '465',
         auth: {
-          user: process.env.EMAIL_ID, // Your Gmail email
-          pass: process.env.EMAIL_LESS_SECURE_PASS, // Your Gmail password or App Password
+          user: process.env.SMTP_USER, // Your Gmail email
+          pass: process.env.SMTP_PASS, // Your Gmail password or App Password
         },
       });
 
@@ -36,7 +36,7 @@ class EmailProvider extends BaseProvider {
       await transporter.verify();
 
       this.transporter = transporter;
-      this.fromAddress = process.env.EMAIL_FROM || process.env.EMAIL_ID || '"UAI Notifications" <noreply@uai.app>';
+      this.fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER || '"UAI Notifications" <noreply@uai.app>';
 
       notificationLogger.info('Email provider initialized', {
         host: process.env.SMTP_HOST || 'smtp.gmail.com',
