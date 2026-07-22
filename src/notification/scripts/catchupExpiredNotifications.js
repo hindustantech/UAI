@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import { Subscription } from '../../../models/Attandance/subscration/Subscription.js';
+import User from '../../../models/userModel.js';
 import { NotificationService } from '../services/NotificationService.js';
 import { acquireLock, releaseLock } from '../utils/redisLock.js';
 import { connectRedis, getRedisClient } from '../../../config/redis.js';
