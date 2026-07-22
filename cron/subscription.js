@@ -2,7 +2,6 @@ import cron from "node-cron";
 import mongoose from "mongoose";
 import { Subscription } from "../models/Attandance/subscration/Subscription.js";
 import { NotificationService } from "../src/notification/services/NotificationService.js";
-import { scheduleSubscriptionReminders } from "../src/notification/scheduler/subscriptionReminder.js";
 import { acquireLock, releaseLock } from "../src/notification/utils/redisLock.js";
 const BATCH_SIZE = 500;
 

@@ -15,7 +15,7 @@ export async function scheduleSubscriptionReminders(subscription) {
   const endDate = new Date(subscription.endDate);
   const now = new Date();
   const daysUntilExpiry = Math.floor((endDate - now) / (1000 * 60 * 60 * 24));
-  const companyId = subscription.company?._id || subscription.companyId;
+  const companyId = subscription.company?._id || subscription.company;
   const planName = subscription.planSnapshot?.name || 'Premium';
 
   const reminderPoints = [
@@ -111,5 +111,5 @@ export function scheduleDailySubscriptionCheck() {
     timezone: 'Asia/Kolkata',
   });
 
-  notificationLogger.info('Daily subscription reminder cron scheduled (0 0 * * *)');
+  notificationLogger.info('Daily subscription reminder cron scheduled (every 5 minutes)');
 }
