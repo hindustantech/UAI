@@ -1,6 +1,6 @@
 export function subscriptionExpiringEmail({ companyName, planName, endDate, daysLeft }) {
   return {
-    subject: `Subscription Expiring Soon — ${daysLeft || ''} Day${daysLeft !== 1 ? 's' : ''} Left`,
+    subject: `Subscription Expiring Soon — ${daysLeft || ''} Day${Number(daysLeft) !== 1 ? 's' : ''} Left`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -13,7 +13,7 @@ export function subscriptionExpiringEmail({ companyName, planName, endDate, days
   <h2>Subscription Expiring Soon</h2>
   <p>Hello ${companyName || 'Valued Customer'},</p>
   <p>Your <strong>${planName}</strong> subscription will expire on <strong>${endDate || 'N/A'}</strong>.</p>
-  <p>That's only <strong>${daysLeft || 'a few'} day${daysLeft !== 1 ? 's' : ''}</strong> away.</p>
+  <p>That's only <strong>${daysLeft || 'a few'} day${Number(daysLeft) !== 1 ? 's' : ''}</strong> away.</p>
   <p>Renew now to avoid any interruption in service.</p>
   <p><a href="#" style="display:inline-block;background:#2ea44f;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;">Renew Now</a></p>
   <div class="footer">This is an automated message from UAI. Please do not reply.</div>

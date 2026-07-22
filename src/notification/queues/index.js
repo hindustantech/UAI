@@ -75,7 +75,7 @@ export const schedulerQueue = new Queue(QUEUE_NAMES.SCHEDULER, {
   ...getConnection(),
   defaultJobOptions: {
     ...defaultJobOptions,
-    attempts: 1,
+    attempts: 3,
   },
 });
 

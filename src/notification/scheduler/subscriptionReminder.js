@@ -27,7 +27,7 @@ export async function scheduleSubscriptionReminders(subscription) {
   const redis = getRedisClient();
 
   for (const reminder of reminderPoints) {
-    if (daysUntilExpiry >= reminder.daysBefore) {
+    if (daysUntilExpiry > reminder.daysBefore) {
       const delayMs = (endDate.getTime() - now.getTime()) - (reminder.daysBefore * 24 * 60 * 60 * 1000);
 
       if (delayMs < 0) continue;
@@ -54,7 +54,7 @@ export async function scheduleSubscriptionReminders(subscription) {
             endDate: subscription.endDate,
             reminderLabel: reminder.label,
           },
-          { delay: delayMs, attempts: 1 },
+          { delay: delayMs, attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
         );
 
         await redis.set(dedupKey, '1', 'PX', delayMs + 86400000, 'NX');
@@ -75,7 +75,7 @@ export async function scheduleSubscriptionReminders(subscription) {
 }
 
 export function scheduleDailySubscriptionCheck() {
-  cron.schedule('0 0 * * *', async () => {
+  cron.schedule('*/5 * * * *', async () => {
     const lockKey = 'subscription-daily-reminder-check';
     const lockValue = await acquireLock(lockKey, 300000);
 
