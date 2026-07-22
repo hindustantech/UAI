@@ -563,7 +563,12 @@ async function processAttendanceForEmployee({
   =========================== */
 
   const shiftStartTimeIST = createDateTimeIST(dateString, shiftData.startTime);
-  const shiftEndTimeIST = createDateTimeIST(dateString, shiftData.endTime);
+  let shiftEndTimeIST = createDateTimeIST(dateString, shiftData.endTime);
+
+  if (shiftData.isNightShift && shiftEndTimeIST <= shiftStartTimeIST) {
+    shiftEndTimeIST.setDate(shiftEndTimeIST.getDate() + 1);
+  }
+
   const shiftDurationMinutes = diffMinutes(shiftStartTimeIST, shiftEndTimeIST);
 
   const isFlexible = isFlexibleShift(shiftData);
@@ -670,7 +675,8 @@ async function processAttendanceForEmployee({
         name: shiftData.shiftName,
         startTime: shiftData.startTime,
         endTime: shiftData.endTime,
-        shiftMinutes: shiftDurationMinutes
+        shiftMinutes: shiftDurationMinutes,
+        isNightShift: shiftData.isNightShift || false
       },
       breaks: breaks || [],
       status: finalStatus,

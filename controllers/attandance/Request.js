@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Attendance from "../../models/Attandance/Attendance.js";
 import AttendanceRequest from '../../models/Attandance/Request.js'
 import Employee from "../../models/Attandance/Employee.js";
+import Shift from "../../models/Attandance/Shift.js";
 
 /*
 ====================================
@@ -93,28 +94,36 @@ const calculateEarlyLeaveMinutes = (punchOut, shiftEndTime) => {
 };
 
 /*
+    UTIL: Compute shift duration minutes (night-shift aware)
+*/
+const computeShiftDurationMinutes = (startTime, endTime, isNightShift) => {
+    const [sh, sm] = (startTime || "09:00").split(":").map(Number);
+    const [eh, em] = (endTime || "18:00").split(":").map(Number);
+    let minutes = (eh * 60 + em) - (sh * 60 + sm);
+    if (isNightShift && minutes <= 0) {
+        minutes += 1440;
+    }
+    return Math.max(0, minutes);
+};
+
+/*
     UTIL: Calculate working hours and work summary
 */
-const calculateWorkingHours = (punchIn, punchOut, existingAttendance) => {
+const calculateWorkingHours = (punchIn, punchOut, existingAttendance, overrides = {}) => {
     if (!punchIn || !punchOut) return {};
 
-    // Calculate total working minutes
     const totalMinutes = Math.round(
         (punchOut.getTime() - punchIn.getTime()) / 60000
     );
 
-    // Calculate total working hours (decimal)
     const totalWorkingHours = parseFloat((totalMinutes / 60).toFixed(2));
 
-    // Get shift details
-    const shiftMinutes = existingAttendance?.shift?.shiftMinutes || 540; // Default 9 hours (540 minutes)
-    const shiftStartTime = existingAttendance?.shift?.startTime || "09:00";
-    const shiftEndTime = existingAttendance?.shift?.endTime || "18:00";
+    const shiftMinutes = existingAttendance?.shift?.shiftMinutes || overrides.shiftMinutes || 540;
+    const shiftStartTime = existingAttendance?.shift?.startTime || overrides.startTime || "09:00";
+    const shiftEndTime = existingAttendance?.shift?.endTime || overrides.endTime || "18:00";
 
-    // Calculate breaks
     const breakMinutes = calculateTotalBreakMinutes(existingAttendance?.breaks || []);
 
-    // Calculate work summary components
     const payableMinutes = Math.max(0, totalMinutes - breakMinutes);
     const overtimeMinutes = Math.max(0, payableMinutes - shiftMinutes);
     const lateMinutes = calculateLateMinutes(punchIn, shiftStartTime);
@@ -640,10 +649,33 @@ export const approveAttendanceRequest = async (req, res) => {
                 source: "manual"
             };
 
+            let shiftOverrides = {};
+
             if (!existingAttendance) {
                 const employee = await Employee.findById(
                     request.employeeId
                 ).session(session);
+
+                if (employee?.shift) {
+                    const shiftDoc = await Shift.findOne({
+                        _id: employee.shift,
+                        companyId: request.companyId,
+                        isDeleted: false
+                    }).session(session);
+
+                    if (shiftDoc) {
+                        shiftOverrides = {
+                            shiftMinutes: computeShiftDurationMinutes(
+                                shiftDoc.startTime,
+                                shiftDoc.endTime,
+                                shiftDoc.isNightShift
+                            ),
+                            startTime: shiftDoc.startTime,
+                            endTime: shiftDoc.endTime,
+                            isNightShift: shiftDoc.isNightShift
+                        };
+                    }
+                }
 
                 const prevStart = new Date(start.getTime() - 86400000);
                 const prevEnd = start;
@@ -675,11 +707,11 @@ export const approveAttendanceRequest = async (req, res) => {
             const effectivePunchOut = punchOut || existingAttendance?.punchOut;
 
             if (effectivePunchIn && effectivePunchOut) {
-                // Calculate working hours and work summary
                 const workingHoursData = calculateWorkingHours(
                     effectivePunchIn,
                     effectivePunchOut,
-                    existingAttendance
+                    existingAttendance,
+                    shiftOverrides
                 );
 
                 // Set total working hours
@@ -722,6 +754,21 @@ export const approveAttendanceRequest = async (req, res) => {
             };
 
             // ───────── UPSERT ─────────
+            const upsertSet = {
+                ...updateFields,
+                ...(existingAttendance ? {} : { geoLocation, date: start })
+            };
+
+            if (!existingAttendance && (shiftOverrides.startTime || shiftOverrides.shiftMinutes)) {
+                upsertSet.shift = {
+                    name: "",
+                    startTime: shiftOverrides.startTime || "00:00",
+                    endTime: shiftOverrides.endTime || "00:00",
+                    shiftMinutes: shiftOverrides.shiftMinutes || 0,
+                    isNightShift: shiftOverrides.isNightShift || false
+                };
+            }
+
             await Attendance.findOneAndUpdate(
                 {
                     companyId: request.companyId,
@@ -729,10 +776,7 @@ export const approveAttendanceRequest = async (req, res) => {
                     date: { $gte: start, $lt: end }
                 },
                 {
-                    $set: {
-                        ...updateFields,
-                        ...(existingAttendance ? {} : { geoLocation, date: start })
-                    },
+                    $set: upsertSet,
                     $push: { editLogs: editLog }
                 },
                 { upsert: true, new: true, session }
@@ -1162,15 +1206,50 @@ export const bulkApproveRequests = async (req, res) => {
                         if (punchIn) updateFields.punchIn = punchIn;
                         if (punchOut) updateFields.punchOut = punchOut;
 
+                        let shiftOverrides = {};
+                        if (!existingAttendance) {
+                            const emp = await Employee.findById(request.employeeId).session(session);
+                            if (emp?.shift) {
+                                const shiftDoc = await Shift.findOne({
+                                    _id: emp.shift,
+                                    companyId: request.companyId,
+                                    isDeleted: false
+                                }).session(session);
+                                if (shiftDoc) {
+                                    shiftOverrides = {
+                                        shiftMinutes: computeShiftDurationMinutes(
+                                            shiftDoc.startTime,
+                                            shiftDoc.endTime,
+                                            shiftDoc.isNightShift
+                                        ),
+                                        startTime: shiftDoc.startTime,
+                                        endTime: shiftDoc.endTime,
+                                        isNightShift: shiftDoc.isNightShift
+                                    };
+                                }
+                            }
+                        }
+
                         if (effectivePunchIn && effectivePunchOut) {
                             const workingHoursData = calculateWorkingHours(
                                 effectivePunchIn,
                                 effectivePunchOut,
-                                existingAttendance
+                                existingAttendance,
+                                shiftOverrides
                             );
                             updateFields.totalWorkingHours = workingHoursData.totalWorkingHours;
                             updateFields.workSummary = workingHoursData.workSummary;
                             updateFields.lateByMinutes = workingHoursData.lateByMinutes;
+                        }
+
+                        if (!existingAttendance && (shiftOverrides.startTime || shiftOverrides.shiftMinutes)) {
+                            updateFields.shift = {
+                                name: "",
+                                startTime: shiftOverrides.startTime || "00:00",
+                                endTime: shiftOverrides.endTime || "00:00",
+                                shiftMinutes: shiftOverrides.shiftMinutes || 0,
+                                isNightShift: shiftOverrides.isNightShift || false
+                            };
                         }
 
                         await Attendance.findOneAndUpdate(

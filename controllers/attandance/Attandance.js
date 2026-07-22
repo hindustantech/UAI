@@ -22,7 +22,7 @@ import * as faceApiService from '../../services/faceApi.service.js';
 
 export const dailyAttendanceEmp = async (req, res) => {
     try {
-        const { fromdate } = req.query;
+        const { date } = req.query;
         const employeeId = req.user._id;
         if (!date) {
             return res.status(400).json({
@@ -554,7 +554,12 @@ export const markAttendance = async (req, res) => {
         =========================== */
 
         const shiftStartTimeIST = createDateTimeIST(dateString, shiftData.startTime);
-        const shiftEndTimeIST = createDateTimeIST(dateString, shiftData.endTime);
+        let shiftEndTimeIST = createDateTimeIST(dateString, shiftData.endTime);
+
+        if (shiftData.isNightShift && shiftEndTimeIST <= shiftStartTimeIST) {
+            shiftEndTimeIST.setDate(shiftEndTimeIST.getDate() + 1);
+        }
+
         const shiftDurationMinutes = diffMinutes(shiftStartTimeIST, shiftEndTimeIST);
 
         console.log(`📍 Shift Start Time (IST): ${shiftStartTimeIST.toISOString()}`);
@@ -654,7 +659,8 @@ export const markAttendance = async (req, res) => {
                         name: shiftData.shiftName,
                         startTime: shiftData.startTime,
                         endTime: shiftData.endTime,
-                        shiftMinutes: shiftDurationMinutes
+                        shiftMinutes: shiftDurationMinutes,
+                        isNightShift: shiftData.isNightShift || false
                     },
                     breaks: breaks || [],
                     status: finalStatus,
@@ -827,7 +833,8 @@ export const markAttendance = async (req, res) => {
                         name: shiftData.shiftName,
                         startTime: shiftData.startTime,
                         endTime: shiftData.endTime,
-                        shiftMinutes: shiftDurationMinutes
+                        shiftMinutes: shiftDurationMinutes,
+                        isNightShift: shiftData.isNightShift || false
                     },
                     breaks: breaks || [],
                     status: finalStatus,
@@ -1474,7 +1481,12 @@ export const markFaceAttendance = async (req, res) => {
         =========================== */
 
         const shiftStartTimeIST = createDateTimeIST(dateString, shiftData.startTime);
-        const shiftEndTimeIST = createDateTimeIST(dateString, shiftData.endTime);
+        let shiftEndTimeIST = createDateTimeIST(dateString, shiftData.endTime);
+
+        if (shiftData.isNightShift && shiftEndTimeIST <= shiftStartTimeIST) {
+            shiftEndTimeIST.setDate(shiftEndTimeIST.getDate() + 1);
+        }
+
         const shiftDurationMinutes = diffMinutes(shiftStartTimeIST, shiftEndTimeIST);
 
         console.log(`📍 Shift Start Time (IST): ${shiftStartTimeIST.toISOString()}`);
@@ -1574,7 +1586,8 @@ export const markFaceAttendance = async (req, res) => {
                         name: shiftData.shiftName,
                         startTime: shiftData.startTime,
                         endTime: shiftData.endTime,
-                        shiftMinutes: shiftDurationMinutes
+                        shiftMinutes: shiftDurationMinutes,
+                        isNightShift: shiftData.isNightShift || false
                     },
                     breaks: breaks || [],
                     status: finalStatus,
@@ -1747,7 +1760,8 @@ export const markFaceAttendance = async (req, res) => {
                         name: shiftData.shiftName,
                         startTime: shiftData.startTime,
                         endTime: shiftData.endTime,
-                        shiftMinutes: shiftDurationMinutes
+                        shiftMinutes: shiftDurationMinutes,
+                        isNightShift: shiftData.isNightShift || false
                     },
                     breaks: breaks || [],
                     status: finalStatus,

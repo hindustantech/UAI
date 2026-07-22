@@ -112,6 +112,11 @@ const attendanceSchema = new mongoose.Schema({
         shiftMinutes: {
             type: Number,
             default: 0
+        },
+
+        isNightShift: {
+            type: Boolean,
+            default: false
         }
     },
 
