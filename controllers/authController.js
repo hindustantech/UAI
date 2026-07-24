@@ -19,7 +19,7 @@ import { Parser } from 'json2csv';
 import { newgenerateToken } from '../config/new_user_jwt.js';
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep this secret in env
 import Otp from '../models/Otp.js';
-
+import { Subscription } from '../models/Attandance/subscration/Subscription.js';
 
 
 export const generateTheQRCode = async (req, res) => {
@@ -1562,7 +1562,6 @@ export const generateUniqueReferralCode = async () => {
 // };
 
 // employeeController.js
-
 export const createOrUpdateEmployee = async (req, res) => {
   try {
     let companyId;
@@ -1584,7 +1583,6 @@ export const createOrUpdateEmployee = async (req, res) => {
 
     // If employeeId is provided, update existing employee
     if (employeeId) {
-      // Find existing employee
       const existingEmployee = await User.findOne({
         _id: employeeId,
         createdBy: companyId,
@@ -1613,7 +1611,7 @@ export const createOrUpdateEmployee = async (req, res) => {
         }
       }
 
-      // Update employee
+      // Update employee - NO increment here
       const updatedEmployee = await User.findByIdAndUpdate(
         employeeId,
         {
@@ -1630,7 +1628,7 @@ export const createOrUpdateEmployee = async (req, res) => {
       });
     }
 
-    // If no employeeId, create new employee
+    // CREATE NEW EMPLOYEE
     const existingUser = await User.findOne({ phone });
 
     if (existingUser) {
@@ -1643,6 +1641,7 @@ export const createOrUpdateEmployee = async (req, res) => {
     // Generate unique referral code
     const referalCode = await generateUniqueReferralCode();
 
+    // Create employee first
     const employee = await User.create({
       name: name.trim(),
       phone: phone.trim(),
@@ -1650,6 +1649,12 @@ export const createOrUpdateEmployee = async (req, res) => {
       type: "user",
       createdBy: companyId,
     });
+
+    // Increment subscription count ONLY on creation
+    await Subscription.findOneAndUpdate(
+      { company: companyId, isActive: true, status: "ACTIVE" },
+      { $inc: { 'usage.new_users_created': 1 } }
+    );
 
     // Remove sensitive fields from response
     const employeeData = employee.toObject();

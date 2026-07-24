@@ -61,18 +61,4 @@ export const checkLimit = async (req, res, next) => {
     }
 };
 
-// After user creation, increment the count
-export const incrementUserCount = async (req, res, next) => {
-    try {
-        if (req.subscription) {
-            await Subscription.findByIdAndUpdate(
-                req.subscription._id,
-                { $inc: { 'usage.new_users_created': 1 } }
-            );
-        }
-        next();
-    } catch (error) {
-        console.error("Error incrementing user count:", error);
-        next(error);
-    }
-};
+
