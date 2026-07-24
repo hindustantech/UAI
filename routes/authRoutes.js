@@ -36,6 +36,7 @@ import {
 
     createOrUpdateEmployee, getAllEmployees, getEmployeeById
 } from '../controllers/authController.js';
+import { checkLimit,incrementUserCount } from '../middlewares/checkLimt/checklimit.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import profileUploadMiddleware from '../middlewares/profileUploadMiddleware.js';
 const router = express.Router();
@@ -61,7 +62,7 @@ router.get('/updateProfileImage', authMiddleware, upload.single('profileImage'),
 // router.post('/signout', signout);
 
 // Create or Update Employee (POST because it can create)
-router.post('/manul/createOrUpdateEmployee', authMiddleware, createOrUpdateEmployee);
+router.post('/manul/createOrUpdateEmployee', authMiddleware, checkLimit, incrementUserCount,  createOrUpdateEmployee);
 
 // Get all employees with pagination and filters
 router.get('/manul/getAllEmployees', authMiddleware, getAllEmployees);

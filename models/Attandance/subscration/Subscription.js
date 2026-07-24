@@ -86,6 +86,10 @@ const subscriptionSchema = new mongoose.Schema({
         employeesUsed: {
             type: Number,
             default: 0,
+        },  
+        new_users_created: {
+            type: Number,
+            default: 0,
         },
         no_of_sales_person_employeesUsed: {
             type: Number,
