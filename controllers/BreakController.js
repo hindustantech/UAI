@@ -721,7 +721,7 @@ export const startFaceBreakController = async (req, res) => {
         const employee = await Employee.findOne({
             userId: u_id,
             employmentStatus: 'active'
-        }).session(session);
+        }).populate("shift").session(session);
 
         if (!employee) {
             return abortAndRespond(session, res, 404, 'EMPLOYEE_NOT_FOUND', 'Active employee not found');
@@ -1229,7 +1229,7 @@ export const startFaceBreakIdentifyController = async (req, res) => {
             userId: matchedEmployeeId,
             companyId,
             employmentStatus: 'active'
-        }).session(session);
+        }).populate("shift").session(session);
 
         if (!employee) {
             return abortAndRespond(
