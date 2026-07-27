@@ -63,10 +63,20 @@ const BreakSchema = new mongoose.Schema({
         default: false
     },
 
+    geoVerified: {
+        type: Boolean,
+        default: false
+    },
+
     status: {
         type: String,
         enum: ["active", "completed"],
         default: "active"
+    },
+
+    faceVerification: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null
     }
 
 }, { _id: true });
