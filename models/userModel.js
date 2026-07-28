@@ -207,7 +207,7 @@ const userSchema = new mongoose.Schema({
     qr: {
       enabled: {
         type: Boolean,
-        default: false,W
+        default: false,
       },
     },
   },
