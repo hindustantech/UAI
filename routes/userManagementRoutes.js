@@ -10,6 +10,7 @@ import {
     createUser
 } from '../controllers/Usermanagement.js';
 import { getme } from "../controllers/getUser.js";
+import { enableFace, disableFace, enableQr, disableQr } from '../controllers/configFeatures.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import { checkPermission } from '../middlewares/checkPermission.js';
 // Assume auth middleware if needed, e.g., const auth = require('../middleware/auth');
@@ -26,5 +27,9 @@ router.get('/analytics', getUserAnalytics); // Analytics
 router.get('/:id', getUserProfile); // View profile
 router.put('/:id/role', authMiddleware, checkPermission('user.update'), changeUserRole); // Change role
 router.put('/:id/block', authMiddleware, checkPermission('user.update'), toggleUserBlock); // Block/unblock
+router.put('/:id/face/enable', authMiddleware, checkPermission('user.update'), enableFace);
+router.put('/:id/face/disable', authMiddleware, checkPermission('user.update'), disableFace);
+router.put('/:id/qr/enable', authMiddleware, checkPermission('user.update'), enableQr);
+router.put('/:id/qr/disable', authMiddleware, checkPermission('user.update'), disableQr);
 
 export default router;

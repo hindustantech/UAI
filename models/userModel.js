@@ -197,7 +197,20 @@ const userSchema = new mongoose.Schema({
       email: String,
     }
   },
-
+  manageFeature: {
+    face: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+    },
+    qr: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+    },
+  },
   googleId: {
     type: String,
     unique: true,
