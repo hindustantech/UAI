@@ -10,7 +10,7 @@ import {
     createUser
 } from '../controllers/Usermanagement.js';
 import { getme } from "../controllers/getUser.js";
-import { enableFace, disableFace, enableQr, disableQr } from '../controllers/configFeatures.js';
+import { enableFace, disableFace, enableQr, disableQr,getFeatureStatus } from '../controllers/configFeatures.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import { checkPermission } from '../middlewares/checkPermission.js';
 // Assume auth middleware if needed, e.g., const auth = require('../middleware/auth');
@@ -31,5 +31,5 @@ router.put('/:id/face/enable', authMiddleware, checkPermission('user.update'), e
 router.put('/:id/face/disable', authMiddleware, checkPermission('user.update'), disableFace);
 router.put('/:id/qr/enable', authMiddleware, checkPermission('user.update'), enableQr);
 router.put('/:id/qr/disable', authMiddleware, checkPermission('user.update'), disableQr);
-
+router.get('/getFeatureStatus', authMiddleware, getFeatureStatus); // Get current user info
 export default router;

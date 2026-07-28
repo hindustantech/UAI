@@ -180,3 +180,42 @@ export const disableQr = async (req, res) => {
     });
   }
 };
+
+
+export const getFeatureStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: 'Invalid user ID'
+      });
+    }
+    
+    const user = await User.findById(id).select('manageFeature');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        data: null,
+        message: 'User not found'
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: user.manageFeature,
+      message: 'Feature status retrieved successfully'
+    });
+  }
+  catch (error) {
+    console.error('Get feature status error:', error);
+    res.status(500).json({
+      success: false,
+      data: null,
+      message: error.message
+    });
+  }
+}
