@@ -31,5 +31,5 @@ router.put('/:id/face/enable', authMiddleware, checkPermission('user.update'), e
 router.put('/:id/face/disable', authMiddleware, checkPermission('user.update'), disableFace);
 router.put('/:id/qr/enable', authMiddleware, checkPermission('user.update'), enableQr);
 router.put('/:id/qr/disable', authMiddleware, checkPermission('user.update'), disableQr);
-router.get('/getFeatureStatus', authMiddleware, getFeatureStatus); // Get current user info
+router.get('/getFeatureStatus/:id', authMiddleware, getFeatureStatus); // Get current user info
 export default router;
