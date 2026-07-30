@@ -10,6 +10,7 @@ import Employee from "../models/Attandance/Employee.js";
 import SalaryRule from "../models/salaryRules.js";
 import PayrollRule from "../models/PayrollRuleSchema.js";
 import Attendance from "../models/Attandance/Attendance.js";
+import AttendanceRequest from "../models/Attandance/Request.js";
 import { calculateSalary } from "../services/salaryCalculator.js";
 import { generatePayrollExcel } from "../services/excelGenerator.js";
 import { generateSalarySlipPDF } from "../services/pdfGenerator.js";
@@ -37,6 +38,26 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
         date: { $gte: start, $lte: end }
     }).lean();
 
+    // Fetch all approved leave requests covering this month
+    const approvedLeaveRequests = await AttendanceRequest.find({
+        employeeId,
+        companyId: employee.companyId,
+        requestType: "leave",
+        status: "approved",
+        "leaveDetails.startDate": { $lte: end },
+        "leaveDetails.endDate": { $gte: start }
+    }).lean();
+
+    // Build set of date strings covered by approved leave requests
+    const approvedLeaveDates = new Set();
+    for (const req of approvedLeaveRequests) {
+        const s = new Date(req.leaveDetails.startDate);
+        const e = new Date(req.leaveDetails.endDate);
+        for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+            approvedLeaveDates.add(d.toISOString().slice(0, 10));
+        }
+    }
+
     // Map records by day-of-month for quick lookup
     const recordByDay = new Map();
     for (const rec of records) {
@@ -47,10 +68,14 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
     let presentDays = 0;
     let absentDays = 0;
     let leaveDays = 0;
+    let paidLeaveDays = 0;
+    let unpaidLeaveDays = 0;
     let holidays = 0;
     let weeklyOffDays = 0;
     let halfDays = 0;
     let lateDays = 0;
+    let totalPayableMinutes = 0;
+    let overtimeMinutes = 0;
 
     const weeklyOffSet = new Set(
         (employee?.weeklyOff && employee.weeklyOff.length) ? employee.weeklyOff : ["Sunday"]
@@ -61,6 +86,9 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
         const rec = recordByDay.get(day);
 
         if (rec) {
+            totalPayableMinutes += rec.workSummary?.payableMinutes ?? 0;
+            overtimeMinutes += rec.workSummary?.overtimeMinutes ?? 0;
+
             switch (rec.status) {
                 case "present":
                     presentDays++;
@@ -75,6 +103,12 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
                     break;
                 case "leave":
                     leaveDays++;
+                    const dateStr = new Date(rec.date).toISOString().slice(0, 10);
+                    if (approvedLeaveDates.has(dateStr)) {
+                        paidLeaveDays++;
+                    } else {
+                        unpaidLeaveDays++;
+                    }
                     break;
                 case "holiday":
                     holidays++;
@@ -86,8 +120,6 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
                     break;
             }
         } else {
-            // No attendance document at all for this day —
-            // treat as absent unless it's a scheduled weekly off.
             const dateObj = new Date(year, month - 1, day);
             const dowName = DOW[dateObj.getDay()];
             if (weeklyOffSet.has(dowName)) {
@@ -98,7 +130,7 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
         }
     }
 
-    return { presentDays, absentDays, leaveDays, holidays, weeklyOffDays, halfDays, lateDays };
+    return { presentDays, absentDays, leaveDays, paidLeaveDays, unpaidLeaveDays, holidays, weeklyOffDays, halfDays, lateDays, totalPayableMinutes, overtimeMinutes };
 }
 
 

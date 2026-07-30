@@ -47,8 +47,8 @@ export async function generatePayrollExcel(records, filePath) {
         if (numFmt) cell.numFmt = numFmt;
     }
 
-    // Total columns = 30  (added: LOP Days=AC, LOP Amount=AD)
-    const LAST_COL = "AC";
+    // Total columns = 33  (A through AG)
+    const LAST_COL = "AG";
 
     /* ── Row 1: Company name ── */
     ws.mergeCells(`A1:${LAST_COL}1`);
@@ -62,16 +62,18 @@ export async function generatePayrollExcel(records, filePath) {
     /* ── Row 2: Group headers ── */
     const groups = [
         ["A2:D2", "Employee Info", DARK_BLUE],
-        ["E2:F2", "Pay Period", MED_BLUE],
-        ["G2:L2", "Attendance", "2E4057"],
-        ["M2:M2", "Payable Days", "37474F"],
-        ["N2:R2", "Earnings", "1B5E20"],
-        ["S2:S2", "Gross", "004D40"],
-        ["T2:X2", "Deductions", "B71C1C"],
-        ["Y2:Y2", "LOP", "E65100"],   // Loss of Pay group
-        ["Z2:Z2", "Total Ded.", "7B1FA2"],
-        ["AA2:AA2", "Net Salary", "1A237E"],
-        ["AB2:AC2", "Rule Cuts", "4A148C"],
+        ["E2:E2", "Pay Type", MED_BLUE],
+        ["F2:G2", "Pay Period", MED_BLUE],
+        ["H2:N2", "Attendance", "2E4057"],
+        ["O2:O2", "Payable Days", "37474F"],
+        ["P2:P2", "Payable Hours", "37474F"],
+        ["Q2:U2", "Earnings", "1B5E20"],
+        ["V2:V2", "Gross", "004D40"],
+        ["W2:AA2", "Deductions", "B71C1C"],
+        ["AB2:AB2", "LOP", "E65100"],
+        ["AC2:AC2", "Total Ded.", "7B1FA2"],
+        ["AD2:AD2", "Net Salary", "1A237E"],
+        ["AE2:AG2", "Rule Cuts", "4A148C"],
     ];
     for (const [range, label, bg] of groups) {
         ws.mergeCells(range);
@@ -85,26 +87,30 @@ export async function generatePayrollExcel(records, filePath) {
     const headers = [
         // A–D: Employee Info
         "Emp Code", "Emp Name", "Department", "Designation",
-        // E–F: Pay Period
+        // E: Pay Type
+        "Pay Type",
+        // F–G: Pay Period
         "Pay Period", "Pay Date",
-        // G–L: Attendance
-        "Std Days", "Present", "Absent", "Leave", "Half Days", "Late Days",
-        // M: Payable
+        // H–N: Attendance
+        "Std Days", "Present", "Absent", "Paid Leave", "Unpaid Leave", "Half Days", "Late Days",
+        // O: Payable Days
         "Payable Days",
-        // N–R: Earnings
+        // P: Payable Hours
+        "Payable Hrs",
+        // Q–U: Earnings
         "Basic", "HRA", "DA", "Bonus", "Other Allow.",
-        // S: Gross
+        // V: Gross
         "Gross Salary",
-        // T–X: Deductions
+        // W–AA: Deductions
         "PF (12%)", "ESI (0.75%)", "Gratuity (4.81%)", "Income Tax", "Prof. Tax",
-        // Y: LOP
+        // AB: LOP
         "LOP Amount",
-        // Z: Total Ded.
+        // AC: Total Ded.
         "Total Ded.",
-        // AA: Net
+        // AD: Net
         "Net Salary",
-        // AB–AC: Rule Cuts
-        "Late Cut (days)", "Half-Day Cut (days)"
+        // AE–AG: Rule Cuts
+        "Late Cut (days)", "Half-Day Cut (days)", "LOP Days"
     ];
     const hRow = ws.getRow(3);
     hRow.height = 30;
@@ -114,19 +120,21 @@ export async function generatePayrollExcel(records, filePath) {
         style(c, { bg: LIGHT_BLUE, fg: DARK_BLUE, bold: true, align: "center" });
     });
 
-    /* ── Column widths (30 columns) ── */
+    /* ── Column widths (33 columns) ── */
     const widths = [
-        10, 22, 16, 18,          // A–D
-        13, 12,                  // E–F
-        9, 9, 9, 9, 10, 10,      // G–L
-        13,                      // M
-        12, 12, 12, 12, 13,      // N–R
-        14,                      // S
-        12, 14, 16, 12, 10,      // T–X
-        14,                      // Y  LOP Amount
-        14,                      // Z  Total Ded.
-        16,                      // AA Net Salary
-        17, 19                   // AB–AC Rule Cuts
+        10, 22, 16, 18,          // A–D  Employee Info
+        10,                      // E    Pay Type
+        13, 12,                  // F–G  Pay Period
+        9, 9, 9, 10, 10, 10, 10, // H–N  Attendance
+        13,                      // O    Payable Days
+        12,                      // P    Payable Hours
+        12, 12, 12, 12, 13,      // Q–U  Earnings
+        14,                      // V    Gross
+        12, 14, 16, 12, 10,      // W–AA Deductions
+        14,                      // AB   LOP Amount
+        14,                      // AC   Total Ded.
+        16,                      // AD   Net Salary
+        17, 19, 10               // AE–AG Rule Cuts + LOP Days
     ];
     widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
@@ -150,41 +158,47 @@ export async function generatePayrollExcel(records, filePath) {
             p.employeeSnapshot?.name,
             p.employeeSnapshot?.department,
             p.employeeSnapshot?.designation,
-            // E–F
+            // E  Pay Type
+            p.payType ?? "monthly",
+            // F–G
             p.payPeriod?.label,
             p.payDate ? new Date(p.payDate) : null,
-            // G–L
+            // H–N  Attendance
             att.standardDays ?? STD_DAYS,
             att.presentDays ?? 0,
             att.absentDays ?? 0,
-            att.leaveDays ?? 0,
+            att.paidLeaveDays ?? 0,
+            att.unpaidLeaveDays ?? 0,
             att.halfDays ?? 0,
             att.lateDays ?? 0,
-            // M
+            // O  Payable Days
             p.payableDays ?? 0,
-            // N–R
+            // P  Payable Hours
+            ear.totalPayableHours ?? 0,
+            // Q–U  Earnings
             ear.basic ?? 0, ear.hra ?? 0, ear.da ?? 0, ear.bonus ?? 0,
             (ear.otherAllowances ?? []).reduce((s, a) => s + a.amount, 0),
-            // S
+            // V  Gross
             p.grossSalary ?? 0,
-            // T–X
+            // W–AA  Deductions
             std.pf ?? 0, std.esi ?? 0, std.gratuity ?? 0,
             oth.incomeTax ?? 0, oth.professionalTax ?? 0,
-            // Y  LOP Amount
+            // AB  LOP Amount
             lop.lopAmount ?? 0,
-            // Z
+            // AC
             p.totalDeductions ?? 0,
-            // AA
+            // AD
             p.netSalary ?? 0,
-            // AB–AC
+            // AE–AG  Rule Cuts + LOP Days
             rul.lateCutDays ?? 0,
-            rul.halfDayCutDays ?? 0
+            rul.halfDayCutDays ?? 0,
+            lop.lopDays ?? 0
         ];
 
-        //  col numbers (1-indexed) that are money / date / day
-        const moneyCols = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
-        const dateCols = new Set([6]);
-        const dayCols = new Set([13, 28, 29]);
+        // col numbers (1-indexed) that are money / date / day
+        const moneyCols = new Set([17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
+        const dateCols = new Set([7]);
+        const dayCols = new Set([15, 16, 31, 32, 33]);
 
         vals.forEach((v, i) => {
             const colNum = i + 1;
@@ -192,10 +206,10 @@ export async function generatePayrollExcel(records, filePath) {
             c.value = v;
 
             let cellBg = bg;
-            if (colNum === 19) cellBg = YELLOW_BG;                    // Gross (S)
-            if (colNum === 27) cellBg = GREEN_BG;                     // Net Salary (AA)
-            if (colNum >= 20 && colNum <= 24) cellBg = RED_BG;        // Deductions T–X
-            if (colNum === 25) cellBg = ORANGE_BG;                    // LOP Amount (Y)               // LOP Amount (Y)
+            if (colNum === 22) cellBg = YELLOW_BG;                    // Gross (V)
+            if (colNum === 30) cellBg = GREEN_BG;                     // Net Salary (AD)
+            if (colNum >= 23 && colNum <= 27) cellBg = RED_BG;        // Deductions W–AA
+            if (colNum === 28) cellBg = ORANGE_BG;                    // LOP Amount (AB)
 
             style(c, {
                 bg: cellBg,
@@ -212,14 +226,13 @@ export async function generatePayrollExcel(records, filePath) {
 
     /* ── Totals row ── */
     const totalRow = records.length + 4;
-    ws.mergeCells(`A${totalRow}:M${totalRow}`);
+    ws.mergeCells(`A${totalRow}:P${totalRow}`);
     const tlCell = ws.getCell(`A${totalRow}`);
     tlCell.value = "TOTALS";
     style(tlCell, { bg: DARK_BLUE, bold: true, fg: WHITE, align: "center" });
 
-    // Sum all money columns: N(14)→R(18), S(19), T(20)→X(24) [no Y=25 for Prof Tax],
-    // Y=26 (LOP), Z=27 (Total Ded), AA=28 wait — let's map by letter
-    const totalCols = [14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27];
+    // Sum all money columns: Q(17)→U(21), V(22), W(23)→AA(27), AB(28), AC(29), AD(30)
+    const totalCols = [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30];
     totalCols.forEach(ci => {
         const col = ws.getColumn(ci).letter;
         const cell = ws.getCell(`${col}${totalRow}`);
@@ -236,10 +249,15 @@ export async function generatePayrollExcel(records, filePath) {
     const totalLOP = records.reduce((s, p) => s + (p.lossOfPay?.lopAmount ?? 0), 0);
     const totalLOPDays = records.reduce((s, p) => s + (p.lossOfPay?.lopDays ?? 0), 0);
 
+    const totalHourly = records.filter(r => r.payType === "hourly").length;
+    const totalMonthly = records.filter(r => r.payType !== "hourly").length;
+
     const summaryRows = [
         ["Metric", "Value"],
         ["Pay Period", records[0]?.payPeriod?.label ?? ""],
         ["Total Employees", records.length],
+        ["Monthly Employees", totalMonthly],
+        ["Hourly Employees", totalHourly],
         ["Total Gross Salary", totalGross],
         ["Total Deductions", totalDed],
         ["Total Loss of Pay (LOP)", totalLOP],

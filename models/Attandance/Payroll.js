@@ -59,16 +59,26 @@ const PayrollSchema = new mongoose.Schema(
             joiningDate: Date
         },
 
+        /* ── Pay Type ── */
+        payType: {
+            type: String,
+            enum: ["monthly", "hourly"],
+            default: "monthly"
+        },
+
         /* ── Attendance Summary ── */
         attendance: {
             standardDays: { type: Number, default: 30 },   // always 30
             weeklyOffDays: { type: Number, default: 0 },
             holidays: { type: Number, default: 0 },
             leaveDays: { type: Number, default: 0 },
+            paidLeaveDays: { type: Number, default: 0 },
+            unpaidLeaveDays: { type: Number, default: 0 },
             absentDays: { type: Number, default: 0 },
             lateDays: { type: Number, default: 0 },    // attendance "late" count
             halfDays: { type: Number, default: 0 },
             presentDays: { type: Number, default: 0 },    // payable working days
+            totalPayableMinutes: { type: Number, default: 0 },  // for hourly employees
         },
 
         /* ── Salary Rule Deductions (from SalaryRule model) ── */
@@ -114,6 +124,13 @@ const PayrollSchema = new mongoose.Schema(
             lopDays: { type: Number, default: 0 },
             lopAmount: { type: Number, default: 0 }
         },
+        /* ── Salary approach used ── */
+        salaryApproach: {
+            type: String,
+            enum: ["full_minus_lop", "pro_rata"],
+            default: "full_minus_lop"
+        },
+
         /* ── Per-unit rates used (for transparency) ── */
         ratesUsed: {
             perDayRate: { type: Number, default: 0 },

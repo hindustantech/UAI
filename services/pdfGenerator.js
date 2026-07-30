@@ -11,6 +11,12 @@ const INR = (v) =>
     maximumFractionDigits: 2,
   })}`;
 const STD_DAYS = 30;
+const INR_SHORT = (v) =>
+  `Rs. ${Number(v ?? 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+const roundTo2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /**
  * @param {Object} payroll  - Payroll lean document
@@ -93,14 +99,31 @@ export async function generateSalarySlipPDF(payroll, filePath) {
       ["Date of joining", emp.joiningDate ? fmtDate(emp.joiningDate) : "—"],
       ["Bank account", emp.bankName ? `${emp.bankName} •••• ${String(emp.bankAccount ?? "").slice(-4)}` : "—"],
     ];
-    const payFields = [
-      ["Standard days", STD_DAYS],
-      ["Payable days", payroll.payableDays ?? "—"],
-      ["Present days", att.presentDays ?? "—"],
-      ["Absent days", att.absentDays ?? "—"],
-      ["Leave / Holidays", `${att.leaveDays ?? 0} / ${att.holidays ?? 0}`],
-      ["Half days / Late days", `${att.halfDays ?? 0} / ${att.lateDays ?? 0}`],
-    ];
+    const isHourly = payroll.payType === "hourly";
+    const isProRata = payroll.salaryApproach === "pro_rata";
+
+    let payFields;
+    if (isHourly) {
+      payFields = [
+        ["Pay type", "Hourly"],
+        ["Hourly rate", INR(ear.perHourRate ?? 0)],
+        ["Payable hours", `${ear.totalPayableHours ?? 0} hrs`],
+        ["Overtime hours", `${ear.overtime ?? 0 > 0 ? "—" : ""}`],
+        ["Work days", `${att.presentDays ?? 0} / ${att.standardDays ?? STD_DAYS}`],
+        ["Leaves (Paid / Unpaid)", `${att.paidLeaveDays ?? 0} / ${att.unpaidLeaveDays ?? 0}`],
+      ];
+    } else {
+      payFields = [
+        ["Standard days", STD_DAYS],
+        ["Payable days", payroll.payableDays ?? "—"],
+        ...(isProRata ? [["Proration factor", `${roundTo2((payroll.payableDays ?? 0) / STD_DAYS)}x`]] : []),
+        ["Present days", att.presentDays ?? "—"],
+        ["Absent days", att.absentDays ?? "—"],
+        ["Leaves (Paid / Unpaid)", `${att.paidLeaveDays ?? 0} / ${att.unpaidLeaveDays ?? 0}`],
+        ["Holidays / Week off", `${att.holidays ?? 0} / ${att.weeklyOffDays ?? 0}`],
+        ["Half days / Late days", `${att.halfDays ?? 0} / ${att.lateDays ?? 0}`],
+      ];
+    }
 
     const drawKV = (fields, x, startY, width) => {
       let ty = startY;
@@ -124,29 +147,37 @@ export async function generateSalarySlipPDF(payroll, filePath) {
     y = Math.max(bottomL, bottomR) + 14;
 
     /* ───────────────────── SALARY RULE STRIP ───────────────────── */
-    const ruleH = 40;
-    doc.roundedRect(MARGIN, y, CW, ruleH, 6).fill(PANEL);
-    doc.fillColor(SLATE).font("Helvetica-Bold").fontSize(7.5)
-       .text("ATTENDANCE RULE ADJUSTMENTS", MARGIN + 14, y + 8, { characterSpacing: 0.4 });
-    doc.fillColor(SLATE).font("Helvetica").fontSize(8)
-       .text(
-         `Late arrivals: ${att.lateDays ?? 0} -> ${rul.lateCutDays ?? 0} day(s) cut   ·   ` +
-         `Half days: ${att.halfDays ?? 0} -> ${rul.halfDayCutDays ?? 0} day(s) cut   ·   ` +
-         `Total cut: ${rul.totalCutDays ?? 0} day(s)`,
-         MARGIN + 14, y + 21, { width: CW - 28 }
-       );
-    y += ruleH + 12;
+    if (!isHourly && (rul.lateCutDays > 0 || rul.halfDayCutDays > 0)) {
+      const ruleH = 40;
+      doc.roundedRect(MARGIN, y, CW, ruleH, 6).fill(PANEL);
+      doc.fillColor(SLATE).font("Helvetica-Bold").fontSize(7.5)
+         .text("ATTENDANCE RULE ADJUSTMENTS", MARGIN + 14, y + 8, { characterSpacing: 0.4 });
+      doc.fillColor(SLATE).font("Helvetica").fontSize(8)
+         .text(
+           `Late arrivals: ${att.lateDays ?? 0} -> ${rul.lateCutDays ?? 0} day(s) cut   ·   ` +
+           `Half days: ${att.halfDays ?? 0} -> ${rul.halfDayCutDays ?? 0} day(s) cut   ·   ` +
+           `Total cut: ${rul.totalCutDays ?? 0} day(s)`,
+           MARGIN + 14, y + 21, { width: CW - 28 }
+         );
+      y += ruleH + 12;
+    } else if (!isHourly) {
+      const ruleH = 30;
+      doc.roundedRect(MARGIN, y, CW, ruleH, 6).fill(PANEL);
+      doc.fillColor(SLATE).font("Helvetica").fontSize(8)
+         .text("No attendance rule adjustments", MARGIN + 14, y + 10);
+      y += ruleH + 12;
+    }
 
     /* ───────────────────── LOSS OF PAY STRIP ───────────────────── */
     const lopDays = lop.lopDays ?? 0;
     const lopAmount = lop.lopAmount ?? 0;
-    if (lopDays > 0 || lopAmount > 0) {
+    if (!isHourly && (lopDays > 0 || lopAmount > 0)) {
       const lopH = 30;
       doc.roundedRect(MARGIN, y, CW, lopH, 6).fill(WARN_BG);
       doc.fillColor(WARN).font("Helvetica-Bold").fontSize(8.5)
          .text(`Loss of Pay`, MARGIN + 14, y + 10);
       doc.fillColor(WARN).font("Helvetica").fontSize(8.5)
-         .text(`${lopDays} absent day(s) × per-day rate`, MARGIN + 90, y + 10.5);
+         .text(`${lopDays} day(s) × per-day rate`, MARGIN + 90, y + 10.5);
       doc.fillColor(WARN).font("Helvetica-Bold").fontSize(9)
          .text(INR(lopAmount), MARGIN, y + 9.5, { width: CW - 14, align: "right" });
       y += lopH + 14;
@@ -171,14 +202,19 @@ export async function generateSalarySlipPDF(payroll, filePath) {
     sectionHeader("DEDUCTIONS", dedX, halfW, BAD, BAD_BG);
     const tableTop = y + headH + 6;
 
-    const earnRows = [
-      ["Basic", ear.basic],
-      ["HRA", ear.hra],
-      ["DA", ear.da],
-      ["Bonus", ear.bonus],
-      ...(ear.otherAllowances ?? []).map((a) => [a.name, a.amount]),
-      ["Overtime", ear.overtime ?? 0],
-    ].filter(([, v]) => (v ?? 0) > 0);
+    const earnRows = isHourly
+      ? [
+          ["Regular Earnings", ear.regularEarnings ?? 0],
+          ...((ear.overtime ?? 0) > 0 ? [["Overtime", ear.overtime]] : []),
+        ].filter(([, v]) => (v ?? 0) > 0)
+      : [
+          ["Basic", ear.basic],
+          ["HRA", ear.hra],
+          ["DA", ear.da],
+          ["Bonus", ear.bonus],
+          ...(ear.otherAllowances ?? []).map((a) => [a.name, a.amount]),
+          ...((ear.overtime ?? 0) > 0 ? [["Overtime", ear.overtime]] : []),
+        ].filter(([, v]) => (v ?? 0) > 0);
 
     const dedRows = [
       ["Provident Fund (12%)", std.pf],

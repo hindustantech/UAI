@@ -80,7 +80,13 @@ const employeeSchema = new mongoose.Schema({
         perDay: Number,
         perHour: Number,
 
-        overtimeRate: Number
+        overtimeRate: Number,
+
+        salaryApproach: {
+            type: String,
+            enum: ["full_minus_lop", "pro_rata"],
+            default: "full_minus_lop"
+        }
     },
 
     deductions: {
