@@ -1410,7 +1410,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             views: [{ state: "frozen", ySplit: 3 }],
         });
 
-        const sCols = 29;
+        const sCols = 28;
 
         wsSummary.mergeCells(1, 1, 1, sCols);
         const sTitleCell = wsSummary.getCell(1, 1);
@@ -1516,9 +1516,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             { label: "DATE BREAKDOWN", start: 6, span: 9 },
             { label: "WORKING HOURS", start: 15, span: 3 },
             { label: "BREAK SUMMARY", start: 18, span: 2 },
-            { label: "HOURS", start: 20, span: 3 },
-            { label: "ATTENDANCE", start: 23, span: 2 },
-            { label: "SALARY (₹)", start: 25, span: 5 },
+            { label: "HOURS", start: 20, span: 2 },
+            { label: "SALARY (₹)", start: 25, span: 7 },
         ];
         const grpRow = wsSummary.getRow(grpRowNum);
         grpRow.height = 16;
@@ -1538,8 +1537,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             "Present", "Half Day", "Absent", "Leave", "Late Days",
             "Gross Hrs", "Net Hrs", "Avg Hrs/Day",
             "Break Hrs", "Deducted Hrs",
-            "OT Hrs", "Late Hrs", "Att %",
-            "Att %", "Att Grade",
+            "OT Hrs", "Late Hrs",
             "Basic", "HRA", "DA", "Bonus", "Per Day", "Per Hour", "OT Rate",
         ];
         const sHeaderRow = wsSummary.getRow(subRowNum);
@@ -1563,15 +1561,6 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const isDummy = typeof r.empName === "string" && r.empName.startsWith("***");
             const bg = isDummy ? LOCKED_BG : (idx % 2 === 0 ? ALT_ROW : "FFFFFFFF");
 
-            const grade = isDummy || typeof r.attPct !== "number" ? "🔒"
-                : r.attPct >= 95 ? "Excellent" : r.attPct >= 85 ? "Good" : r.attPct >= 75 ? "Average" : "Poor";
-            const gradeColor = isDummy ? "FF888888"
-                : r.attPct >= 95 ? "FF137333" : r.attPct >= 85 ? "FF0B5394" : r.attPct >= 75 ? "FF7D4604" : "FF9C0006";
-            const gradeBg = isDummy ? LOCKED_BG
-                : r.attPct >= 95 ? "FFB7E1CD" : r.attPct >= 85 ? "FFD0E4F7" : r.attPct >= 75 ? "FFFFF2CC" : "FFFFC7CE";
-
-            const attDisplay = isDummy || typeof r.attPct !== "number" ? "🔒" : r.attPct / 100;
-
             const vals = [
                 idx + 1, r.empCode, r.empName, r.department, r.designation,
                 r.totalDays, r.weekOff, r.holiday, r.presentableDays,
@@ -1579,7 +1568,6 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 r.totalGrossHrs, r.totalWorkHrs, r.avgWorkHrs,
                 r.totalBreakHrs, r.totalDeductedHrs,
                 r.totalOTHrs, r.totalLateHrs,
-                attDisplay, grade,
                 r.basic, r.hra, r.da, r.bonus, r.perDay, r.perHour, r.overtimeRate,
             ];
 
@@ -1596,24 +1584,10 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 }
                 
                 if (!isDummy && typeof v === "number") {
-                    if (i >= 14 && i <= 21) c.numFmt = "0.00";
-                    if (i >= 24) c.numFmt = "#,##0.00";
+                    if (i >= 14 && i <= 20) c.numFmt = "0.00";
+                    if (i >= 21) c.numFmt = "#,##0.00";
                 }
             });
-
-            // Att % formatting
-            if (!isDummy && typeof r.attPct === "number") {
-                const attCell = row.getCell(23);
-                attCell.value = r.attPct / 100;
-                attCell.numFmt = "0.0%";
-                attCell.font = { name: "Arial", size: 9, bold: true };
-                attCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
-            }
-
-            // Grade cell
-            const gradeCell = row.getCell(24);
-            gradeCell.font = { name: "Arial", size: 9, bold: true, color: { argb: gradeColor } };
-            gradeCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: gradeBg } };
 
             // Highlight break deductions
             if (!isDummy && r.totalDeductedHrs > 0) {
@@ -1651,14 +1625,12 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             [19, `=SUM(S${dataStartRow}:S${lastReal})`],
             [20, `=SUM(T${dataStartRow}:T${lastReal})`],
             [21, `=AVERAGE(U${dataStartRow}:U${lastReal})`],
-            [23, `=AVERAGE(W${dataStartRow}:W${lastReal})`],
         ].forEach(([col, val]) => {
             const c = totRow.getCell(col);
             c.value = val;
             c.font = { name: "Arial", size: 9, bold: true };
             c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
             c.alignment = { horizontal: "center", vertical: "middle" };
-            if (col === 23) c.numFmt = "0.0%";
         });
 
         wsSummary.autoFilter = { from: { row: subRowNum, column: 1 }, to: { row: subRowNum, column: sCols } };

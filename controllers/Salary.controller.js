@@ -2,6 +2,7 @@
 import { calculateEmployeeSalary, calculateBatchSalaries } from "../services/SalaryEngine.js";
 import { SalaryExcelGenerator } from "../services/CsvbuilderSalary.js";
 import Employee from "../models/Attandance/Employee.js";
+import Attendance from "../models/Attandance/Attendance.js";
 import Payroll from "../models/Attandance/Payroll.js";
 import SalaryRule from "../models/salaryRules.js";
 // Constants
@@ -60,54 +61,86 @@ const getSalaryRules = async (companyId) => {
 /**
  * Helper: Get employee attendance from database or calculate from attendance records
  */
-const getEmployeeAttendance = async (employeeId, empCode, month, year) => {
+const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOffDays = ["Sunday"]) => {
   try {
-    // Option 1: If you have an Attendance model, fetch from there
-    // const attendance = await Attendance.findOne({
-    //   employeeId,
-    //   month,
-    //   year
-    // }).lean();
-
-    // Option 2: Calculate from attendance records
     const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+    const totalDaysInMonth = endDate.getDate();
 
-    // This is a placeholder - implement based on your Attendance model structure
     const attendanceRecords = await Attendance.find({
-      employeeId,
+      employeeId: employeeDocId,
       date: { $gte: startDate, $lte: endDate }
     }).lean();
 
-    if (!attendanceRecords || attendanceRecords.length === 0) {
-      // Return default attendance if no records found
-      return {
-        daysWorked: DEFAULT_WORKING_DAYS,
-        lateDays: 0,
-        halfDays: 0,
-        overtimeHours: 0
-      };
+    const recordByDay = new Map();
+    for (const rec of attendanceRecords) {
+      recordByDay.set(new Date(rec.date).getDate(), rec);
     }
 
-    // Calculate attendance metrics
-    const daysWorked = attendanceRecords.filter(r => r.status === 'present' || r.status === 'half-day').length;
-    const lateDays = attendanceRecords.filter(r => r.isLate === true).length;
-    const halfDays = attendanceRecords.filter(r => r.status === 'half-day').length;
-    const overtimeHours = attendanceRecords.reduce((sum, r) => sum + (r.overtimeHours || 0), 0);
+    const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const weeklyOffSet = new Set(weekOffDays);
+
+    let presentDays = 0, absentDays = 0, leaveDays = 0, holidays = 0, weeklyOffTotal = 0;
+    let halfDays = 0, lateDays = 0, daysWorked = 0;
+    let totalPayableMinutes = 0, totalMinutes = 0, overtimeMinutes = 0;
+
+    for (let day = 1; day <= totalDaysInMonth; day++) {
+      const rec = recordByDay.get(day);
+      if (rec) {
+        const ws = rec.workSummary || {};
+        totalPayableMinutes += ws.payableMinutes || 0;
+        totalMinutes += ws.totalMinutes || 0;
+        overtimeMinutes += ws.overtimeMinutes || 0;
+
+        switch (rec.status) {
+          case "present":
+            presentDays++;
+            daysWorked++;
+            if (ws.lateMinutes > 0) lateDays++;
+            break;
+          case "half_day":
+            halfDays++;
+            presentDays += 0.5;
+            daysWorked += 0.5;
+            break;
+          case "absent": absentDays++; break;
+          case "leave": leaveDays++; break;
+          case "holiday": holidays++; break;
+          case "week_off": weeklyOffTotal++; break;
+        }
+      } else {
+        const dateObj = new Date(year, month - 1, day);
+        if (weeklyOffSet.has(DOW[dateObj.getDay()])) {
+          weeklyOffTotal++;
+        } else {
+          absentDays++;
+        }
+      }
+    }
+
+    const grossHours = parseFloat((totalMinutes / 60).toFixed(2));
+    const netHours = parseFloat((totalPayableMinutes / 60).toFixed(2));
+    const breakHours = parseFloat(((totalMinutes - totalPayableMinutes) / 60).toFixed(2));
+    const deductedHours = parseFloat((grossHours - netHours).toFixed(2));
+    const otHours = parseFloat((overtimeMinutes / 60).toFixed(2));
+    const avgHoursPerDay = presentDays > 0 ? parseFloat((netHours / presentDays).toFixed(2)) : 0;
 
     return {
-      daysWorked,
-      lateDays,
-      halfDays,
-      overtimeHours: parseFloat(overtimeHours.toFixed(2))
+      totalDaysInMonth,
+      presentDays, absentDays, leaveDays, holidays, weeklyOffDays: weeklyOffTotal,
+      halfDays, lateDays, daysWorked,
+      totalPayableMinutes, totalMinutes, overtimeMinutes,
+      grossHours, netHours, breakHours, deductedHours, otHours, avgHoursPerDay,
+      overtimeHours: otHours
     };
   } catch (error) {
     console.error(`Error fetching attendance for ${empCode}:`, error);
-    // Return default attendance on error
     return {
-      daysWorked: DEFAULT_WORKING_DAYS,
-      lateDays: 0,
-      halfDays: 0,
+      totalDaysInMonth: DEFAULT_WORKING_DAYS,
+      presentDays: 0, absentDays: 0, leaveDays: 0, holidays: 0, weeklyOffDays: 0,
+      halfDays: 0, lateDays: 0, daysWorked: 0,
+      totalPayableMinutes: 0, totalMinutes: 0, overtimeMinutes: 0,
+      grossHours: 0, netHours: 0, breakHours: 0, deductedHours: 0, otHours: 0, avgHoursPerDay: 0,
       overtimeHours: 0
     };
   }
@@ -121,13 +154,13 @@ const buildAttendanceMap = async (employees, month, year) => {
 
   for (const employee of employees) {
     const attendance = await getEmployeeAttendance(
-      employee.userId,
+      employee._id,
       employee.empCode,
       month,
-      year
+      year,
+      employee.weeklyOff || ["Sunday"]
     );
 
-    // Use empCode as key (fallback to _id)
     const key = employee.empCode || employee._id.toString();
     attendanceMap[key] = attendance;
   }
@@ -322,7 +355,7 @@ export const calculateOne = async (req, res) => {
       };
     } else {
       // Fetch from database
-      attendance = await getEmployeeAttendance(employee.userId, empCode, month, year);
+      attendance = await getEmployeeAttendance(employee._id, empCode, month, year, employee.weeklyOff || ["Sunday"]);
     }
 
     // Override salary structure if provided
@@ -397,7 +430,7 @@ export const calculateByEmployee = async (req, res) => {
     const salaryRule = await getSalaryRules(employee.companyId);
 
     // Get attendance
-    const attendance = await getEmployeeAttendance(employee.userId, empCode, month, year);
+    const attendance = await getEmployeeAttendance(employee._id, empCode, month, year, employee.weeklyOff || ["Sunday"]);
 
     // Calculate
     const result = calculateEmployeeSalary(employee, attendance, payrollRule, salaryRule);
@@ -454,7 +487,7 @@ export const calculateByDepartment = async (req, res) => {
     // Get rules (use first employee's companyId)
     const targetCompanyId = companyId || employees[0].companyId;
     const payrollRule = await getActivePayrollRules(targetCompanyId);
-    const salaryRule = await getSalaryRules(employee.companyId);
+    const salaryRule = await getSalaryRules(targetCompanyId);
 
     // Get attendance
     const attendanceMap = await buildAttendanceMap(employees, month, year);
@@ -520,7 +553,7 @@ export const exportExcel = async (req, res) => {
     // Get rules
     const targetCompanyId = companyId || employees[0].companyId;
     const payrollRule = await getActivePayrollRules(targetCompanyId);
-    const salaryRule = await getSalaryRules(employee.companyId);
+    const salaryRule = await getSalaryRules(targetCompanyId);
 
     // Get attendance
     const attendanceMap = await buildAttendanceMap(employees, month, year);
@@ -530,6 +563,7 @@ export const exportExcel = async (req, res) => {
 
     // Generate Excel
     const generator = new SalaryExcelGenerator(results);
+    generator.setPeriodInfo(month, year);
     await generator.generate();
 
     const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
@@ -578,13 +612,14 @@ export const exportSalarySlip = async (req, res) => {
     const salaryRule = await getSalaryRules(employee.companyId);
 
     // Get attendance
-    const attendance = await getEmployeeAttendance(employee.userId, empCode, month, year);
+    const attendance = await getEmployeeAttendance(employee._id, empCode, month, year, employee.weeklyOff || ["Sunday"]);
 
     // Calculate
     const result = calculateEmployeeSalary(employee, attendance, payrollRule, salaryRule);
 
     // Generate single employee slip
     const generator = new SalaryExcelGenerator([result]);
+    generator.setPeriodInfo(Number(month), Number(year));
     await generator.generate();
 
     const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
@@ -717,7 +752,7 @@ export const getSummary = async (req, res) => {
     // Get rules
     const targetCompanyId = companyId || employees[0].companyId;
     const payrollRule = await getActivePayrollRules(targetCompanyId);
-    const salaryRule = await getSalaryRules(employee.companyId);
+    const salaryRule = await getSalaryRules(targetCompanyId);
 
     // Get attendance
     const attendanceMap = await buildAttendanceMap(employees, month, year);

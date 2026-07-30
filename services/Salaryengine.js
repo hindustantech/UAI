@@ -33,7 +33,7 @@ export class SalaryCalculator {
     const netSalary = this._calculateNetSalary(earnings.grossSalary, deductions);
     
     // Step 5: Build final result
-    this.result = this._buildResult(effectiveDays, earnings, deductions, netSalary);
+    this.result = this._buildResult(effectiveDays, earnings, deductions, netSalary, this.attendance);
     
     return this.result;
   }
@@ -42,7 +42,8 @@ export class SalaryCalculator {
    * Step 1: Calculate effective working days
    */
   _calculateEffectiveDays() {
-    const { daysWorked = DEFAULT_WORKING_DAYS, lateDays = 0, halfDays = 0 } = this.attendance;
+    const { daysWorked = DEFAULT_WORKING_DAYS, lateDays = 0, halfDays = 0, totalDaysInMonth } = this.attendance;
+    const totalDays = totalDaysInMonth || DEFAULT_WORKING_DAYS;
     
     let deductionDays = 0;
     
@@ -61,13 +62,13 @@ export class SalaryCalculator {
     const effectiveDays = Math.max(0, daysWorked - deductionDays);
     
     return {
-      totalDays: DEFAULT_WORKING_DAYS,
+      totalDays,
       daysWorked,
       lateDays,
       halfDays,
       deductionDays: parseFloat(deductionDays.toFixed(2)),
       effectiveDays: parseFloat(effectiveDays.toFixed(2)),
-      prorationFactor: parseFloat((effectiveDays / DEFAULT_WORKING_DAYS).toFixed(4))
+      prorationFactor: parseFloat((effectiveDays / totalDays).toFixed(4))
     };
   }
 
@@ -233,7 +234,8 @@ export class SalaryCalculator {
   /**
    * Step 5: Build final result
    */
-  _buildResult(effectiveDays, earnings, deductions, netSalary) {
+  _buildResult(effectiveDays, earnings, deductions, netSalary, rawAttendance) {
+    const salary = this.employee.salaryStructure || {};
     return {
       // Employee Info
       employeeInfo: {
@@ -243,7 +245,10 @@ export class SalaryCalculator {
         designation: this.employee.jobInfo?.designation || "—",
         department: this.employee.jobInfo?.department || "—",
         employeeType: this.employee.employeeType || "non_sales",
-        role: this.employee.role || "employee"
+        role: this.employee.role || "employee",
+        perDay: salary.perDay || 0,
+        perHour: salary.perHour || 0,
+        overtimeRate: salary.overtimeRate || 0
       },
       
       // Period Info
@@ -256,6 +261,28 @@ export class SalaryCalculator {
       
       // Attendance Summary
       attendance: effectiveDays,
+      
+      // Attendance Detail (raw data from controller)
+      attendanceDetail: rawAttendance ? {
+        totalDaysInMonth: rawAttendance.totalDaysInMonth || DEFAULT_WORKING_DAYS,
+        presentDays: rawAttendance.presentDays ?? effectiveDays.daysWorked,
+        absentDays: rawAttendance.absentDays ?? 0,
+        leaveDays: rawAttendance.leaveDays ?? 0,
+        holidays: rawAttendance.holidays ?? 0,
+        weeklyOffDays: rawAttendance.weeklyOffDays ?? 0,
+        halfDays: rawAttendance.halfDays ?? 0,
+        lateDays: rawAttendance.lateDays ?? 0,
+        daysWorked: rawAttendance.daysWorked ?? effectiveDays.daysWorked,
+        totalPayableMinutes: rawAttendance.totalPayableMinutes ?? 0,
+        totalMinutes: rawAttendance.totalMinutes ?? 0,
+        overtimeMinutes: rawAttendance.overtimeMinutes ?? 0,
+        grossHours: rawAttendance.grossHours ?? 0,
+        netHours: rawAttendance.netHours ?? 0,
+        breakHours: rawAttendance.breakHours ?? 0,
+        deductedHours: rawAttendance.deductedHours ?? 0,
+        otHours: rawAttendance.otHours ?? 0,
+        avgHoursPerDay: rawAttendance.avgHoursPerDay ?? 0
+      } : null,
       
       // Earnings Detail
       earnings: {
@@ -282,7 +309,6 @@ export class SalaryCalculator {
         otherDeductionsDetail: deductions.otherDeductions,
         employerContributions: {
           gratuity: deductions.gratuity,
-          // You can add employer PF contribution here if needed
         },
         totalDeductionsFromSalary: deductions.totalDeductions
       },
@@ -290,7 +316,7 @@ export class SalaryCalculator {
       // Net Salary
       netSalary,
       
-      // Salary in Words (optional but useful)
+      // Salary in Words
       netSalaryInWords: this._numberToWords(netSalary),
       
       // Rules Applied

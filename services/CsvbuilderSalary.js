@@ -19,6 +19,13 @@ export class SalaryExcelGenerator {
   constructor(salaryResults) {
     this.salaryResults = salaryResults;
     this.workbook = new ExcelJS.Workbook();
+    this.periodMonth = null;
+    this.periodYear = null;
+  }
+
+  setPeriodInfo(month, year) {
+    this.periodMonth = month;
+    this.periodYear = year;
   }
 
   /**
@@ -29,6 +36,7 @@ export class SalaryExcelGenerator {
     this.workbook.created = new Date();
     
     await this._createSummarySheet();
+    await this._createAttendanceWageSheet();
     await this._createDetailedSheet();
     await this._createSalarySlips();
     await this._createRulesSheet();
@@ -193,7 +201,169 @@ export class SalaryExcelGenerator {
   }
 
   /**
-   * Sheet 2: Detailed Salary Breakdown
+   * Sheet 2: Attendance & Wage Report (grouped by pay type)
+   */
+  async _createAttendanceWageSheet() {
+    const ws = this.workbook.addWorksheet("Attendance & Wage", {
+      properties: { tabColor: { argb: "E8611A" } }
+    });
+
+    const money = '#,##0.00';
+    const numFmt = '0.00';
+    const intFmt = '0';
+
+    const sections = [
+      { key: 'hourly', title: 'HOURLY WAGE EMPLOYEES', filter: r => r.employeeInfo.perHour > 0 },
+      { key: 'perday', title: 'PER-DAY WAGE EMPLOYEES', filter: r => r.employeeInfo.perDay > 0 && !r.employeeInfo.perHour },
+      { key: 'monthly', title: 'MONTHLY SALARY EMPLOYEES', filter: r => !r.employeeInfo.perHour && !r.employeeInfo.perDay }
+    ];
+
+    const headers = [
+      "Emp Code", "Emp Name", "Department", "Designation",
+      "Total Days", "Present", "Absent", "Leave", "Late Days",
+      "Gross Hrs", "Net Hrs", "Avg Hrs/Day", "Break Hrs", "Deducted Hrs", "OT Hrs",
+      "Per Day", "Per Hour", "OT Rate",
+      "Total Wage", "OT Salary"
+    ];
+
+    const colWidths = [11, 24, 18, 20, 11, 10, 9, 9, 10, 10, 10, 12, 10, 12, 9, 10, 10, 10, 14, 12];
+    colWidths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+    let row = 1;
+
+    for (const section of sections) {
+      const filtered = this.salaryResults.filter(section.filter);
+      if (!filtered.length) continue;
+
+      // Spacing between sections
+      if (row > 1) row += 1;
+
+      // Section title
+      ws.mergeCells(row, 1, row, headers.length);
+      const titleCell = ws.getCell(row, 1);
+      titleCell.value = section.title;
+      this._styleCell(titleCell, {
+        bold: true, size: 12, color: COLORS.HEADER_TEXT, bg: COLORS.PRIMARY,
+        alignment: { horizontal: 'center', vertical: 'middle' }
+      });
+      ws.getRow(row).height = 26;
+      row++;
+
+      // Info row
+      ws.mergeCells(row, 1, row, headers.length);
+      const infoCell = ws.getCell(row, 1);
+      const monthName = this.periodMonth
+        ? new Date(this.periodYear, this.periodMonth - 1).toLocaleString('default', { month: 'long', year: 'numeric' })
+        : 'Current Month';
+      const att = filtered[0]?.attendanceDetail;
+      const totalDays = att?.totalDaysInMonth || 30;
+      infoCell.value = `${monthName}  |  Total Days: ${totalDays}  |  Employees: ${filtered.length}`;
+      this._styleCell(infoCell, {
+        bold: true, color: COLORS.HEADER_TEXT, bg: COLORS.SECONDARY,
+        alignment: { horizontal: 'left', vertical: 'middle' }
+      });
+      ws.getRow(row).height = 22;
+      row++;
+
+      // Header row
+      const hRow = ws.getRow(row);
+      hRow.height = 30;
+      headers.forEach((h, i) => {
+        const c = hRow.getCell(i + 1);
+        c.value = h;
+        this._styleCell(c, {
+          bold: true, color: COLORS.HEADER_TEXT, bg: COLORS.PRIMARY,
+          alignment: { horizontal: 'center', vertical: 'middle' }, wrapText: true
+        });
+      });
+      row++;
+
+      // Data rows
+      filtered.forEach((result, idx) => {
+        const emp = result.employeeInfo;
+        const att = result.attendanceDetail || {};
+        const ear = result.earnings;
+        const effectiveDays = result.attendance.effectiveDays || 0;
+        const salary = { perDay: emp.perDay || 0, perHour: emp.perHour || 0, overtimeRate: emp.overtimeRate || 0 };
+
+        const grossHrs = att.grossHours ?? 0;
+        const netHrs = att.netHours ?? 0;
+        const breakHrs = att.breakHours ?? 0;
+        const deductedHrs = att.deductedHours ?? 0;
+        const otHrs = att.otHours ?? 0;
+        const avgHrs = att.avgHoursPerDay ?? 0;
+        const presentDays = att.presentDays ?? effectiveDays ?? 0;
+
+        // Calculate wage based on pay type
+        let totalWage = 0;
+        let otSalary = 0;
+
+        if (section.key === 'hourly') {
+          totalWage = parseFloat((salary.perHour * netHrs).toFixed(2));
+          otSalary = parseFloat((salary.overtimeRate * otHrs).toFixed(2));
+        } else if (section.key === 'perday') {
+          totalWage = parseFloat((salary.perDay * effectiveDays).toFixed(2));
+          otSalary = parseFloat((salary.overtimeRate * otHrs).toFixed(2));
+        } else {
+          totalWage = ear.grossSalary || 0;
+          otSalary = ear.overtimeAmount || 0;
+        }
+
+        const rowData = [
+          emp.empCode, emp.name, emp.department, emp.designation,
+          att.totalDaysInMonth ?? 30, presentDays, att.absentDays ?? 0, att.leaveDays ?? 0, att.lateDays ?? 0,
+          grossHrs, netHrs, avgHrs, breakHrs, deductedHrs, otHrs,
+          salary.perDay || 0, salary.perHour || 0, salary.overtimeRate || 0,
+          totalWage, otSalary
+        ];
+
+        const r = ws.getRow(row);
+        r.height = 20;
+        const isEven = idx % 2 === 0;
+
+        rowData.forEach((val, i) => {
+          const c = r.getCell(i + 1);
+          c.value = val;
+          this._styleCell(c, {
+            bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE,
+            alignment: { horizontal: i < 4 ? 'left' : 'center', vertical: 'middle' }
+          });
+          if (i >= 15 && i <= 19) c.numFmt = money;
+        });
+
+        row++;
+      });
+
+      // Totals row
+      const totRow = ws.getRow(row);
+      ws.mergeCells(row, 1, row, 4);
+      const totCell = totRow.getCell(1);
+      totCell.value = `TOTAL (${filtered.length} employees)`;
+      this._styleCell(totCell, { bold: true, bg: COLORS.TOTAL_BG, alignment: { horizontal: 'right', vertical: 'middle' } });
+      ws.getRow(row).height = 22;
+
+      const sumCols = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19, 20];
+      sumCols.forEach(ci => {
+        const c = totRow.getCell(ci);
+        const colLetter = this._columnLetter(ci);
+        const dataStart = row - filtered.length;
+        c.value = { formula: `SUM(${colLetter}${dataStart}:${colLetter}${row - 1})` };
+        this._styleCell(c, { bold: true, bg: COLORS.TOTAL_BG });
+        if (ci >= 16) c.numFmt = money;
+      });
+
+      row++;
+    }
+
+    // No data case
+    if (row === 1) {
+      ws.mergeCells(1, 1, 1, headers.length);
+      ws.getCell(1, 1).value = "No employee data available for the selected period.";
+    }
+  }
+
+  /**
+   * Sheet 3: Detailed Salary Breakdown
    */
   async _createDetailedSheet() {
     const ws = this.workbook.addWorksheet("Detailed Breakdown", {
@@ -325,7 +495,7 @@ export class SalaryExcelGenerator {
   }
 
   /**
-   * Sheet 3: Individual Salary Slips
+   * Sheet 4: Individual Salary Slips
    */
   async _createSalarySlips() {
     const ws = this.workbook.addWorksheet("Salary Slips", {
@@ -502,13 +672,14 @@ export class SalaryExcelGenerator {
       // Page break for next employee
       if (index < this.salaryResults.length - 1) {
         row += 3;
-        ws.addPageBreak(row - 1);
+        if (!ws.pageSetup.rowBreaks) ws.pageSetup.rowBreaks = [];
+        ws.pageSetup.rowBreaks.push(row - 1);
       }
     });
   }
 
   /**
-   * Sheet 4: Payroll Rules Reference
+   * Sheet 5: Payroll Rules Reference
    */
   async _createRulesSheet() {
     const ws = this.workbook.addWorksheet("Payroll Rules", {
