@@ -10,16 +10,20 @@ export function calculateSalary({
     payDate,
     generatedBy
 }) {
-    if (!employee?.salaryStructure?.basic && !employee?.salaryStructure?.perHour) {
-        throw new Error("Employee salary structure (basic or perHour) is required.");
+    if (!employee?.salaryStructure?.basic && !employee?.salaryStructure?.perHour && !employee?.salaryStructure?.perDay) {
+        throw new Error("Employee salary structure (basic, perHour or perDay) is required.");
     }
 
-    const payType = employee.salaryStructure?.perHour > 0 ? "hourly" : "monthly";
+    const payType = employee.salaryStructure?.perHour > 0 ? "hourly"
+        : employee.salaryStructure?.perDay > 0 ? "perday"
+            : "monthly";
     const salaryApproach = employee.salaryStructure?.salaryApproach || "full_minus_lop";
 
     let result;
     if (payType === "hourly") {
         result = calculateHourly({ employee, attendance, payrollRule, payPeriod, payDate, generatedBy });
+    } else if (payType === "perday") {
+        result = calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy });
     } else if (salaryApproach === "pro_rata") {
         result = calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy });
     } else {
@@ -114,7 +118,113 @@ function calculateHourly({ employee, attendance, payrollRule, payPeriod, payDate
         totalDeductions,
         netSalary,
 
-        ratesUsed: { perDayRate: 0, perHourRate },
+        ratesUsed: { perDayRate: 0, perHourRate: perHourRate, perDay: 0, perHour: perHourRate, overtimeRate },
+
+        generatedBy
+    };
+}
+
+function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy }) {
+    const sal = employee.salaryStructure;
+    const perDayRate = sal.perDay ?? 0;
+    const overtimeRate = sal.overtimeRate ?? 0;
+
+    const { presentDays = 0, absentDays = 0, unpaidLeaveDays = 0, lateDays = 0, halfDays = 0,
+            leaveDays = 0, paidLeaveDays = 0, holidays = 0, weeklyOffDays = 0 } = attendance;
+
+    let lateCutDays = 0;
+    let halfDayCutDays = 0;
+    if (salaryRule?.late && salaryRule?.halfDay) {
+        if (salaryRule.late.count > 0) {
+            lateCutDays = Math.floor(lateDays / salaryRule.late.count) * salaryRule.late.deductionDays;
+        }
+        if (salaryRule.halfDay.count > 0) {
+            halfDayCutDays = Math.floor(halfDays / salaryRule.halfDay.count) * salaryRule.halfDay.deductionDays;
+        }
+    }
+    const totalSalaryRuleCutDays = lateCutDays + halfDayCutDays;
+
+    const payableDays = Math.max(0, presentDays - totalSalaryRuleCutDays);
+    const dayWages = roundTo2(perDayRate * payableDays);
+
+    const attendanceOvertimeMinutes = attendance.overtimeMinutes ?? 0;
+    const overtimeHours = roundTo2(attendanceOvertimeMinutes / 60);
+    const overtimeEarned = roundTo2(overtimeRate * overtimeHours);
+
+    const grossSalary = roundTo2(dayWages + overtimeEarned);
+
+    let pf = 0, esi = 0, gratuity = 0;
+    if (payrollRule?.deductions) {
+        const pRule = payrollRule.deductions;
+        pf = pRule.pf?.enabled ? computeDeduction(grossSalary, pRule.pf) : 0;
+        esi = pRule.esi?.enabled ? computeDeduction(grossSalary, pRule.esi) : 0;
+        gratuity = pRule.gratuity?.enabled ? computeDeduction(grossSalary, pRule.gratuity) : 0;
+    }
+
+    const incomeTax = roundTo2(employee.deductions?.incomeTax ?? 0);
+    const professionalTax = roundTo2(employee.deductions?.professionalTax ?? 0);
+    const additionalLines = (employee.deductions?.otherDeduction ?? []).map(d => ({
+        name: d.name,
+        amount: roundTo2(d.amount)
+    }));
+    const additionalTotal = additionalLines.reduce((s, d) => s + d.amount, 0);
+
+    const totalDeductions = roundTo2(pf + esi + gratuity + incomeTax + professionalTax + additionalTotal);
+    const netSalary = roundTo2(grossSalary - totalDeductions);
+
+    const jobInfo = employee.jobInfo ?? {};
+    const bank = employee.bankDetails ?? {};
+
+    return {
+        companyId: employee.companyId,
+        employeeId: employee._id,
+
+        payPeriod,
+        payDate,
+
+        employeeSnapshot: {
+            empCode: employee.empCode,
+            name: employee.user_name,
+            designation: jobInfo.designation,
+            department: jobInfo.department,
+            grade: jobInfo.grade,
+            bankAccount: bank.accountNo,
+            bankName: bank.bankName,
+            ifsc: bank.ifsc,
+            joiningDate: jobInfo.joiningDate
+        },
+
+        attendance: buildAttendanceBlock(attendance, { paidLeaveDays, unpaidLeaveDays }),
+
+        salaryRuleDeductions: {
+            lateCutDays,
+            halfDayCutDays,
+            totalCutDays: totalSalaryRuleCutDays,
+            salaryRuleCutAmount: 0
+        },
+
+        payableDays,
+
+        earnings: {
+            basic: 0, hra: 0, da: 0, bonus: 0,
+            overtime: overtimeEarned,
+            otherAllowances: [],
+            dayWages,
+            totalPayableHours: roundTo2((attendance.totalPayableMinutes ?? 0) / 60)
+        },
+
+        grossSalary,
+
+        statutoryDeductions: { pf, esi, gratuity },
+
+        otherDeductions: { incomeTax, professionalTax, additionalLines },
+
+        lossOfPay: { lopDays: 0, lopAmount: 0 },
+
+        totalDeductions,
+        netSalary,
+
+        ratesUsed: { perDayRate, perHourRate: 0, perDay: perDayRate, perHour: 0, overtimeRate },
 
         generatedBy
     };
@@ -245,7 +355,7 @@ function calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule
         totalDeductions,
         netSalary,
 
-        ratesUsed: { perDayRate, perHourRate: 0 },
+        ratesUsed: { perDayRate, perHourRate: 0, perDay: sal.perDay ?? 0, perHour: 0, overtimeRate: sal.overtimeRate ?? 0 },
 
         generatedBy
     };
@@ -377,7 +487,7 @@ function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrol
         totalDeductions,
         netSalary,
 
-        ratesUsed: { perDayRate, perHourRate: 0 },
+        ratesUsed: { perDayRate, perHourRate: 0, perDay: sal.perDay ?? 0, perHour: 0, overtimeRate: sal.overtimeRate ?? 0 },
 
         generatedBy
     };
@@ -386,7 +496,8 @@ function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrol
 function buildAttendanceBlock(attendance, extras = {}) {
     const {
         presentDays = 0, absentDays = 0, leaveDays = 0, holidays = 0,
-        weeklyOffDays = 0, halfDays = 0, lateDays = 0, totalPayableMinutes = 0
+        weeklyOffDays = 0, halfDays = 0, lateDays = 0,
+        totalPayableMinutes = 0, totalMinutes = 0, overtimeMinutes = 0
     } = attendance;
     const { paidLeaveDays = 0, unpaidLeaveDays = 0 } = extras;
 
@@ -401,7 +512,9 @@ function buildAttendanceBlock(attendance, extras = {}) {
         lateDays,
         halfDays,
         presentDays,
-        totalPayableMinutes
+        totalPayableMinutes,
+        totalMinutes,
+        overtimeMinutes
     };
 }
 

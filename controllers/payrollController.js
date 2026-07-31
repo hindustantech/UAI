@@ -76,6 +76,7 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
     let halfDays = 0;
     let lateDays = 0;
     let totalPayableMinutes = 0;
+    let totalMinutes = 0;
     let overtimeMinutes = 0;
 
     const weeklyOffSet = new Set(
@@ -88,6 +89,7 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
 
         if (rec) {
             totalPayableMinutes += rec.workSummary?.payableMinutes ?? 0;
+            totalMinutes += rec.workSummary?.totalMinutes ?? 0;
             overtimeMinutes += rec.workSummary?.overtimeMinutes ?? 0;
 
             switch (rec.status) {
@@ -131,7 +133,7 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
         }
     }
 
-    return { presentDays, absentDays, leaveDays, paidLeaveDays, unpaidLeaveDays, holidays, weeklyOffDays, halfDays, lateDays, totalPayableMinutes, overtimeMinutes };
+    return { presentDays, absentDays, leaveDays, paidLeaveDays, unpaidLeaveDays, holidays, weeklyOffDays, halfDays, lateDays, totalPayableMinutes, totalMinutes, overtimeMinutes };
 }
 
 
@@ -337,7 +339,7 @@ export const generatePayroll = async (req, res) => {
         if (employee.employmentStatus === "inactive") {
             return res.status(400).json({ success: false, message: "Employee is inactive." });
         }
-        if (!employee.salaryStructure?.basic) {
+        if (!employee.salaryStructure?.basic && !employee.salaryStructure?.perHour && !employee.salaryStructure?.perDay) {
             return res.status(400).json({ success: false, message: "Employee salary structure is not configured." });
         }
 
@@ -370,6 +372,68 @@ export const generatePayroll = async (req, res) => {
 
 
 /* ═══════════════════════════════════════════════════════════════
+   HELPER — generate (create if missing) payroll records for ALL
+   active employees of a company for a given month/year.
+   Existing records are left untouched.
+   Used by: generateBulkPayroll, downloadCompanyExcel
+   Returns: { created: [], skipped: [], failed: [] }
+═══════════════════════════════════════════════════════════════ */
+async function generatePayrollsForCompany({ companyId, month, year, payDate, generatedBy }) {
+    const employees = await Employee.find({ companyId, employmentStatus: "active" }).lean();
+    if (!employees.length) {
+        return { created: [], skipped: [], failed: [], message: "No active employees found." };
+    }
+
+    /* ── Rules are OPTIONAL ── */
+    const [salaryRule, payrollRule] = await Promise.all([
+        SalaryRule.findOne({ companyId }).lean(),
+        PayrollRule.findOne({ companyId, isActive: true }).lean()
+    ]);
+
+    const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
+    const resolvedPayDate = payDate ? new Date(payDate) : endDate;
+
+    const results = { created: [], skipped: [], failed: [] };
+
+    for (const employee of employees) {
+        try {
+            const exists = await Payroll.exists({
+                companyId, employeeId: employee._id,
+                "payPeriod.month": month, "payPeriod.year": year
+            });
+            if (exists) {
+                results.skipped.push({ employeeId: employee._id, empCode: employee.empCode, reason: "Already exists" });
+                continue;
+            }
+            const salaryStructure = employee.salaryStructure || {};
+            if (!salaryStructure.basic && !salaryStructure.perHour && !salaryStructure.perDay) {
+                results.failed.push({ employeeId: employee._id, empCode: employee.empCode, reason: "No salary structure" });
+                continue;
+            }
+
+            const attendance = await getAttendanceSummary(employee._id, month, year, employee);
+            const payrollData = calculateSalary({
+                employee, attendance, salaryRule, payrollRule,
+                payPeriod: { month, year, label: monthLabel, startDate, endDate },
+                payDate: resolvedPayDate,
+                generatedBy
+            });
+
+            const payroll = await Payroll.create(payrollData);
+            results.created.push({ employeeId: employee._id, empCode: employee.empCode, payrollId: payroll._id, netSalary: payroll.netSalary });
+
+        } catch (empErr) {
+            results.failed.push({ employeeId: employee._id, empCode: employee.empCode, reason: empErr.message });
+        }
+    }
+
+    return results;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
    2.  POST /api/payroll/generate-bulk
        Generate & save payroll for ALL active employees
 ═══════════════════════════════════════════════════════════════ */
@@ -387,53 +451,12 @@ export const generateBulkPayroll = async (req, res) => {
             return res.status(400).json({ success: false, message: "month and year are required." });
         }
 
-        const employees = await Employee.find({ companyId, employmentStatus: "active" }).lean();
-        if (!employees.length) {
-            return res.status(404).json({ success: false, message: "No active employees found." });
-        }
+        const results = await generatePayrollsForCompany({
+            companyId, month: Number(month), year: Number(year), payDate, generatedBy: req.user._id
+        });
 
-        /* ── Rules are OPTIONAL ── */
-        const [salaryRule, payrollRule] = await Promise.all([
-            SalaryRule.findOne({ companyId }).lean(),
-            PayrollRule.findOne({ companyId, isActive: true }).lean()
-        ]);
-
-        const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
-        const startDate = new Date(year, month - 1, 1);
-        const endDate = new Date(year, month, 0);
-        const resolvedPayDate = payDate ? new Date(payDate) : endDate;
-
-        const results = { created: [], skipped: [], failed: [] };
-
-        for (const employee of employees) {
-            try {
-                const exists = await Payroll.exists({
-                    companyId, employeeId: employee._id,
-                    "payPeriod.month": month, "payPeriod.year": year
-                });
-                if (exists) {
-                    results.skipped.push({ employeeId: employee._id, empCode: employee.empCode, reason: "Already exists" });
-                    continue;
-                }
-                if (!employee.salaryStructure?.basic) {
-                    results.failed.push({ employeeId: employee._id, empCode: employee.empCode, reason: "No salary structure" });
-                    continue;
-                }
-
-                const attendance = await getAttendanceSummary(employee._id, month, year, employee);
-                const payrollData = calculateSalary({
-                    employee, attendance, salaryRule, payrollRule,
-                    payPeriod: { month, year, label: monthLabel, startDate, endDate },
-                    payDate: resolvedPayDate,
-                    generatedBy: req.user._id
-                });
-
-                const payroll = await Payroll.create(payrollData);
-                results.created.push({ employeeId: employee._id, empCode: employee.empCode, payrollId: payroll._id, netSalary: payroll.netSalary });
-
-            } catch (empErr) {
-                results.failed.push({ employeeId: employee._id, empCode: employee.empCode, reason: empErr.message });
-            }
+        if (!results.created.length && !results.failed.length && !results.skipped.length) {
+            return res.status(404).json({ success: false, message: results.message || "No active employees found." });
         }
 
         return res.status(200).json({
@@ -601,6 +624,24 @@ export const updatePayrollStatus = async (req, res) => {
 
 
 /* ═══════════════════════════════════════════════════════════════
+   HELPER — write payroll records to an Excel file and stream it
+═══════════════════════════════════════════════════════════════ */
+async function sendExcel(records, month, year, res) {
+    const fileName = `payroll_${year}_${String(month).padStart(2, "0")}.xlsx`;
+    const filePath = path.join(TMP_DIR, fileName);
+
+    await generatePayrollExcel(records, filePath);
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+    stream.on("end", () => fs.unlink(filePath, () => { }));
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
    6.  GET /api/payroll/download/excel/:companyId
 ═══════════════════════════════════════════════════════════════ */
 export const downloadCompanyExcel = async (req, res) => {
@@ -623,20 +664,32 @@ export const downloadCompanyExcel = async (req, res) => {
         }).sort({ "employeeSnapshot.name": 1 }).lean();
 
         if (!records.length) {
-            return res.status(404).json({ success: false, message: "No payroll records found for this period." });
+            // Auto-generate salary records for the period first, then export them
+            const generated = await generatePayrollsForCompany({
+                companyId,
+                month: Number(month),
+                year: Number(year),
+                generatedBy: req.user._id
+            });
+
+            if (!generated.created.length && !generated.skipped.length) {
+                return res.status(404).json({ success: false, message: generated.failed[0]?.reason || "No payroll records could be generated for this period." });
+            }
+
+            const recordsAfterGenerate = await Payroll.find({
+                companyId,
+                "payPeriod.month": Number(month),
+                "payPeriod.year": Number(year)
+            }).sort({ "employeeSnapshot.name": 1 }).lean();
+
+            if (!recordsAfterGenerate.length) {
+                return res.status(404).json({ success: false, message: "No payroll records found for this period." });
+            }
+
+            return sendExcel(recordsAfterGenerate, month, year, res);
         }
 
-        const fileName = `payroll_${year}_${String(month).padStart(2, "0")}.xlsx`;
-        const filePath = path.join(TMP_DIR, fileName);
-
-        await generatePayrollExcel(records, filePath);
-
-        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-
-        const stream = fs.createReadStream(filePath);
-        stream.pipe(res);
-        stream.on("end", () => fs.unlink(filePath, () => { }));
+        return sendExcel(records, month, year, res);
 
     } catch (err) {
         console.error("[downloadCompanyExcel]", err);

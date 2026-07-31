@@ -1,10 +1,27 @@
 // services/excelGenerator.js
-// Generates the company-wide payroll register Excel file.
+// Generates the company-wide payroll Excel file with 3 sheets:
+//   1. Monthly Salary  (basic salary calculated for the current month)
+//   2. Per Hour Wages  (gross/net working hours × per-hour rate)
+//   3. Per Day Wages   (per-day rate × payable days)
 // Called by downloadCompanyExcel controller — writes to filePath, returns void.
 
 import ExcelJS from "exceljs";
 
-const STD_DAYS = 30;
+const COLORS = {
+    PRIMARY: "1F3864",
+    SECONDARY: "2E75B6",
+    SUCCESS: "375623",
+    DANGER: "C00000",
+    WARNING: "ED7D31",
+    ALT_ROW: "DEEAF1",
+    DEDUCTION_BG: "FCE4D6",
+    TOTAL_BG: "E2EFDA",
+    HEADER_TEXT: "FFFFFF",
+    WHITE: "FFFFFF",
+    BLACK: "000000"
+};
+
+const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /**
  * @param {Object[]} records  - Payroll documents (lean)
@@ -15,273 +32,379 @@ export async function generatePayrollExcel(records, filePath) {
     wb.creator = "Payroll System";
     wb.created = new Date();
 
-    const ws = wb.addWorksheet("Payroll Register", {
-        views: [{ state: "frozen", ySplit: 4 }]
+    await createMonthlySalarySheet(wb, records);
+    await createPerHourWageSheet(wb, records);
+    await createPerDayWageSheet(wb, records);
+
+    await wb.xlsx.writeFile(filePath);
+}
+
+/**
+ * Helper: Add title + info row + header row; returns the next data row index
+ */
+function writeHeaderBlock(ws, columns, title, infoText) {
+    let row = 1;
+
+    ws.mergeCells(row, 1, row, columns.length);
+    const titleCell = ws.getCell(row, 1);
+    titleCell.value = title;
+    styleCell(titleCell, {
+        bold: true, size: 14, color: COLORS.HEADER_TEXT, bg: COLORS.PRIMARY,
+        alignment: { horizontal: "center", vertical: "middle" }
+    });
+    ws.getRow(row).height = 30;
+    row++;
+
+    ws.mergeCells(row, 1, row, columns.length);
+    const infoCell = ws.getCell(row, 1);
+    infoCell.value = infoText;
+    styleCell(infoCell, {
+        bold: true, color: COLORS.HEADER_TEXT, bg: COLORS.SECONDARY,
+        alignment: { horizontal: "left", vertical: "middle" }
+    });
+    ws.getRow(row).height = 22;
+    row++;
+
+    const headerRow = ws.getRow(row);
+    headerRow.height = 30;
+    columns.forEach((col, i) => {
+        const cell = headerRow.getCell(i + 1);
+        cell.value = col.header;
+        styleCell(cell, {
+            bold: true, color: COLORS.HEADER_TEXT, bg: COLORS.PRIMARY,
+            wrapText: true, alignment: { horizontal: "center", vertical: "middle" }
+        });
+    });
+    row++;
+
+    return row;
+}
+
+/**
+ * Helper: Write data rows; returns next row index
+ */
+function writeDataRows(ws, rows, startRow, moneyCols = []) {
+    let row = startRow;
+
+    rows.forEach((data, idx) => {
+        const r = ws.getRow(row);
+        r.height = 20;
+        const isEven = idx % 2 === 0;
+
+        data.forEach((val, i) => {
+            const c = r.getCell(i + 1);
+            c.value = val;
+            styleCell(c, {
+                bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE,
+                alignment: { horizontal: i < 4 ? "left" : "center", vertical: "middle" }
+            });
+            if (moneyCols.includes(i + 1)) c.numFmt = '₹#,##0.00';
+        });
+
+        row++;
     });
 
-    /* ── Colour palette ── */
-    const DARK_BLUE = "1F3864";
-    const MED_BLUE = "2F5496";
-    const LIGHT_BLUE = "BDD7EE";
-    const WHITE = "FFFFFF";
-    const YELLOW_BG = "FFF9C4";
-    const GREEN_BG = "E8F5E9";
-    const RED_BG = "FFEBEE";
-    const ORANGE_BG = "FFF3E0";   // LOP highlight
+    return row;
+}
 
-    const money = '"₹"#,##0.00';
-    const intFmt = "0";
-    const dayFmt = "0.00";
+/**
+ * Helper: Totals row with SUM formulas over the data range
+ */
+function writeTotalsRow(ws, columns, startRow, endRow, sumCols) {
+    const totRow = ws.getRow(endRow);
+    ws.mergeCells(endRow, 1, endRow, 4);
+    const labelCell = totRow.getCell(1);
+    labelCell.value = "TOTAL";
+    styleCell(labelCell, {
+        bold: true, bg: COLORS.TOTAL_BG,
+        alignment: { horizontal: "right", vertical: "middle" }
+    });
+    ws.getRow(endRow).height = 22;
 
-    /* ── Helper: apply style to a cell ── */
-    function style(cell, { bg, fg = WHITE, bold = false, align = "center", numFmt } = {}) {
-        if (bg) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg } };
-        cell.font = { name: "Arial", bold, color: { argb: "FF" + (fg === WHITE ? WHITE : fg) }, size: 9 };
-        cell.alignment = { horizontal: align, vertical: "middle", wrapText: true };
-        cell.border = {
-            top: { style: "thin", color: { argb: "FFAAAAAA" } },
-            left: { style: "thin", color: { argb: "FFAAAAAA" } },
-            bottom: { style: "thin", color: { argb: "FFAAAAAA" } },
-            right: { style: "thin", color: { argb: "FFAAAAAA" } }
-        };
-        if (numFmt) cell.numFmt = numFmt;
-    }
+    sumCols.forEach(ci => {
+        const c = totRow.getCell(ci);
+        const colLetter = columnLetter(ci);
+        c.value = { formula: `SUM(${colLetter}${startRow}:${colLetter}${endRow - 1})` };
+        styleCell(c, { bold: true, bg: COLORS.TOTAL_BG });
+        if (ci >= 5) c.numFmt = '₹#,##0.00';
+    });
 
-    // Total columns = 33  (A through AG)
-    const LAST_COL = "AG";
+    return endRow + 1;
+}
 
-    /* ── Row 1: Company name ── */
-    ws.mergeCells(`A1:${LAST_COL}1`);
-    const companyCell = ws.getCell("A1");
-    const companyName = records[0]?.employeeSnapshot?.company ?? "Company Payroll Register";
+/**
+ * Sheet 1: Monthly Salary (basic salary per current month)
+ */
+async function createMonthlySalarySheet(wb, records) {
+    const ws = wb.addWorksheet("Monthly Salary", {
+        properties: { tabColor: { argb: COLORS.PRIMARY } },
+        views: [{ state: "frozen", ySplit: 3, xSplit: 2 }]
+    });
+
+    const monthly = records.filter(r => (r.payType ?? "monthly") === "monthly");
+
+    const columns = [
+        { header: "Emp Code", key: "empCode", width: 12 },
+        { header: "Emp Name", key: "name", width: 25 },
+        { header: "Department", key: "department", width: 18 },
+        { header: "Designation", key: "designation", width: 20 },
+        { header: "Present", key: "present", width: 10 },
+        { header: "Late Days", key: "lateDays", width: 10 },
+        { header: "Half Days", key: "halfDays", width: 10 },
+        { header: "Payable Days", key: "payableDays", width: 12 },
+        { header: "Basic", key: "basic", width: 14 },
+        { header: "HRA", key: "hra", width: 14 },
+        { header: "DA", key: "da", width: 14 },
+        { header: "Bonus", key: "bonus", width: 14 },
+        { header: "Other Allow.", key: "otherAllowance", width: 14 },
+        { header: "Gross Salary", key: "gross", width: 16 },
+        { header: "PF", key: "pf", width: 14 },
+        { header: "ESI", key: "esi", width: 14 },
+        { header: "Income Tax", key: "incomeTax", width: 14 },
+        { header: "Prof. Tax", key: "professionalTax", width: 14 },
+        { header: "Other Ded.", key: "otherDeductions", width: 14 },
+        { header: "Total Ded.", key: "totalDeductions", width: 16 },
+        { header: "Net Salary", key: "netSalary", width: 16 }
+    ];
+
+    columns.forEach((col, i) => { ws.getColumn(i + 1).width = col.width; });
+
     const period = records[0]?.payPeriod?.label ?? "";
-    companyCell.value = `${companyName}  —  Payroll Register  |  ${period}  |  Standard Month: ${STD_DAYS} Days`;
-    style(companyCell, { bg: DARK_BLUE, bold: true, fg: WHITE });
-    ws.getRow(1).height = 26;
+    let row = writeHeaderBlock(ws, columns, "MONTHLY SALARY REGISTER", `${period} | Employees: ${monthly.length}`);
 
-    /* ── Row 2: Group headers ── */
-    const groups = [
-        ["A2:D2", "Employee Info", DARK_BLUE],
-        ["E2:E2", "Pay Type", MED_BLUE],
-        ["F2:G2", "Pay Period", MED_BLUE],
-        ["H2:N2", "Attendance", "2E4057"],
-        ["O2:O2", "Payable Days", "37474F"],
-        ["P2:P2", "Payable Hours", "37474F"],
-        ["Q2:U2", "Earnings", "1B5E20"],
-        ["V2:V2", "Gross", "004D40"],
-        ["W2:AA2", "Deductions", "B71C1C"],
-        ["AB2:AB2", "LOP", "E65100"],
-        ["AC2:AC2", "Total Ded.", "7B1FA2"],
-        ["AD2:AD2", "Net Salary", "1A237E"],
-        ["AE2:AG2", "Rule Cuts", "4A148C"],
-    ];
-    for (const [range, label, bg] of groups) {
-        ws.mergeCells(range);
-        const c = ws.getCell(range.split(":")[0]);
-        c.value = label;
-        style(c, { bg, bold: true, fg: WHITE });
+    if (!monthly.length) {
+        ws.mergeCells(row, 1, row, columns.length);
+        ws.getCell(row, 1).value = "No monthly salary employees found for the selected period.";
+        return;
     }
-    ws.getRow(2).height = 20;
 
-    /* ── Row 3: Column headers ── */
-    const headers = [
-        // A–D: Employee Info
-        "Emp Code", "Emp Name", "Department", "Designation",
-        // E: Pay Type
-        "Pay Type",
-        // F–G: Pay Period
-        "Pay Period", "Pay Date",
-        // H–N: Attendance
-        "Std Days", "Present", "Absent", "Paid Leave", "Unpaid Leave", "Half Days", "Late Days",
-        // O: Payable Days
-        "Payable Days",
-        // P: Payable Hours
-        "Payable Hrs",
-        // Q–U: Earnings
-        "Basic", "HRA", "DA", "Bonus", "Other Allow.",
-        // V: Gross
-        "Gross Salary",
-        // W–AA: Deductions
-        "PF (12%)", "ESI (0.75%)", "Gratuity (4.81%)", "Income Tax", "Prof. Tax",
-        // AB: LOP
-        "LOP Amount",
-        // AC: Total Ded.
-        "Total Ded.",
-        // AD: Net
-        "Net Salary",
-        // AE–AG: Rule Cuts
-        "Late Cut (days)", "Half-Day Cut (days)", "LOP Days"
-    ];
-    const hRow = ws.getRow(3);
-    hRow.height = 30;
-    headers.forEach((h, i) => {
-        const c = hRow.getCell(i + 1);
-        c.value = h;
-        style(c, { bg: LIGHT_BLUE, fg: DARK_BLUE, bold: true, align: "center" });
-    });
-
-    /* ── Column widths (33 columns) ── */
-    const widths = [
-        10, 22, 16, 18,          // A–D  Employee Info
-        10,                      // E    Pay Type
-        13, 12,                  // F–G  Pay Period
-        9, 9, 9, 10, 10, 10, 10, // H–N  Attendance
-        13,                      // O    Payable Days
-        12,                      // P    Payable Hours
-        12, 12, 12, 12, 13,      // Q–U  Earnings
-        14,                      // V    Gross
-        12, 14, 16, 12, 10,      // W–AA Deductions
-        14,                      // AB   LOP Amount
-        14,                      // AC   Total Ded.
-        16,                      // AD   Net Salary
-        17, 19, 10               // AE–AG Rule Cuts + LOP Days
-    ];
-    widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-
-    /* ── Data rows ── */
-    records.forEach((p, idx) => {
+    const rows = monthly.map(p => {
         const att = p.attendance ?? {};
         const ear = p.earnings ?? {};
         const std = p.statutoryDeductions ?? {};
         const oth = p.otherDeductions ?? {};
-        const rul = p.salaryRuleDeductions ?? {};
-        const lop = p.lossOfPay ?? {};
-        const bg = idx % 2 === 0 ? "F5F5F5" : WHITE;
+        const emp = p.employeeSnapshot ?? {};
 
-        const rowNum = idx + 4;
-        const row = ws.getRow(rowNum);
-        row.height = 18;
+        return [
+            emp.empCode, emp.name, emp.department, emp.designation,
+            att.presentDays ?? 0,
+            att.lateDays ?? 0,
+            att.halfDays ?? 0,
+            p.payableDays ?? 0,
+            ear.basic ?? 0, ear.hra ?? 0, ear.da ?? 0, ear.bonus ?? 0,
+            (ear.otherAllowances ?? []).reduce((s, a) => s + (a.amount ?? 0), 0),
+            p.grossSalary ?? 0,
+            std.pf ?? 0, std.esi ?? 0,
+            oth.incomeTax ?? 0, oth.professionalTax ?? 0,
+            (oth.additionalLines ?? []).reduce((s, d) => s + (d.amount ?? 0), 0),
+            p.totalDeductions ?? 0,
+            p.netSalary ?? 0
+        ];
+    });
 
-        const vals = [
-            // A–D
-            p.employeeSnapshot?.empCode,
-            p.employeeSnapshot?.name,
-            p.employeeSnapshot?.department,
-            p.employeeSnapshot?.designation,
-            // E  Pay Type
-            p.payType ?? "monthly",
-            // F–G
-            p.payPeriod?.label,
-            p.payDate ? new Date(p.payDate) : null,
-            // H–N  Attendance
-            att.standardDays ?? STD_DAYS,
+    const dataStart = row;
+    row = writeDataRows(ws, rows, row, [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+}
+
+/**
+ * Sheet 2: Per Hour Wages (gross/net working hours × per-hour rate)
+ */
+async function createPerHourWageSheet(wb, records) {
+    const ws = wb.addWorksheet("Per Hour Wages", {
+        properties: { tabColor: { argb: "E8611A" } },
+        views: [{ state: "frozen", ySplit: 3, xSplit: 2 }]
+    });
+
+    const hourly = records.filter(r => (r.payType ?? "monthly") === "hourly");
+
+    const columns = [
+        { header: "Emp Code", key: "empCode", width: 12 },
+        { header: "Emp Name", key: "name", width: 25 },
+        { header: "Department", key: "department", width: 18 },
+        { header: "Designation", key: "designation", width: 20 },
+        { header: "Present Days", key: "present", width: 12 },
+        { header: "Gross Hrs", key: "grossHours", width: 12 },
+        { header: "Net Hrs", key: "netHours", width: 12 },
+        { header: "Break Hrs", key: "breakHours", width: 11 },
+        { header: "OT Hrs", key: "otHours", width: 10 },
+        { header: "Per Hour Rate", key: "perHour", width: 14 },
+        { header: "OT Rate", key: "overtimeRate", width: 12 },
+        { header: "Hourly Wages", key: "hourlyWages", width: 14 },
+        { header: "OT Salary", key: "otSalary", width: 14 },
+        { header: "Total Salary", key: "totalSalary", width: 14 }
+    ];
+
+    columns.forEach((col, i) => { ws.getColumn(i + 1).width = col.width; });
+
+    const period = records[0]?.payPeriod?.label ?? "";
+    let row = writeHeaderBlock(ws, columns, "PER HOUR WAGES SHEET", `${period} | Employees: ${hourly.length}`);
+
+    if (!hourly.length) {
+        ws.mergeCells(row, 1, row, columns.length);
+        ws.getCell(row, 1).value = "No per-hour wage employees found for the selected period.";
+        return;
+    }
+
+    const rows = hourly.map(p => {
+        const att = p.attendance ?? {};
+        const emp = p.employeeSnapshot ?? {};
+        const rates = p.ratesUsed ?? {};
+
+        const perHour = rates.perHour ?? rates.perHourRate ?? 0;
+        const overtimeRate = rates.overtimeRate ?? 0;
+
+        const grossMinutes = att.totalMinutes ?? att.totalPayableMinutes ?? 0;
+        const payableMinutes = att.totalPayableMinutes ?? 0;
+        const overtimeMinutes = att.overtimeMinutes ?? 0;
+
+        const grossHours = round2(grossMinutes / 60);
+        const netHours = round2(payableMinutes / 60);
+        const breakHours = round2(Math.max(0, grossHours - netHours));
+        const otHours = round2(overtimeMinutes / 60);
+
+        const hourlyWages = round2(perHour * netHours);
+        const otSalary = round2(overtimeRate * otHours);
+
+        return [
+            emp.empCode, emp.name, emp.department, emp.designation,
+            att.presentDays ?? 0,
+            grossHours, netHours, breakHours, otHours,
+            perHour, overtimeRate,
+            hourlyWages, otSalary,
+            round2(hourlyWages + otSalary)
+        ];
+    });
+
+    const dataStart = row;
+    row = writeDataRows(ws, rows, row, [10, 11, 12, 13, 14]);
+    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 12, 13, 14]);
+}
+
+/**
+ * Sheet 3: Per Day Wages (per-day rate × payable days)
+ */
+async function createPerDayWageSheet(wb, records) {
+    const ws = wb.addWorksheet("Per Day Wages", {
+        properties: { tabColor: { argb: COLORS.SUCCESS } },
+        views: [{ state: "frozen", ySplit: 3, xSplit: 2 }]
+    });
+
+    const perDay = records.filter(r => (r.payType ?? "monthly") === "perday");
+
+    const columns = [
+        { header: "Emp Code", key: "empCode", width: 12 },
+        { header: "Emp Name", key: "name", width: 25 },
+        { header: "Department", key: "department", width: 18 },
+        { header: "Designation", key: "designation", width: 20 },
+        { header: "Total Days", key: "totalDays", width: 11 },
+        { header: "Present", key: "present", width: 10 },
+        { header: "Absent", key: "absent", width: 9 },
+        { header: "Leave", key: "leave", width: 9 },
+        { header: "Late Days", key: "lateDays", width: 10 },
+        { header: "Payable Days", key: "payableDays", width: 12 },
+        { header: "Per Day Rate", key: "perDay", width: 14 },
+        { header: "OT Rate", key: "overtimeRate", width: 12 },
+        { header: "Day Wages", key: "dayWages", width: 14 },
+        { header: "OT Salary", key: "otSalary", width: 14 },
+        { header: "Total Salary", key: "totalSalary", width: 14 }
+    ];
+
+    columns.forEach((col, i) => { ws.getColumn(i + 1).width = col.width; });
+
+    const period = records[0]?.payPeriod?.label ?? "";
+    let row = writeHeaderBlock(ws, columns, "PER DAY WAGES SHEET", `${period} | Employees: ${perDay.length}`);
+
+    if (!perDay.length) {
+        ws.mergeCells(row, 1, row, columns.length);
+        ws.getCell(row, 1).value = "No per-day wage employees found for the selected period.";
+        return;
+    }
+
+    const rows = perDay.map(p => {
+        const att = p.attendance ?? {};
+        const emp = p.employeeSnapshot ?? {};
+        const rates = p.ratesUsed ?? {};
+
+        const perDayRate = rates.perDay ?? rates.perDayRate ?? 0;
+        const overtimeRate = rates.overtimeRate ?? 0;
+        const payableDays = p.payableDays ?? 0;
+        const otHours = round2((att.overtimeMinutes ?? 0) / 60);
+
+        const dayWages = round2(perDayRate * payableDays);
+        const otSalary = round2(overtimeRate * otHours);
+
+        return [
+            emp.empCode, emp.name, emp.department, emp.designation,
+            att.standardDays ?? 30,
             att.presentDays ?? 0,
             att.absentDays ?? 0,
-            att.paidLeaveDays ?? 0,
-            att.unpaidLeaveDays ?? 0,
-            att.halfDays ?? 0,
+            att.leaveDays ?? 0,
             att.lateDays ?? 0,
-            // O  Payable Days
-            p.payableDays ?? 0,
-            // P  Payable Hours
-            ear.totalPayableHours ?? 0,
-            // Q–U  Earnings
-            ear.basic ?? 0, ear.hra ?? 0, ear.da ?? 0, ear.bonus ?? 0,
-            (ear.otherAllowances ?? []).reduce((s, a) => s + a.amount, 0),
-            // V  Gross
-            p.grossSalary ?? 0,
-            // W–AA  Deductions
-            std.pf ?? 0, std.esi ?? 0, std.gratuity ?? 0,
-            oth.incomeTax ?? 0, oth.professionalTax ?? 0,
-            // AB  LOP Amount
-            lop.lopAmount ?? 0,
-            // AC
-            p.totalDeductions ?? 0,
-            // AD
-            p.netSalary ?? 0,
-            // AE–AG  Rule Cuts + LOP Days
-            rul.lateCutDays ?? 0,
-            rul.halfDayCutDays ?? 0,
-            lop.lopDays ?? 0
+            payableDays,
+            perDayRate, overtimeRate,
+            dayWages, otSalary,
+            round2(dayWages + otSalary)
         ];
-
-        // col numbers (1-indexed) that are money / date / day
-        const moneyCols = new Set([17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
-        const dateCols = new Set([7]);
-        const dayCols = new Set([15, 16, 31, 32, 33]);
-
-        vals.forEach((v, i) => {
-            const colNum = i + 1;
-            const c = row.getCell(colNum);
-            c.value = v;
-
-            let cellBg = bg;
-            if (colNum === 22) cellBg = YELLOW_BG;                    // Gross (V)
-            if (colNum === 30) cellBg = GREEN_BG;                     // Net Salary (AD)
-            if (colNum >= 23 && colNum <= 27) cellBg = RED_BG;        // Deductions W–AA
-            if (colNum === 28) cellBg = ORANGE_BG;                    // LOP Amount (AB)
-
-            style(c, {
-                bg: cellBg,
-                fg: "333333",
-                bold: colNum === 19 || colNum === 27,
-                align: colNum <= 4 ? "left" : "center",
-                numFmt: moneyCols.has(colNum) ? money
-                    : dateCols.has(colNum) ? "dd-mmm-yyyy"
-                        : dayCols.has(colNum) ? dayFmt
-                            : intFmt
-            });
-        });
     });
 
-    /* ── Totals row ── */
-    const totalRow = records.length + 4;
-    ws.mergeCells(`A${totalRow}:P${totalRow}`);
-    const tlCell = ws.getCell(`A${totalRow}`);
-    tlCell.value = "TOTALS";
-    style(tlCell, { bg: DARK_BLUE, bold: true, fg: WHITE, align: "center" });
+    const dataStart = row;
+    row = writeDataRows(ws, rows, row, [11, 12, 13, 14, 15]);
+    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 13, 14, 15]);
+}
 
-    // Sum all money columns: Q(17)→U(21), V(22), W(23)→AA(27), AB(28), AC(29), AD(30)
-    const totalCols = [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30];
-    totalCols.forEach(ci => {
-        const col = ws.getColumn(ci).letter;
-        const cell = ws.getCell(`${col}${totalRow}`);
-        cell.value = { formula: `SUM(${col}4:${col}${totalRow - 1})` };
-        style(cell, { bg: DARK_BLUE, bold: true, fg: WHITE, numFmt: money });
-    });
-    ws.getRow(totalRow).height = 22;
+/**
+ * Helper: Style a cell
+ */
+function styleCell(cell, options = {}) {
+    const {
+        bold = false,
+        size = 10,
+        color = COLORS.BLACK,
+        bg = null,
+        wrapText = false,
+        italic = false,
+        alignment = { horizontal: "center", vertical: "middle" }
+    } = options;
 
-    /* ── Summary sheet ── */
-    const ws2 = wb.addWorksheet("Summary");
-    const totalGross = records.reduce((s, p) => s + (p.grossSalary ?? 0), 0);
-    const totalNet = records.reduce((s, p) => s + (p.netSalary ?? 0), 0);
-    const totalDed = records.reduce((s, p) => s + (p.totalDeductions ?? 0), 0);
-    const totalLOP = records.reduce((s, p) => s + (p.lossOfPay?.lopAmount ?? 0), 0);
-    const totalLOPDays = records.reduce((s, p) => s + (p.lossOfPay?.lopDays ?? 0), 0);
+    cell.font = {
+        name: "Calibri",
+        bold,
+        size,
+        color: { argb: "FF" + color },
+        italic
+    };
 
-    const totalHourly = records.filter(r => r.payType === "hourly").length;
-    const totalMonthly = records.filter(r => r.payType !== "hourly").length;
+    if (bg) {
+        cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FF" + bg }
+        };
+    }
 
-    const summaryRows = [
-        ["Metric", "Value"],
-        ["Pay Period", records[0]?.payPeriod?.label ?? ""],
-        ["Total Employees", records.length],
-        ["Monthly Employees", totalMonthly],
-        ["Hourly Employees", totalHourly],
-        ["Total Gross Salary", totalGross],
-        ["Total Deductions", totalDed],
-        ["Total Loss of Pay (LOP)", totalLOP],
-        ["Total LOP Days", totalLOPDays],
-        ["Total Net Payable", totalNet],
-        ["Standard Days", STD_DAYS],
-        ["PF Rate", "12%"],
-        ["ESI Rate", "0.75%"],
-        ["Gratuity Rate", "4.81%"],
-    ];
-    summaryRows.forEach(([k, v], ri) => {
-        const r = ws2.getRow(ri + 1);
-        const c1 = r.getCell(1); c1.value = k;
-        const c2 = r.getCell(2); c2.value = v;
-        const isHdr = ri === 0;
-        style(c1, { bg: isHdr ? DARK_BLUE : "EBF2FA", fg: isHdr ? WHITE : "1F3864", bold: true });
-        style(c2, {
-            bg: isHdr ? DARK_BLUE : WHITE,
-            fg: isHdr ? WHITE : "333333",
-            numFmt: typeof v === "number" && ri > 2 ? money : undefined
-        });
-    });
-    ws2.getColumn(1).width = 28;
-    ws2.getColumn(2).width = 30;
+    cell.alignment = {
+        ...alignment,
+        wrapText
+    };
 
-    await wb.xlsx.writeFile(filePath);
+    cell.border = {
+        top: { style: "thin", color: { argb: "FFD0D0D0" } },
+        bottom: { style: "thin", color: { argb: "FFD0D0D0" } },
+        left: { style: "thin", color: { argb: "FFD0D0D0" } },
+        right: { style: "thin", color: { argb: "FFD0D0D0" } }
+    };
+}
+
+/**
+ * Helper: Convert column number to letter
+ */
+function columnLetter(col) {
+    let letter = "";
+    while (col > 0) {
+        const temp = (col - 1) % 26;
+        letter = String.fromCharCode(65 + temp) + letter;
+        col = (col - temp - 1) / 26;
+    }
+    return letter;
 }

@@ -62,7 +62,7 @@ const PayrollSchema = new mongoose.Schema(
         /* ── Pay Type ── */
         payType: {
             type: String,
-            enum: ["monthly", "hourly"],
+            enum: ["monthly", "hourly", "perday"],
             default: "monthly"
         },
 
@@ -79,6 +79,8 @@ const PayrollSchema = new mongoose.Schema(
             halfDays: { type: Number, default: 0 },
             presentDays: { type: Number, default: 0 },    // payable working days
             totalPayableMinutes: { type: Number, default: 0 },  // for hourly employees
+            totalMinutes: { type: Number, default: 0 },   // gross minutes (incl. breaks)
+            overtimeMinutes: { type: Number, default: 0 } // overtime minutes
         },
 
         /* ── Salary Rule Deductions (from SalaryRule model) ── */
@@ -134,7 +136,10 @@ const PayrollSchema = new mongoose.Schema(
         /* ── Per-unit rates used (for transparency) ── */
         ratesUsed: {
             perDayRate: { type: Number, default: 0 },
-            perHourRate: { type: Number, default: 0 }
+            perHourRate: { type: Number, default: 0 },
+            perDay: { type: Number, default: 0 },       // configured perDay from employee
+            perHour: { type: Number, default: 0 },      // configured perHour from employee
+            overtimeRate: { type: Number, default: 0 }  // configured overtimeRate from employee
         },
 
         /* ── Status ── */
