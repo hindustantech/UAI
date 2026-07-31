@@ -6,6 +6,7 @@ import Attendance from "../models/Attandance/Attendance.js";
 import Payroll from "../models/Attandance/Payroll.js";
 import PayrollRule from "../models/PayrollRuleSchema.js";
 import SalaryRule from "../models/salaryRules.js";
+import logger from "../utils/logger.js";
 // Constants
 const DEFAULT_WORKING_DAYS = 30;
 const ESI_GROSS_LIMIT = 21000;
@@ -526,6 +527,7 @@ export const calculateByDepartment = async (req, res) => {
  * GET /api/salary/export?month=6&year=2026&companyId=xxx
  */
 export const exportExcel = async (req, res) => {
+  logger.info(' salary controllerExport Excel request received with query:', req.query);
   try {
     const {
       month = new Date().getMonth() + 1,

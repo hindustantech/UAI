@@ -15,6 +15,7 @@ import { calculateSalary } from "../services/salaryCalculator.js";
 import { generatePayrollExcel } from "../services/excelGenerator.js";
 import { generateSalarySlipPDF } from "../services/pdfGenerator.js";
 import { Subscription } from "../models/Attandance/subscration/Subscription.js";
+import logger from "../utils/logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TMP_DIR = path.join(__dirname, "../tmp");
@@ -603,6 +604,7 @@ export const updatePayrollStatus = async (req, res) => {
    6.  GET /api/payroll/download/excel/:companyId
 ═══════════════════════════════════════════════════════════════ */
 export const downloadCompanyExcel = async (req, res) => {
+    logger.info(" Payroll controller [downloadCompanyExcel] Request received with params:", req.params, "and query:", req.query);
     try {
         let companyId;
         if (req.user.type === 'partner') {
