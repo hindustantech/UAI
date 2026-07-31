@@ -1,8 +1,9 @@
 // controllers/SalaryController.js
-import { calculateEmployeeSalary, calculateBatchSalaries } from "../services/SalaryEngine.js";
+import { calculateEmployeeSalary, calculateBatchSalaries, buildPayrollDocument } from "../services/SalaryEngine.js";
 import { SalaryExcelGenerator } from "../services/CsvbuilderSalary.js";
 import Employee from "../models/Attandance/Employee.js";
 import Attendance from "../models/Attandance/Attendance.js";
+import Payroll from "../models/Attandance/Payroll.js";
 import PayrollRule from "../models/PayrollRuleSchema.js";
 import SalaryRule from "../models/salaryRules.js";
 // Constants
@@ -560,6 +561,39 @@ export const exportExcel = async (req, res) => {
 
     // Calculate salaries
     const results = calculateBatchSalaries(employees, attendanceMap, payrollRule, salaryRule);
+
+    // Generate (persist) salaries first so payroll reports show the same data.
+    // Existing records are refreshed but their status (draft/approved/paid) is preserved.
+    await Promise.all(employees.map(async (employee, idx) => {
+      const salaryStructure = employee.salaryStructure || {};
+      const hasPayableStructure = salaryStructure.basic || salaryStructure.perHour || salaryStructure.perDay;
+      if (!hasPayableStructure) return;
+
+      const doc = buildPayrollDocument(results[idx], employee, {
+        companyId: targetCompanyId,
+        month,
+        year,
+        salaryRule,
+        generatedBy: req.user?._id
+      });
+
+      await Payroll.updateOne(
+        {
+          companyId: targetCompanyId,
+          employeeId: employee._id,
+          "payPeriod.month": Number(month),
+          "payPeriod.year": Number(year)
+        },
+        {
+          $set: doc,
+          $setOnInsert: {
+            status: "draft",
+            editLogs: []
+          }
+        },
+        { upsert: true }
+      );
+    }));
 
     // Generate Excel
     const generator = new SalaryExcelGenerator(results);

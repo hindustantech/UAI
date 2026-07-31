@@ -435,3 +435,86 @@ export const calculateBatchSalaries = (employees, attendanceMap, payrollRule, sa
     return calculateEmployeeSalary(employee, attendance, payrollRule, salaryRule);
   });
 };
+
+/**
+ * Convert a calculated salary result into a Payroll collection document
+ * so generated salaries can be persisted and shown in payroll reports.
+ */
+export const buildPayrollDocument = (result, employee, { companyId, month, year, salaryRule, generatedBy }) => {
+  const empInfo = result.employeeInfo;
+  const att = result.attendanceDetail || {};
+  const ear = result.earnings;
+  const ded = result.deductions;
+  const salaryStructure = employee.salaryStructure || {};
+
+  const lateCutDays = salaryRule?.late?.count
+    ? Math.floor((att.lateDays ?? 0) / salaryRule.late.count) * (salaryRule.late.deductionDays || 0)
+    : 0;
+  const halfDayCutDays = salaryRule?.halfDay?.count
+    ? Math.floor((att.halfDays ?? 0) / salaryRule.halfDay.count) * (salaryRule.halfDay.deductionDays || 0)
+    : 0;
+
+  const label = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0);
+
+  return {
+    companyId,
+    employeeId: employee._id,
+    payPeriod: { month: Number(month), year: Number(year), label, startDate, endDate },
+    payDate: endDate,
+    employeeSnapshot: {
+      empCode: empInfo.empCode,
+      name: empInfo.name,
+      designation: empInfo.designation,
+      department: empInfo.department,
+      grade: employee.jobInfo?.grade,
+      bankAccount: employee.bankDetails?.accountNo,
+      bankName: employee.bankDetails?.bankName,
+      ifsc: employee.bankDetails?.ifsc,
+      joiningDate: employee.jobInfo?.joiningDate
+    },
+    payType: empInfo.perHour > 0 ? "hourly" : "monthly",
+    attendance: {
+      standardDays: att.totalDaysInMonth ?? DEFAULT_WORKING_DAYS,
+      weeklyOffDays: att.weeklyOffDays ?? 0,
+      holidays: att.holidays ?? 0,
+      leaveDays: att.leaveDays ?? 0,
+      paidLeaveDays: att.leaveDays ?? 0,
+      unpaidLeaveDays: 0,
+      absentDays: att.absentDays ?? 0,
+      lateDays: att.lateDays ?? 0,
+      halfDays: att.halfDays ?? 0,
+      presentDays: att.presentDays ?? 0,
+      totalPayableMinutes: att.totalPayableMinutes ?? 0
+    },
+    salaryRuleDeductions: {
+      lateCutDays,
+      halfDayCutDays,
+      totalCutDays: result.attendance.deductionDays ?? 0,
+      salaryRuleCutAmount: 0
+    },
+    payableDays: result.attendance.effectiveDays ?? 0,
+    earnings: {
+      basic: ear.basic,
+      hra: ear.hra,
+      da: ear.da,
+      bonus: ear.bonus,
+      overtime: ear.overtimeAmount ?? 0,
+      otherAllowances: (ear.otherAllowance || []).map(a => ({ name: a.name, amount: a.amount })),
+      totalPayableHours: att.netHours ?? 0
+    },
+    grossSalary: ear.grossSalary,
+    statutoryDeductions: { pf: ded.pf, esi: ded.esi, gratuity: ded.gratuity },
+    otherDeductions: {
+      incomeTax: ded.incomeTax,
+      professionalTax: ded.professionalTax,
+      additionalLines: (ded.otherDeductions || []).map(d => ({ name: d.name, amount: d.amount }))
+    },
+    totalDeductions: ded.totalDeductions,
+    netSalary: result.netSalary,
+    lossOfPay: { lopDays: 0, lopAmount: 0 },
+    ratesUsed: { perDayRate: ear.perDayRate ?? empInfo.perDay ?? 0, perHourRate: empInfo.perHour ?? 0 },
+    salaryApproach: salaryStructure.salaryApproach || "full_minus_lop"
+  };
+};
