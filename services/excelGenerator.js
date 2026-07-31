@@ -110,7 +110,7 @@ function writeDataRows(ws, rows, startRow, moneyCols = []) {
 /**
  * Helper: Totals row with SUM formulas over the data range
  */
-function writeTotalsRow(ws, columns, startRow, endRow, sumCols) {
+function writeTotalsRow(ws, columns, startRow, endRow, sumCols, moneyCols = null) {
     const totRow = ws.getRow(endRow);
     ws.mergeCells(endRow, 1, endRow, 4);
     const labelCell = totRow.getCell(1);
@@ -126,7 +126,7 @@ function writeTotalsRow(ws, columns, startRow, endRow, sumCols) {
         const colLetter = columnLetter(ci);
         c.value = { formula: `SUM(${colLetter}${startRow}:${colLetter}${endRow - 1})` };
         styleCell(c, { bold: true, bg: COLORS.TOTAL_BG });
-        if (ci >= 5) c.numFmt = '₹#,##0.00';
+        if (moneyCols === null ? ci >= 5 : moneyCols.includes(ci)) c.numFmt = '₹#,##0.00';
     });
 
     return endRow + 1;
@@ -149,6 +149,9 @@ async function createMonthlySalarySheet(wb, records) {
         { header: "Department", key: "department", width: 18 },
         { header: "Designation", key: "designation", width: 20 },
         { header: "Present", key: "present", width: 10 },
+        { header: "Absent", key: "absent", width: 10 },
+        { header: "Paid Leave", key: "paidLeave", width: 11 },
+        { header: "Unpaid Leave", key: "unpaidLeave", width: 13 },
         { header: "Late Days", key: "lateDays", width: 10 },
         { header: "Half Days", key: "halfDays", width: 10 },
         { header: "Payable Days", key: "payableDays", width: 12 },
@@ -163,6 +166,8 @@ async function createMonthlySalarySheet(wb, records) {
         { header: "Income Tax", key: "incomeTax", width: 14 },
         { header: "Prof. Tax", key: "professionalTax", width: 14 },
         { header: "Other Ded.", key: "otherDeductions", width: 14 },
+        { header: "LOP Days", key: "lopDays", width: 10 },
+        { header: "LOP Amount", key: "lopAmount", width: 14 },
         { header: "Total Ded.", key: "totalDeductions", width: 16 },
         { header: "Net Salary", key: "netSalary", width: 16 }
     ];
@@ -183,11 +188,15 @@ async function createMonthlySalarySheet(wb, records) {
         const ear = p.earnings ?? {};
         const std = p.statutoryDeductions ?? {};
         const oth = p.otherDeductions ?? {};
+        const lop = p.lossOfPay ?? {};
         const emp = p.employeeSnapshot ?? {};
 
         return [
             emp.empCode, emp.name, emp.department, emp.designation,
             att.presentDays ?? 0,
+            att.absentDays ?? 0,
+            att.paidLeaveDays ?? 0,
+            att.unpaidLeaveDays ?? 0,
             att.lateDays ?? 0,
             att.halfDays ?? 0,
             p.payableDays ?? 0,
@@ -197,14 +206,19 @@ async function createMonthlySalarySheet(wb, records) {
             std.pf ?? 0, std.esi ?? 0,
             oth.incomeTax ?? 0, oth.professionalTax ?? 0,
             (oth.additionalLines ?? []).reduce((s, d) => s + (d.amount ?? 0), 0),
+            lop.lopDays ?? 0,
+            lop.lopAmount ?? 0,
             p.totalDeductions ?? 0,
             p.netSalary ?? 0
         ];
     });
 
     const dataStart = row;
-    row = writeDataRows(ws, rows, row, [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
-    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    const moneyCols = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26];
+    row = writeDataRows(ws, rows, row, moneyCols);
+    writeTotalsRow(ws, columns, dataStart, row,
+        [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26],
+        moneyCols);
 }
 
 /**
@@ -278,7 +292,7 @@ async function createPerHourWageSheet(wb, records) {
 
     const dataStart = row;
     row = writeDataRows(ws, rows, row, [10, 11, 12, 13, 14]);
-    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 12, 13, 14]);
+    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 12, 13, 14], [12, 13, 14]);
 }
 
 /**
@@ -350,7 +364,7 @@ async function createPerDayWageSheet(wb, records) {
 
     const dataStart = row;
     row = writeDataRows(ws, rows, row, [11, 12, 13, 14, 15]);
-    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 13, 14, 15]);
+    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 13, 14, 15], [13, 14, 15]);
 }
 
 /**

@@ -128,7 +128,13 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
             if (weeklyOffSet.has(dowName)) {
                 weeklyOffDays++;
             } else {
-                absentDays++;
+                const dateStr = new Date(year, month - 1, day).toISOString().slice(0, 10);
+                if (approvedLeaveDates.has(dateStr)) {
+                    leaveDays++;
+                    paidLeaveDays++;
+                } else {
+                    absentDays++;
+                }
             }
         }
     }
