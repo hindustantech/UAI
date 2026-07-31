@@ -34,25 +34,140 @@ export class SalaryExcelGenerator {
   async generate() {
     this.workbook.creator = "HRMS Salary System";
     this.workbook.created = new Date();
-    
-    await this._createSummarySheet();
-    await this._createAttendanceWageSheet();
-    await this._createDetailedSheet();
-    await this._createSalarySlips();
-    await this._createRulesSheet();
-    
+
+    await this._createMonthlySalarySheet();
+    await this._createPerHourWageSheet();
+    await this._createPerDayWageSheet();
+
     return this.workbook;
   }
 
   /**
-   * Sheet 1: Salary Summary (One-line per employee)
+   * Helper: Period label (e.g. "June 2026")
    */
-  async _createSummarySheet() {
-    const ws = this.workbook.addWorksheet("Salary Summary", {
+  _periodLabel() {
+    return this.periodMonth
+      ? new Date(this.periodYear, this.periodMonth - 1).toLocaleString('default', { month: 'long', year: 'numeric' })
+      : 'Current Month';
+  }
+
+  /**
+   * Helper: Add section title + info row + header row to a sheet
+   */
+  _writeHeaderBlock(ws, columns, title, infoText) {
+    let row = 1;
+
+    // Title row
+    ws.mergeCells(row, 1, row, columns.length);
+    const titleCell = ws.getCell(row, 1);
+    titleCell.value = title;
+    this._styleCell(titleCell, {
+      bold: true,
+      size: 14,
+      color: COLORS.HEADER_TEXT,
+      bg: COLORS.PRIMARY,
+      alignment: { horizontal: 'center', vertical: 'middle' }
+    });
+    ws.getRow(row).height = 30;
+    row++;
+
+    // Info row
+    ws.mergeCells(row, 1, row, columns.length);
+    const infoCell = ws.getCell(row, 1);
+    infoCell.value = infoText;
+    this._styleCell(infoCell, {
+      bold: true,
+      color: COLORS.HEADER_TEXT,
+      bg: COLORS.SECONDARY,
+      alignment: { horizontal: 'left', vertical: 'middle' }
+    });
+    ws.getRow(row).height = 22;
+    row++;
+
+    // Header row
+    const headerRow = ws.getRow(row);
+    headerRow.height = 30;
+    columns.forEach((col, i) => {
+      const cell = headerRow.getCell(i + 1);
+      cell.value = col.header;
+      this._styleCell(cell, {
+        bold: true,
+        color: COLORS.HEADER_TEXT,
+        bg: COLORS.PRIMARY,
+        wrapText: true,
+        alignment: { horizontal: 'center', vertical: 'middle' }
+      });
+    });
+    row++;
+
+    return row;
+  }
+
+  /**
+   * Helper: Write data rows and return next row index
+   */
+  _writeDataRows(ws, rows, startRow, moneyCols = []) {
+    let row = startRow;
+
+    rows.forEach((data, idx) => {
+      const r = ws.getRow(row);
+      r.height = 20;
+      const isEven = idx % 2 === 0;
+
+      data.forEach((val, i) => {
+        const c = r.getCell(i + 1);
+        c.value = val;
+        this._styleCell(c, {
+          bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE,
+          alignment: { horizontal: i < 4 ? 'left' : 'center', vertical: 'middle' }
+        });
+        if (moneyCols.includes(i + 1)) c.numFmt = '₹#,##0.00';
+      });
+
+      row++;
+    });
+
+    return row;
+  }
+
+  /**
+   * Helper: Write totals row using SUM formulas over the data range
+   */
+  _writeTotalsRow(ws, columns, startRow, endRow, sumCols) {
+    const totRow = ws.getRow(endRow);
+    ws.mergeCells(endRow, 1, endRow, 4);
+    const labelCell = totRow.getCell(1);
+    labelCell.value = "TOTAL";
+    this._styleCell(labelCell, {
+      bold: true,
+      bg: COLORS.TOTAL_BG,
+      alignment: { horizontal: 'right', vertical: 'middle' }
+    });
+    ws.getRow(endRow).height = 22;
+
+    sumCols.forEach(ci => {
+      const c = totRow.getCell(ci);
+      const colLetter = this._columnLetter(ci);
+      c.value = { formula: `SUM(${colLetter}${startRow}:${colLetter}${endRow - 1})` };
+      this._styleCell(c, { bold: true, bg: COLORS.TOTAL_BG });
+      if (ci >= 5) c.numFmt = '₹#,##0.00';
+    });
+
+    return endRow + 1;
+  }
+
+  /**
+   * Sheet 1: Monthly Salary (employees with monthly structure - no perHour/perDay)
+   */
+  async _createMonthlySalarySheet() {
+    const ws = this.workbook.addWorksheet("Monthly Salary", {
       properties: { tabColor: { argb: COLORS.PRIMARY } }
     });
 
-    // Column configuration
+    const monthly = this.salaryResults.filter(
+      r => !r.employeeInfo.perHour && !r.employeeInfo.perDay
+    );
+
     const columns = [
       { header: "Emp Code", key: "empCode", width: 12 },
       { header: "Employee Name", key: "name", width: 25 },
@@ -74,666 +189,218 @@ export class SalaryExcelGenerator {
       { header: "Prof. Tax", key: "professionalTax", width: 14 },
       { header: "Other Ded.", key: "otherDeductions", width: 14 },
       { header: "Total Ded.", key: "totalDeductions", width: 16 },
-      { header: "Net Salary", key: "netSalary", width: 16 },
-      { header: "Gratuity (Emp)", key: "gratuity", width: 16 }
+      { header: "Net Salary", key: "netSalary", width: 16 }
     ];
 
-    ws.columns = columns;
+    columns.forEach((col, i) => { ws.getColumn(i + 1).width = col.width; });
 
-    // Title row
-    ws.mergeCells(1, 1, 1, columns.length);
-    const titleCell = ws.getCell(1, 1);
-    titleCell.value = "MONTHLY SALARY REGISTER";
-    this._styleCell(titleCell, { 
-      bold: true, 
-      size: 14, 
-      color: COLORS.HEADER_TEXT, 
-      bg: COLORS.PRIMARY,
-      alignment: { horizontal: 'center', vertical: 'middle' }
-    });
-    ws.getRow(1).height = 30;
+    let row = this._writeHeaderBlock(ws, columns, "MONTHLY SALARY REGISTER", `${this._periodLabel()} | Default Working Days: 30`);
 
-    // Info row
-    ws.mergeCells(2, 1, 2, columns.length);
-    const infoCell = ws.getCell(2, 1);
-    const date = new Date();
-    infoCell.value = `Month: ${date.toLocaleString('default', { month: 'long', year: 'numeric' })} | Default Working Days: 30 | Generated: ${date.toLocaleDateString('en-IN')}`;
-    this._styleCell(infoCell, { 
-      bold: true, 
-      color: COLORS.HEADER_TEXT, 
-      bg: COLORS.SECONDARY,
-      alignment: { horizontal: 'left', vertical: 'middle' }
-    });
-    ws.getRow(2).height = 22;
-
-    // Header row
-    const headerRow = ws.getRow(3);
-    headerRow.height = 40;
-    headerRow.eachCell((cell) => {
-      this._styleCell(cell, {
-        bold: true,
-        color: COLORS.HEADER_TEXT,
-        bg: COLORS.PRIMARY,
-        wrapText: true,
-        alignment: { horizontal: 'center', vertical: 'middle' }
-      });
-    });
-
-    // Data rows
-    this.salaryResults.forEach((result, index) => {
-      const rowNum = index + 4;
-      const row = ws.getRow(rowNum);
-      
-      const data = {
-        empCode: result.employeeInfo.empCode,
-        name: result.employeeInfo.name,
-        designation: result.employeeInfo.designation,
-        department: result.employeeInfo.department,
-        daysWorked: result.attendance.daysWorked,
-        lateDays: result.attendance.lateDays,
-        halfDays: result.attendance.halfDays,
-        effectiveDays: result.attendance.effectiveDays,
-        basic: result.earnings.basic,
-        hra: result.earnings.hra,
-        da: result.earnings.da,
-        bonus: result.earnings.bonus,
-        otherAllowance: result.earnings.otherAllowance.reduce((sum, a) => sum + a.amount, 0),
-        grossSalary: result.earnings.grossSalary,
-        pf: result.deductions.pf,
-        esi: result.deductions.esi,
-        incomeTax: result.deductions.incomeTax,
-        professionalTax: result.deductions.professionalTax,
-        otherDeductions: result.deductions.totalOtherDeductions,
-        totalDeductions: result.deductions.totalDeductions,
-        netSalary: result.netSalary,
-        gratuity: result.deductions.gratuity
-      };
-
-      Object.keys(data).forEach((key, colIndex) => {
-        const cell = row.getCell(colIndex + 1);
-        cell.value = data[key];
-        
-        // Format currency columns
-        if ([8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].includes(colIndex + 1)) {
-          cell.numFmt = '₹#,##0.00';
-        }
-        
-        // Style
-        const isEven = index % 2 === 0;
-        this._styleCell(cell, {
-          bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE,
-          alignment: { horizontal: colIndex < 3 ? 'left' : 'center', vertical: 'middle' }
-        });
-      });
-      
-      row.height = 20;
-    });
-
-    // Totals row
-    const totalRowNum = this.salaryResults.length + 4;
-    const totalRow = ws.getRow(totalRowNum);
-    
-    // Merge first 7 columns for "TOTAL" label
-    ws.mergeCells(totalRowNum, 1, totalRowNum, 7);
-    totalRow.getCell(1).value = "TOTAL";
-    this._styleCell(totalRow.getCell(1), { 
-      bold: true, 
-      bg: COLORS.TOTAL_BG,
-      alignment: { horizontal: 'right', vertical: 'middle' }
-    });
-    
-    // Add SUM formulas for numeric columns
-    for (let col = 8; col <= columns.length; col++) {
-      const cell = totalRow.getCell(col);
-      cell.value = { 
-        formula: `SUM(${this._columnLetter(col)}4:${this._columnLetter(col)}${totalRowNum - 1})` 
-      };
-      cell.numFmt = '₹#,##0.00';
-      this._styleCell(cell, { bold: true, bg: COLORS.TOTAL_BG });
+    if (!monthly.length) {
+      ws.mergeCells(row, 1, row, columns.length);
+      ws.getCell(row, 1).value = "No monthly salary employees found for the selected period.";
+      return;
     }
-    
-    totalRow.height = 22;
+
+    const rows = monthly.map(r => [
+      r.employeeInfo.empCode,
+      r.employeeInfo.name,
+      r.employeeInfo.designation,
+      r.employeeInfo.department,
+      r.attendance.daysWorked,
+      r.attendance.lateDays,
+      r.attendance.halfDays,
+      r.attendance.effectiveDays,
+      r.earnings.basic,
+      r.earnings.hra,
+      r.earnings.da,
+      r.earnings.bonus,
+      r.earnings.otherAllowance.reduce((sum, a) => sum + a.amount, 0),
+      r.earnings.grossSalary,
+      r.deductions.pf,
+      r.deductions.esi,
+      r.deductions.incomeTax,
+      r.deductions.professionalTax,
+      r.deductions.totalOtherDeductions,
+      r.deductions.totalDeductions,
+      r.netSalary
+    ]);
+
+    const dataStart = row;
+    row = this._writeDataRows(ws, rows, row, [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+
+    this._writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
 
     // Freeze panes
     ws.views = [
-      { state: 'frozen', ySplit: 3, xSplit: 7 }
+      { state: 'frozen', ySplit: 3, xSplit: 2 }
     ];
   }
 
   /**
-   * Sheet 2: Attendance & Wage Report (grouped by pay type)
+   * Sheet 2: Per Hour Wage Employees (perHour available in employee table)
    */
-  async _createAttendanceWageSheet() {
-    const ws = this.workbook.addWorksheet("Attendance & Wage", {
+  async _createPerHourWageSheet() {
+    const ws = this.workbook.addWorksheet("Per Hour Wages", {
       properties: { tabColor: { argb: "E8611A" } }
     });
 
-    const money = '#,##0.00';
-    const numFmt = '0.00';
-    const intFmt = '0';
+    const hourly = this.salaryResults.filter(r => r.employeeInfo.perHour > 0);
 
-    const sections = [
-      { key: 'hourly', title: 'HOURLY WAGE EMPLOYEES', filter: r => r.employeeInfo.perHour > 0 },
-      { key: 'perday', title: 'PER-DAY WAGE EMPLOYEES', filter: r => r.employeeInfo.perDay > 0 && !r.employeeInfo.perHour },
-      { key: 'monthly', title: 'MONTHLY SALARY EMPLOYEES', filter: r => !r.employeeInfo.perHour && !r.employeeInfo.perDay }
+    const columns = [
+      { header: "Emp Code", key: "empCode", width: 12 },
+      { header: "Emp Name", key: "name", width: 25 },
+      { header: "Department", key: "department", width: 18 },
+      { header: "Designation", key: "designation", width: 20 },
+      { header: "Present Days", key: "presentDays", width: 12 },
+      { header: "Gross Hrs", key: "grossHours", width: 12 },
+      { header: "Net Hrs", key: "netHours", width: 12 },
+      { header: "Break Hrs", key: "breakHours", width: 11 },
+      { header: "Deducted Hrs", key: "deductedHours", width: 13 },
+      { header: "OT Hrs", key: "otHours", width: 10 },
+      { header: "Per Hour Rate", key: "perHour", width: 14 },
+      { header: "OT Rate", key: "overtimeRate", width: 12 },
+      { header: "Hourly Wages", key: "hourlyWages", width: 14 },
+      { header: "OT Salary", key: "otSalary", width: 14 },
+      { header: "Total Salary", key: "totalSalary", width: 14 }
     ];
 
-    const headers = [
-      "Emp Code", "Emp Name", "Department", "Designation",
-      "Total Days", "Present", "Absent", "Leave", "Late Days",
-      "Gross Hrs", "Net Hrs", "Avg Hrs/Day", "Break Hrs", "Deducted Hrs", "OT Hrs",
-      "Per Day", "Per Hour", "OT Rate",
-      "Total Wage", "OT Salary"
+    columns.forEach((col, i) => { ws.getColumn(i + 1).width = col.width; });
+
+    const att = hourly[0]?.attendanceDetail;
+    const totalDays = att?.totalDaysInMonth || 30;
+    let row = this._writeHeaderBlock(ws, columns, "PER HOUR WAGES SHEET", `${this._periodLabel()} | Total Days: ${totalDays} | Employees: ${hourly.length}`);
+
+    if (!hourly.length) {
+      ws.mergeCells(row, 1, row, columns.length);
+      ws.getCell(row, 1).value = "No per-hour wage employees found for the selected period.";
+      return;
+    }
+
+    const rows = hourly.map(r => {
+      const emp = r.employeeInfo;
+      const att = r.attendanceDetail || {};
+      const perHour = emp.perHour || 0;
+      const overtimeRate = emp.overtimeRate || 0;
+      const netHrs = att.netHours ?? 0;
+      const otHrs = att.otHours ?? 0;
+
+      const hourlyWages = parseFloat((perHour * netHrs).toFixed(2));
+      const otSalary = parseFloat((overtimeRate * otHrs).toFixed(2));
+
+      return [
+        emp.empCode,
+        emp.name,
+        emp.department,
+        emp.designation,
+        att.presentDays ?? 0,
+        att.grossHours ?? 0,
+        netHrs,
+        att.breakHours ?? 0,
+        att.deductedHours ?? 0,
+        otHrs,
+        perHour,
+        overtimeRate,
+        hourlyWages,
+        otSalary,
+        parseFloat((hourlyWages + otSalary).toFixed(2))
+      ];
+    });
+
+    const dataStart = row;
+    row = this._writeDataRows(ws, rows, row, [11, 12, 13, 14, 15]);
+
+    this._writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 13, 14, 15]);
+
+    // Freeze panes
+    ws.views = [
+      { state: 'frozen', ySplit: 3, xSplit: 2 }
     ];
-
-    const colWidths = [11, 24, 18, 20, 11, 10, 9, 9, 10, 10, 10, 12, 10, 12, 9, 10, 10, 10, 14, 12];
-    colWidths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-
-    let row = 1;
-
-    for (const section of sections) {
-      const filtered = this.salaryResults.filter(section.filter);
-      if (!filtered.length) continue;
-
-      // Spacing between sections
-      if (row > 1) row += 1;
-
-      // Section title
-      ws.mergeCells(row, 1, row, headers.length);
-      const titleCell = ws.getCell(row, 1);
-      titleCell.value = section.title;
-      this._styleCell(titleCell, {
-        bold: true, size: 12, color: COLORS.HEADER_TEXT, bg: COLORS.PRIMARY,
-        alignment: { horizontal: 'center', vertical: 'middle' }
-      });
-      ws.getRow(row).height = 26;
-      row++;
-
-      // Info row
-      ws.mergeCells(row, 1, row, headers.length);
-      const infoCell = ws.getCell(row, 1);
-      const monthName = this.periodMonth
-        ? new Date(this.periodYear, this.periodMonth - 1).toLocaleString('default', { month: 'long', year: 'numeric' })
-        : 'Current Month';
-      const att = filtered[0]?.attendanceDetail;
-      const totalDays = att?.totalDaysInMonth || 30;
-      infoCell.value = `${monthName}  |  Total Days: ${totalDays}  |  Employees: ${filtered.length}`;
-      this._styleCell(infoCell, {
-        bold: true, color: COLORS.HEADER_TEXT, bg: COLORS.SECONDARY,
-        alignment: { horizontal: 'left', vertical: 'middle' }
-      });
-      ws.getRow(row).height = 22;
-      row++;
-
-      // Header row
-      const hRow = ws.getRow(row);
-      hRow.height = 30;
-      headers.forEach((h, i) => {
-        const c = hRow.getCell(i + 1);
-        c.value = h;
-        this._styleCell(c, {
-          bold: true, color: COLORS.HEADER_TEXT, bg: COLORS.PRIMARY,
-          alignment: { horizontal: 'center', vertical: 'middle' }, wrapText: true
-        });
-      });
-      row++;
-
-      // Data rows
-      filtered.forEach((result, idx) => {
-        const emp = result.employeeInfo;
-        const att = result.attendanceDetail || {};
-        const ear = result.earnings;
-        const effectiveDays = result.attendance.effectiveDays || 0;
-        const salary = { perDay: emp.perDay || 0, perHour: emp.perHour || 0, overtimeRate: emp.overtimeRate || 0 };
-
-        const grossHrs = att.grossHours ?? 0;
-        const netHrs = att.netHours ?? 0;
-        const breakHrs = att.breakHours ?? 0;
-        const deductedHrs = att.deductedHours ?? 0;
-        const otHrs = att.otHours ?? 0;
-        const avgHrs = att.avgHoursPerDay ?? 0;
-        const presentDays = att.presentDays ?? effectiveDays ?? 0;
-
-        // Calculate wage based on pay type
-        let totalWage = 0;
-        let otSalary = 0;
-
-        if (section.key === 'hourly') {
-          totalWage = parseFloat((salary.perHour * netHrs).toFixed(2));
-          otSalary = parseFloat((salary.overtimeRate * otHrs).toFixed(2));
-        } else if (section.key === 'perday') {
-          totalWage = parseFloat((salary.perDay * effectiveDays).toFixed(2));
-          otSalary = parseFloat((salary.overtimeRate * otHrs).toFixed(2));
-        } else {
-          totalWage = ear.grossSalary || 0;
-          otSalary = ear.overtimeAmount || 0;
-        }
-
-        const rowData = [
-          emp.empCode, emp.name, emp.department, emp.designation,
-          att.totalDaysInMonth ?? 30, presentDays, att.absentDays ?? 0, att.leaveDays ?? 0, att.lateDays ?? 0,
-          grossHrs, netHrs, avgHrs, breakHrs, deductedHrs, otHrs,
-          salary.perDay || 0, salary.perHour || 0, salary.overtimeRate || 0,
-          totalWage, otSalary
-        ];
-
-        const r = ws.getRow(row);
-        r.height = 20;
-        const isEven = idx % 2 === 0;
-
-        rowData.forEach((val, i) => {
-          const c = r.getCell(i + 1);
-          c.value = val;
-          this._styleCell(c, {
-            bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE,
-            alignment: { horizontal: i < 4 ? 'left' : 'center', vertical: 'middle' }
-          });
-          if (i >= 15 && i <= 19) c.numFmt = money;
-        });
-
-        row++;
-      });
-
-      // Totals row
-      const totRow = ws.getRow(row);
-      ws.mergeCells(row, 1, row, 4);
-      const totCell = totRow.getCell(1);
-      totCell.value = `TOTAL (${filtered.length} employees)`;
-      this._styleCell(totCell, { bold: true, bg: COLORS.TOTAL_BG, alignment: { horizontal: 'right', vertical: 'middle' } });
-      ws.getRow(row).height = 22;
-
-      const sumCols = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19, 20];
-      sumCols.forEach(ci => {
-        const c = totRow.getCell(ci);
-        const colLetter = this._columnLetter(ci);
-        const dataStart = row - filtered.length;
-        c.value = { formula: `SUM(${colLetter}${dataStart}:${colLetter}${row - 1})` };
-        this._styleCell(c, { bold: true, bg: COLORS.TOTAL_BG });
-        if (ci >= 16) c.numFmt = money;
-      });
-
-      row++;
-    }
-
-    // No data case
-    if (row === 1) {
-      ws.mergeCells(1, 1, 1, headers.length);
-      ws.getCell(1, 1).value = "No employee data available for the selected period.";
-    }
   }
 
   /**
-   * Sheet 3: Detailed Salary Breakdown
+   * Sheet 3: Per Day Wage Employees (perDay available in employee table)
    */
-  async _createDetailedSheet() {
-    const ws = this.workbook.addWorksheet("Detailed Breakdown", {
-      properties: { tabColor: { argb: COLORS.SECONDARY } }
-    });
-
-    let row = 1;
-
-    this.salaryResults.forEach((result, index) => {
-      // Employee header
-      ws.mergeCells(row, 1, row, 6);
-      const empHeader = ws.getCell(row, 1);
-      empHeader.value = `${result.employeeInfo.name} (${result.employeeInfo.empCode}) - ${result.employeeInfo.designation}`;
-      this._styleCell(empHeader, { 
-        bold: true, 
-        size: 12, 
-        color: COLORS.HEADER_TEXT, 
-        bg: COLORS.PRIMARY 
-      });
-      ws.getRow(row).height = 25;
-      row++;
-
-      // Column headers
-      const colHeaders = ['Component', 'Monthly Rate', 'Effective Days', 'Prorated Amount', 'Factor', 'Remarks'];
-      colHeaders.forEach((header, i) => {
-        const cell = ws.getCell(row, i + 1);
-        cell.value = header;
-        this._styleCell(cell, { bold: true, bg: COLORS.SECONDARY, color: COLORS.HEADER_TEXT });
-      });
-      row++;
-
-      // Earnings section
-      ws.getCell(row, 1).value = 'EARNINGS';
-      ws.mergeCells(row, 1, row, 6);
-      this._styleCell(ws.getCell(row, 1), { bold: true, bg: COLORS.SUCCESS, color: COLORS.HEADER_TEXT });
-      row++;
-
-      const earningsData = [
-        ['Basic Salary', result.earnings.breakdown.basicRate, result.attendance.effectiveDays, result.earnings.basic],
-        ['HRA', result.earnings.breakdown.hraRate, result.attendance.effectiveDays, result.earnings.hra],
-        ['DA', result.earnings.breakdown.daRate, result.attendance.effectiveDays, result.earnings.da],
-        ['Bonus', result.earnings.breakdown.bonusRate, result.attendance.effectiveDays, result.earnings.bonus],
-        ...result.earnings.otherAllowance.map(a => [a.name, (a.originalAmount / 30).toFixed(2), result.attendance.effectiveDays, a.amount])
-      ];
-
-      earningsData.forEach(([name, rate, days, amount]) => {
-        ws.getCell(row, 1).value = name;
-        ws.getCell(row, 2).value = rate;
-        ws.getCell(row, 3).value = days;
-        ws.getCell(row, 4).value = amount;
-        ws.getCell(row, 4).numFmt = '₹#,##0.00';
-        ws.getCell(row, 5).value = result.attendance.prorationFactor;
-        ws.getCell(row, 6).value = `= ${rate} × ${days}`;
-        row++;
-      });
-
-      // Gross total
-      ws.getCell(row, 1).value = 'GROSS SALARY';
-      ws.mergeCells(row, 1, row, 3);
-      ws.getCell(row, 4).value = result.earnings.grossSalary;
-      ws.getCell(row, 4).numFmt = '₹#,##0.00';
-      this._styleCell(ws.getCell(row, 1), { bold: true, bg: COLORS.TOTAL_BG });
-      this._styleCell(ws.getCell(row, 4), { bold: true, bg: COLORS.TOTAL_BG });
-      row++;
-      row++;
-
-      // Deductions section
-      ws.getCell(row, 1).value = 'DEDUCTIONS (From Employee Salary)';
-      ws.mergeCells(row, 1, row, 6);
-      this._styleCell(ws.getCell(row, 1), { bold: true, bg: COLORS.DANGER, color: COLORS.HEADER_TEXT });
-      row++;
-
-      const deductionsData = [
-        ['PF (Employee Contribution)', result.deductions.pf, '12% of Basic'],
-        ['ESI (Employee Contribution)', result.deductions.esi, '0.75% of Gross (if ≤ ₹21,000)'],
-        ['Income Tax', result.deductions.incomeTax, 'As per IT declaration'],
-        ['Professional Tax', result.deductions.professionalTax, 'As per state rules'],
-        ...result.deductions.otherDeductions.map(d => [d.name, d.amount, 'Other Deduction'])
-      ];
-
-      deductionsData.forEach(([name, amount, remark]) => {
-        ws.getCell(row, 1).value = name;
-        ws.getCell(row, 4).value = amount;
-        ws.getCell(row, 4).numFmt = '₹#,##0.00';
-        ws.getCell(row, 6).value = remark;
-        row++;
-      });
-
-      // Total deductions
-      ws.getCell(row, 1).value = 'TOTAL DEDUCTIONS';
-      ws.mergeCells(row, 1, row, 3);
-      ws.getCell(row, 4).value = result.deductions.totalDeductions;
-      ws.getCell(row, 4).numFmt = '₹#,##0.00';
-      this._styleCell(ws.getCell(row, 1), { bold: true, bg: COLORS.DEDUCTION_BG });
-      this._styleCell(ws.getCell(row, 4), { bold: true, bg: COLORS.DEDUCTION_BG });
-      row++;
-
-      // Net salary
-      ws.getCell(row, 1).value = 'NET SALARY PAYABLE';
-      ws.mergeCells(row, 1, row, 3);
-      ws.getCell(row, 4).value = result.netSalary;
-      ws.getCell(row, 4).numFmt = '₹#,##0.00';
-      this._styleCell(ws.getCell(row, 1), { bold: true, size: 11, bg: COLORS.SUCCESS, color: COLORS.HEADER_TEXT });
-      this._styleCell(ws.getCell(row, 4), { bold: true, size: 12, bg: COLORS.SUCCESS, color: COLORS.HEADER_TEXT });
-      row++;
-
-      // Employer contributions
-      ws.getCell(row, 1).value = 'EMPLOYER CONTRIBUTIONS (Not deducted from salary)';
-      ws.mergeCells(row, 1, row, 6);
-      this._styleCell(ws.getCell(row, 1), { bold: true, bg: COLORS.WARNING, color: COLORS.HEADER_TEXT });
-      row++;
-
-      ws.getCell(row, 1).value = 'Gratuity (4.81% of Basic)';
-      ws.getCell(row, 4).value = result.deductions.gratuity;
-      ws.getCell(row, 4).numFmt = '₹#,##0.00';
-      row++;
-
-      // Notes
-      result.notes.forEach(note => {
-        ws.getCell(row, 1).value = note;
-        ws.mergeCells(row, 1, row, 6);
-        this._styleCell(ws.getCell(row, 1), { color: "7F0000", alignment: { horizontal: 'left' } });
-        row++;
-      });
-
-      // Spacing between employees
-      row += 2;
-    });
-  }
-
-  /**
-   * Sheet 4: Individual Salary Slips
-   */
-  async _createSalarySlips() {
-    const ws = this.workbook.addWorksheet("Salary Slips", {
+  async _createPerDayWageSheet() {
+    const ws = this.workbook.addWorksheet("Per Day Wages", {
       properties: { tabColor: { argb: COLORS.SUCCESS } }
     });
 
-    // Set column widths
-    ws.getColumn(1).width = 5;
-    ws.getColumn(2).width = 30;
-    ws.getColumn(3).width = 20;
-    ws.getColumn(4).width = 5;
-    ws.getColumn(5).width = 30;
-    ws.getColumn(6).width = 20;
-    ws.getColumn(7).width = 5;
+    const perDay = this.salaryResults.filter(
+      r => r.employeeInfo.perDay > 0 && !r.employeeInfo.perHour
+    );
 
-    let row = 1;
-
-    this.salaryResults.forEach((result, index) => {
-      // Company header (you can customize this)
-      ws.mergeCells(row, 1, row, 7);
-      const companyCell = ws.getCell(row, 1);
-      companyCell.value = "YOUR COMPANY NAME";
-      this._styleCell(companyCell, { bold: true, size: 16, bg: COLORS.PRIMARY, color: COLORS.HEADER_TEXT, alignment: { horizontal: 'center' } });
-      ws.getRow(row).height = 35;
-      row++;
-
-      ws.mergeCells(row, 1, row, 7);
-      const slipTitle = ws.getCell(row, 1);
-      slipTitle.value = "SALARY SLIP";
-      this._styleCell(slipTitle, { bold: true, size: 14, bg: COLORS.SECONDARY, color: COLORS.HEADER_TEXT, alignment: { horizontal: 'center' } });
-      ws.getRow(row).height = 28;
-      row++;
-
-      // Period
-      ws.mergeCells(row, 1, row, 7);
-      const periodCell = ws.getCell(row, 1);
-      periodCell.value = `For the Month of ${result.period.month} ${result.period.year}`;
-      this._styleCell(periodCell, { bold: true, alignment: { horizontal: 'center' } });
-      row++;
-      row++;
-
-      // Employee Details
-      const details = [
-        ['', 'Employee Code', result.employeeInfo.empCode, '', 'Employee Name', result.employeeInfo.name],
-        ['', 'Designation', result.employeeInfo.designation, '', 'Department', result.employeeInfo.department],
-        ['', 'Days Worked', result.attendance.daysWorked.toString(), '', 'Effective Days', result.attendance.effectiveDays.toString()],
-        ['', 'Late Days', result.attendance.lateDays.toString(), '', 'Half Days', result.attendance.halfDays.toString()],
-      ];
-
-      details.forEach(([s1, label1, value1, s2, label2, value2]) => {
-        ws.getCell(row, 1).value = '';
-        ws.getCell(row, 2).value = label1;
-        this._styleCell(ws.getCell(row, 2), { bold: true, alignment: { horizontal: 'left' } });
-        ws.getCell(row, 3).value = value1;
-        ws.getCell(row, 4).value = '';
-        ws.getCell(row, 5).value = label2;
-        this._styleCell(ws.getCell(row, 5), { bold: true, alignment: { horizontal: 'left' } });
-        ws.getCell(row, 6).value = value2;
-        ws.getCell(row, 7).value = '';
-        
-        // Borders
-        for (let col = 1; col <= 7; col++) {
-          ws.getCell(row, col).border = {
-            bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } }
-          };
-        }
-        
-        row++;
-      });
-
-      row++;
-
-      // Earnings and Deductions side by side
-      // Headers
-      ws.mergeCells(row, 1, row, 3);
-      ws.getCell(row, 1).value = 'EARNINGS';
-      this._styleCell(ws.getCell(row, 1), { bold: true, bg: COLORS.SUCCESS, color: COLORS.HEADER_TEXT, alignment: { horizontal: 'center' } });
-      
-      ws.mergeCells(row, 5, row, 7);
-      ws.getCell(row, 5).value = 'DEDUCTIONS';
-      this._styleCell(ws.getCell(row, 5), { bold: true, bg: COLORS.DANGER, color: COLORS.HEADER_TEXT, alignment: { horizontal: 'center' } });
-      row++;
-
-      // Column sub-headers
-      ws.getCell(row, 2).value = 'Particulars';
-      ws.getCell(row, 3).value = 'Amount (₹)';
-      this._styleCell(ws.getCell(row, 2), { bold: true, bg: COLORS.TOTAL_BG });
-      this._styleCell(ws.getCell(row, 3), { bold: true, bg: COLORS.TOTAL_BG });
-      
-      ws.getCell(row, 5).value = 'Particulars';
-      ws.getCell(row, 6).value = 'Amount (₹)';
-      this._styleCell(ws.getCell(row, 5), { bold: true, bg: COLORS.DEDUCTION_BG });
-      this._styleCell(ws.getCell(row, 6), { bold: true, bg: COLORS.DEDUCTION_BG });
-      row++;
-
-      // Earnings items
-      const earningItems = [
-        ['Basic Salary', result.earnings.basic],
-        ['HRA', result.earnings.hra],
-        ['DA', result.earnings.da],
-        ['Bonus', result.earnings.bonus],
-        ...result.earnings.otherAllowance.map(a => [a.name, a.amount])
-      ];
-
-      const deductionItems = [
-        ['PF (12% of Basic)', result.deductions.pf],
-        ['ESI (0.75% of Gross)', result.deductions.esi],
-        ['Income Tax', result.deductions.incomeTax],
-        ['Professional Tax', result.deductions.professionalTax],
-        ...result.deductions.otherDeductions.map(d => [d.name, d.amount])
-      ];
-
-      const maxRows = Math.max(earningItems.length, deductionItems.length);
-      
-      for (let i = 0; i < maxRows; i++) {
-        const [eName, eAmt] = earningItems[i] || ['', ''];
-        const [dName, dAmt] = deductionItems[i] || ['', ''];
-        
-        ws.getCell(row, 2).value = eName;
-        ws.getCell(row, 3).value = eAmt || '';
-        if (eAmt) ws.getCell(row, 3).numFmt = '₹#,##0.00';
-        
-        ws.getCell(row, 5).value = dName;
-        ws.getCell(row, 6).value = dAmt || '';
-        if (dAmt) ws.getCell(row, 6).numFmt = '₹#,##0.00';
-        
-        // Alternate row colors
-        const isEven = i % 2 === 0;
-        this._styleCell(ws.getCell(row, 2), { bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE });
-        this._styleCell(ws.getCell(row, 3), { bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE });
-        this._styleCell(ws.getCell(row, 5), { bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE });
-        this._styleCell(ws.getCell(row, 6), { bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE });
-        
-        row++;
-      }
-
-      // Totals
-      ws.getCell(row, 2).value = 'GROSS SALARY';
-      this._styleCell(ws.getCell(row, 2), { bold: true, bg: COLORS.TOTAL_BG });
-      ws.getCell(row, 3).value = result.earnings.grossSalary;
-      ws.getCell(row, 3).numFmt = '₹#,##0.00';
-      this._styleCell(ws.getCell(row, 3), { bold: true, bg: COLORS.TOTAL_BG });
-      
-      ws.getCell(row, 5).value = 'TOTAL DEDUCTIONS';
-      this._styleCell(ws.getCell(row, 5), { bold: true, bg: COLORS.DEDUCTION_BG });
-      ws.getCell(row, 6).value = result.deductions.totalDeductions;
-      ws.getCell(row, 6).numFmt = '₹#,##0.00';
-      this._styleCell(ws.getCell(row, 6), { bold: true, bg: COLORS.DEDUCTION_BG });
-      row++;
-
-      // Net Salary
-      ws.mergeCells(row, 1, row, 3);
-      ws.getCell(row, 1).value = 'NET SALARY PAYABLE';
-      this._styleCell(ws.getCell(row, 1), { bold: true, size: 12, bg: COLORS.SUCCESS, color: COLORS.HEADER_TEXT, alignment: { horizontal: 'center' } });
-      
-      ws.mergeCells(row, 5, row, 7);
-      ws.getCell(row, 5).value = `₹ ${result.netSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
-      this._styleCell(ws.getCell(row, 5), { bold: true, size: 14, bg: COLORS.SUCCESS, color: COLORS.HEADER_TEXT, alignment: { horizontal: 'center' } });
-      ws.getRow(row).height = 30;
-      row++;
-
-      // Amount in words
-      ws.mergeCells(row, 1, row, 7);
-      ws.getCell(row, 1).value = `Amount in words: ${result.netSalaryInWords}`;
-      this._styleCell(ws.getCell(row, 1), { italic: true, alignment: { horizontal: 'left' } });
-      row++;
-
-      // Employer contribution note
-      ws.mergeCells(row, 1, row, 7);
-      ws.getCell(row, 1).value = `Employer Contribution - Gratuity: ₹${result.deductions.gratuity.toLocaleString('en-IN', { minimumFractionDigits: 2 })} (Not deducted from employee salary)`;
-      this._styleCell(ws.getCell(row, 1), { color: "7F0000", alignment: { horizontal: 'left' } });
-      row++;
-
-      // Page break for next employee
-      if (index < this.salaryResults.length - 1) {
-        row += 3;
-        if (!ws.pageSetup.rowBreaks) ws.pageSetup.rowBreaks = [];
-        ws.pageSetup.rowBreaks.push(row - 1);
-      }
-    });
-  }
-
-  /**
-   * Sheet 5: Payroll Rules Reference
-   */
-  async _createRulesSheet() {
-    const ws = this.workbook.addWorksheet("Payroll Rules", {
-      properties: { tabColor: { argb: COLORS.WARNING } }
-    });
-
-    ws.getColumn(1).width = 30;
-    ws.getColumn(2).width = 60;
-
-    ws.mergeCells(1, 1, 1, 2);
-    const titleCell = ws.getCell(1, 1);
-    titleCell.value = 'PAYROLL RULES & CALCULATION POLICIES';
-    this._styleCell(titleCell, { bold: true, size: 13, color: COLORS.HEADER_TEXT, bg: COLORS.PRIMARY, alignment: { horizontal: 'center' } });
-    ws.getRow(1).height = 28;
-
-    const rules = [
-      ['Rule', 'Description'],
-      ['Working Days', '30 days per month (standard)'],
-      ['Proration Formula', 'Component Amount = (Monthly Amount / 30) × Effective Days'],
-      ['Effective Days', 'Days Worked - Late Deductions - Half Day Deductions'],
-      ['PF (Provident Fund)', 'Employee Contribution: 12% of Basic Salary (prorated). Deducted from employee salary.'],
-      ['ESI (Employee State Insurance)', 'Employee Contribution: 0.75% of Gross Salary. Applicable only if Gross ≤ ₹21,000/month. Not deducted if Gross > ₹21,000.'],
-      ['Gratuity', 'Employer Contribution: 4.81% of Basic Salary (prorated). Borne by employer. NOT deducted from employee salary.'],
-      ['Late Deduction', 'Every 3 late marks = 0.5 working day deduction from effective days.'],
-      ['Half Day Deduction', 'Every 2 half days = 1 full working day deduction from effective days.'],
-      ['Income Tax (TDS)', 'Deducted as per employees tax declaration and applicable tax slab.'],
-      ['Professional Tax', 'Deducted as per state government rules.'],
-      ['Net Salary Formula', 'Net Salary = Gross Salary - PF - ESI - Income Tax - Professional Tax - Other Deductions'],
-      ['Overtime', 'Calculated at specified overtime rate × overtime hours (if applicable).'],
-      ['Salary Cycle', 'Monthly - from 1st to last day of the month.'],
-      ['Payment Date', 'Salary credited by 7th of following month (or as per company policy).'],
+    const columns = [
+      { header: "Emp Code", key: "empCode", width: 12 },
+      { header: "Emp Name", key: "name", width: 25 },
+      { header: "Department", key: "department", width: 18 },
+      { header: "Designation", key: "designation", width: 20 },
+      { header: "Total Days", key: "totalDays", width: 11 },
+      { header: "Present", key: "presentDays", width: 10 },
+      { header: "Absent", key: "absentDays", width: 9 },
+      { header: "Leave", key: "leaveDays", width: 9 },
+      { header: "Late Days", key: "lateDays", width: 10 },
+      { header: "Days Worked", key: "daysWorked", width: 12 },
+      { header: "Eff. Days", key: "effectiveDays", width: 12 },
+      { header: "Per Day Rate", key: "perDay", width: 14 },
+      { header: "OT Rate", key: "overtimeRate", width: 12 },
+      { header: "Day Wages", key: "dayWages", width: 14 },
+      { header: "OT Salary", key: "otSalary", width: 14 },
+      { header: "Total Salary", key: "totalSalary", width: 14 }
     ];
 
-    rules.forEach((rule, index) => {
-      const row = ws.getRow(index + 2);
-      row.getCell(1).value = rule[0];
-      row.getCell(2).value = rule[1];
-      
-      const isHeader = index === 0;
-      this._styleCell(row.getCell(1), { 
-        bold: isHeader, 
-        bg: isHeader ? COLORS.SECONDARY : (index % 2 === 0 ? COLORS.ALT_ROW : COLORS.WHITE),
-        color: isHeader ? COLORS.HEADER_TEXT : COLORS.BLACK,
-        alignment: { horizontal: 'left', vertical: 'middle' }
-      });
-      this._styleCell(row.getCell(2), { 
-        bold: isHeader,
-        bg: isHeader ? COLORS.SECONDARY : (index % 2 === 0 ? COLORS.ALT_ROW : COLORS.WHITE),
-        color: isHeader ? COLORS.HEADER_TEXT : COLORS.BLACK,
-        alignment: { horizontal: 'left', vertical: 'middle' }
-      });
-      
-      row.height = isHeader ? 22 : 20;
+    columns.forEach((col, i) => { ws.getColumn(i + 1).width = col.width; });
+
+    const att = perDay[0]?.attendanceDetail;
+    const totalDays = att?.totalDaysInMonth || 30;
+    let row = this._writeHeaderBlock(ws, columns, "PER DAY WAGES SHEET", `${this._periodLabel()} | Total Days: ${totalDays} | Employees: ${perDay.length}`);
+
+    if (!perDay.length) {
+      ws.mergeCells(row, 1, row, columns.length);
+      ws.getCell(row, 1).value = "No per-day wage employees found for the selected period.";
+      return;
+    }
+
+    const rows = perDay.map(r => {
+      const emp = r.employeeInfo;
+      const att = r.attendanceDetail || {};
+      const perDayRate = emp.perDay || 0;
+      const overtimeRate = emp.overtimeRate || 0;
+      const effectiveDays = r.attendance.effectiveDays || 0;
+      const otHrs = att.otHours ?? 0;
+
+      const dayWages = parseFloat((perDayRate * effectiveDays).toFixed(2));
+      const otSalary = parseFloat((overtimeRate * otHrs).toFixed(2));
+
+      return [
+        emp.empCode,
+        emp.name,
+        emp.department,
+        emp.designation,
+        att.totalDaysInMonth ?? 30,
+        att.presentDays ?? 0,
+        att.absentDays ?? 0,
+        att.leaveDays ?? 0,
+        att.lateDays ?? 0,
+        r.attendance.daysWorked,
+        effectiveDays,
+        perDayRate,
+        overtimeRate,
+        dayWages,
+        otSalary,
+        parseFloat((dayWages + otSalary).toFixed(2))
+      ];
     });
+
+    const dataStart = row;
+    row = this._writeDataRows(ws, rows, row, [12, 13, 14, 15, 16]);
+
+    this._writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 11, 14, 15, 16]);
+
+    // Freeze panes
+    ws.views = [
+      { state: 'frozen', ySplit: 3, xSplit: 2 }
+    ];
   }
 
   /**
@@ -797,14 +464,14 @@ export class SalaryExcelGenerator {
    */
   async writeToResponse(res, filename) {
     res.setHeader(
-      'Content-Type', 
+      'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     );
     res.setHeader(
-      'Content-Disposition', 
+      'Content-Disposition',
       `attachment; filename="${filename}"`
     );
-    
+
     await this.workbook.xlsx.write(res);
   }
 }

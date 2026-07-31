@@ -3,7 +3,7 @@ import { calculateEmployeeSalary, calculateBatchSalaries } from "../services/Sal
 import { SalaryExcelGenerator } from "../services/CsvbuilderSalary.js";
 import Employee from "../models/Attandance/Employee.js";
 import Attendance from "../models/Attandance/Attendance.js";
-import Payroll from "../models/Attandance/Payroll.js";
+import PayrollRule from "../models/PayrollRuleSchema.js";
 import SalaryRule from "../models/salaryRules.js";
 // Constants
 const DEFAULT_WORKING_DAYS = 30;
@@ -567,7 +567,7 @@ export const exportExcel = async (req, res) => {
     await generator.generate();
 
     const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
-    const filename = `Salary_Register_${monthName}_${year}.xlsx`;
+    const filename = `Salary_Wages_${monthName}_${year}.xlsx`;
 
     await generator.writeToResponse(res, filename);
 
