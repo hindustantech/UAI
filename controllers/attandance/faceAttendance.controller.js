@@ -775,17 +775,16 @@ async function processAttendanceForEmployee({
 
   const outTimeUTC = new Date(punchOut);
 
-  const lastPunch = attendance.punchHistory?.[attendance.punchHistory.length - 1];
-  if (lastPunch && lastPunch.punchOut) {
-    const lastPunchTimeIST = getPunchTimeIST(new Date(lastPunch.punchOut));
-    const gap = diffMinutes(lastPunchTimeIST, punchOutTimeIST);
-    if (gap < 3) {
-      return abortAndRespond(
-        session, res, 429, 'PUNCH_TOO_FREQUENT',
-        'Punch registered too soon. Please wait 3 minutes before trying again.',
-        { lastPunchTime: lastPunch.punchOut, minimumGapMinutes: 3, currentGapMinutes: gap }
-      );
-    }
+  /* Prevent multiple punch-outs */
+  if (attendance.punchOut) {
+    return abortAndRespond(
+      session, res, 409, 'ALREADY_PUNCHED_OUT',
+      'Punch-out is already recorded for this day. Multiple punch-outs are not allowed.',
+      {
+        lastPunchOut: attendance.punchOut,
+        date: dateString
+      }
+    );
   }
 
   attendance.punchHistory.push({
