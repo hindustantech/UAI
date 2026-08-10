@@ -3610,6 +3610,54 @@ const formatHours = (minutes) => {
     return (minutes / 60).toFixed(2) + " hrs";
 };
 
+/* ================================
+   Helper: Minutes → HH:MM
+================================ */
+const formatHHMM = (minutes) => {
+    if (!Number.isFinite(minutes) || minutes < 0) return "00:00";
+
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+};
+
+/* ================================
+   Helper: Total Taken Break Minutes
+================================ */
+const getBreakMinutes = (rec) => {
+    if (!rec?.breaks || !Array.isArray(rec.breaks)) return 0;
+
+    return rec.breaks.reduce((sum, b) => {
+        if (b?.startTime && b?.endTime) {
+            const dur = b.durationMinutes
+                || Math.floor((new Date(b.endTime) - new Date(b.startTime)) / 60000);
+            return sum + Math.max(0, dur);
+        }
+        return sum;
+    }, 0);
+};
+
+/* ================================
+   Helper: Format All Breaks (multi)
+================================ */
+const formatBreaks = (rec) => {
+    if (!rec?.breaks || !Array.isArray(rec.breaks)) return "-";
+
+    const list = rec.breaks
+        .filter(b => b?.startTime && b?.endTime)
+        .map(b => {
+            const dur = b.durationMinutes
+                || Math.floor((new Date(b.endTime) - new Date(b.startTime)) / 60000);
+
+            const name = b.breakName || b.type || "Break";
+
+            return `${name} (${formatTime(b.startTime)} - ${formatTime(b.endTime)}) ${formatHHMM(dur)}`;
+        });
+
+    return list.length ? list.join("; ") : "-";
+};
+
 /* =========================
    CONTROLLER
 ========================= */
@@ -3680,6 +3728,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
         let presentDays = 0;
         let absentDays = 0;
         let totalMinutes = 0;
+        let totalBreakMinutes = 0;
         let validDays = 0;
 
         const report = [];
@@ -3708,6 +3757,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                     Status: "-",
                     TimeIn: "-",
                     TimeOut: "-",
+                    BreakTime: "-",
                     TotalHours: "-"
                 });
                 continue;
@@ -3720,6 +3770,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                     Status: "-",
                     TimeIn: "-",
                     TimeOut: "-",
+                    BreakTime: "-",
                     TotalHours: "-"
                 });
                 continue;
@@ -3734,6 +3785,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                     Status: "week_off",
                     TimeIn: "Week Off",
                     TimeOut: "-",
+                    BreakTime: "-",
                     TotalHours: "-"
                 });
                 continue;
@@ -3748,6 +3800,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                     Status: "absent",
                     TimeIn: "Absent",
                     TimeOut: "-",
+                    BreakTime: "-",
                     TotalHours: "-"
                 });
                 continue;
@@ -3760,6 +3813,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                     Status: "holiday",
                     TimeIn: "Holiday",
                     TimeOut: "-",
+                    BreakTime: "-",
                     TotalHours: "-"
                 });
                 continue;
@@ -3772,6 +3826,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                     Status: rec.status,
                     TimeIn: safe(formatTime(rec.punchIn)),
                     TimeOut: safe(formatTime(rec.punchOut)),
+                    BreakTime: "-",
                     TotalHours: "Invalid"
                 });
                 continue;
@@ -3781,10 +3836,15 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
             const minutes = rec.workSummary?.totalMinutes || 0;
 
+            // ✅ BREAK CALCULATION (net working hours)
+            const breakMinutes = getBreakMinutes(rec);
+            const netMinutes = Math.max(0, minutes - breakMinutes);
+
             // ✅ FIXED PRESENT COUNT
             if (minutes > 0) {
                 presentDays++;
-                totalMinutes += minutes;
+                totalMinutes += netMinutes;
+                totalBreakMinutes += breakMinutes;
                 validDays++;
             }
 
@@ -3793,7 +3853,10 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 Status: rec.status,
                 TimeIn: safe(formatTime(rec.punchIn)),
                 TimeOut: safe(formatTime(rec.punchOut)),
-                TotalHours: minutes > 0 ? formatHours(minutes) : "-"
+                GrossHours: minutes > 0 ? formatHHMM(minutes) : "-",
+                Breaks: breakMinutes > 0 ? formatBreaks(rec) : "-",
+                BreakTime: breakMinutes > 0 ? formatHHMM(breakMinutes) : "-",
+                TotalHours: minutes > 0 ? formatHHMM(netMinutes) : "-"
             });
         }
 
@@ -3815,7 +3878,9 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
                 presentDays,
                 absentDays,
                 validWorkingDays: validDays,
-                avgPerDay: formatHours(avgMinutes)
+                totalBreakHours: formatHHMM(totalBreakMinutes),
+                totalWorkingHours: formatHHMM(totalMinutes),
+                avgPerDay: formatHHMM(avgMinutes)
             },
             records: report
         });
