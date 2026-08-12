@@ -497,7 +497,8 @@ function buildAttendanceBlock(attendance, extras = {}) {
     const {
         presentDays = 0, absentDays = 0, leaveDays = 0, holidays = 0,
         weeklyOffDays = 0, halfDays = 0, lateDays = 0,
-        totalPayableMinutes = 0, totalMinutes = 0, overtimeMinutes = 0
+        totalPayableMinutes = 0, totalMinutes = 0, overtimeMinutes = 0,
+        compOffDaysUsed = 0
     } = attendance;
     const { paidLeaveDays = 0, unpaidLeaveDays = 0 } = extras;
 
@@ -508,6 +509,7 @@ function buildAttendanceBlock(attendance, extras = {}) {
         leaveDays,
         paidLeaveDays,
         unpaidLeaveDays,
+        compOffDaysUsed,
         absentDays,
         lateDays,
         halfDays,

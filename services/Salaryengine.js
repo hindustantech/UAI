@@ -273,6 +273,7 @@ export class SalaryCalculator {
         halfDays: rawAttendance.halfDays ?? 0,
         lateDays: rawAttendance.lateDays ?? 0,
         daysWorked: rawAttendance.daysWorked ?? effectiveDays.daysWorked,
+        compOffUsed: rawAttendance.compOffUsed ?? 0,
         totalPayableMinutes: rawAttendance.totalPayableMinutes ?? 0,
         totalMinutes: rawAttendance.totalMinutes ?? 0,
         overtimeMinutes: rawAttendance.overtimeMinutes ?? 0,
@@ -315,6 +316,12 @@ export class SalaryCalculator {
       
       // Net Salary
       netSalary,
+      
+      // Comp Off (banked days used this month + remaining balance)
+      compOff: {
+        used: rawAttendance?.compOffUsed ?? 0,
+        balance: this.employee.compOff?.balance ?? 0
+      },
       
       // Salary in Words
       netSalaryInWords: this._numberToWords(netSalary),
@@ -486,6 +493,7 @@ export const buildPayrollDocument = (result, employee, { companyId, month, year,
       lateDays: att.lateDays ?? 0,
       halfDays: att.halfDays ?? 0,
       presentDays: att.presentDays ?? 0,
+      compOffDaysUsed: att.compOffUsed ?? 0,
       totalPayableMinutes: att.totalPayableMinutes ?? 0
     },
     salaryRuleDeductions: {

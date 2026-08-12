@@ -40,6 +40,23 @@ const SalaryRuleSchema = new mongoose.Schema(
                 default: 1,
                 min: 0
             }
+        },
+
+        compOff: {
+            ruleName: {
+                type: String,
+                default: "Comp Off Expiry",
+                trim: true
+            },
+            enabled: {
+                type: Boolean,
+                default: true
+            },
+            expireAfterDays: {
+                type: Number,
+                default: 90,
+                min: 0
+            }
         }
     },
     {

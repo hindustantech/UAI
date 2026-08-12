@@ -59,6 +59,26 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
         }
     }
 
+    // Fetch all approved comp-off requests covering this month
+    const approvedCompOffRequests = await AttendanceRequest.find({
+        employeeId,
+        companyId: employee.companyId,
+        requestType: "comp_off",
+        status: "approved",
+        "leaveDetails.startDate": { $lte: end },
+        "leaveDetails.endDate": { $gte: start }
+    }).lean();
+
+    // Build set of date strings covered by approved comp-off requests
+    const approvedCompOffDates = new Set();
+    for (const req of approvedCompOffRequests) {
+        const s = new Date(req.leaveDetails.startDate);
+        const e = new Date(req.leaveDetails.endDate);
+        for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+            approvedCompOffDates.add(d.toISOString().slice(0, 10));
+        }
+    }
+
     // Map records by day-of-month for quick lookup
     const recordByDay = new Map();
     for (const rec of records) {
@@ -78,6 +98,7 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
     let totalPayableMinutes = 0;
     let totalMinutes = 0;
     let overtimeMinutes = 0;
+    let compOffUsed = 0;
 
     const weeklyOffSet = new Set(
         (employee?.weeklyOff && employee.weeklyOff.length) ? employee.weeklyOff : ["Sunday"]
@@ -90,7 +111,14 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
         if (rec) {
             totalPayableMinutes += rec.workSummary?.payableMinutes ?? 0;
             totalMinutes += rec.workSummary?.totalMinutes ?? 0;
-            overtimeMinutes += rec.workSummary?.overtimeMinutes ?? 0;
+
+            // Weekend / holiday / week-off OT is compensated as comp-off, NOT cash
+            const dowName = DOW[new Date(rec.date).getDay()];
+            const isOffDay =
+                weeklyOffSet.has(dowName) ||
+                rec.status === "holiday" ||
+                rec.status === "week_off";
+            if (!isOffDay) overtimeMinutes += rec.workSummary?.overtimeMinutes ?? 0;
 
             switch (rec.status) {
                 case "present":
@@ -113,6 +141,10 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
                         unpaidLeaveDays++;
                     }
                     break;
+                case "comp_off":
+                    compOffUsed++;
+                    presentDays++;
+                    break;
                 case "holiday":
                     holidays++;
                     break;
@@ -132,6 +164,10 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
                 if (approvedLeaveDates.has(dateStr)) {
                     leaveDays++;
                     paidLeaveDays++;
+                } else if (approvedCompOffDates.has(dateStr)) {
+                    // Approved comp-off on a day with no record → paid day
+                    compOffUsed++;
+                    presentDays++;
                 } else {
                     absentDays++;
                 }
@@ -139,7 +175,7 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
         }
     }
 
-    return { presentDays, absentDays, leaveDays, paidLeaveDays, unpaidLeaveDays, holidays, weeklyOffDays, halfDays, lateDays, totalPayableMinutes, totalMinutes, overtimeMinutes };
+    return { presentDays, absentDays, leaveDays, paidLeaveDays, unpaidLeaveDays, holidays, weeklyOffDays, halfDays, lateDays, totalPayableMinutes, totalMinutes, overtimeMinutes, compOffUsed };
 }
 
 

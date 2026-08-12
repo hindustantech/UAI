@@ -83,7 +83,7 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
     const weeklyOffSet = new Set(weekOffDays);
 
     let presentDays = 0, absentDays = 0, leaveDays = 0, holidays = 0, weeklyOffTotal = 0;
-    let halfDays = 0, lateDays = 0, daysWorked = 0;
+    let halfDays = 0, lateDays = 0, daysWorked = 0, compOffUsed = 0;
     let totalPayableMinutes = 0, totalMinutes = 0, overtimeMinutes = 0;
 
     for (let day = 1; day <= totalDaysInMonth; day++) {
@@ -92,7 +92,14 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
         const ws = rec.workSummary || {};
         totalPayableMinutes += ws.payableMinutes || 0;
         totalMinutes += ws.totalMinutes || 0;
-        overtimeMinutes += ws.overtimeMinutes || 0;
+
+        // Weekend / holiday / week-off OT is compensated as comp-off, NOT cash
+        const dateObj = new Date(year, month - 1, day);
+        const isOffDay =
+          weeklyOffSet.has(DOW[dateObj.getDay()]) ||
+          rec.status === "holiday" ||
+          rec.status === "week_off";
+        if (!isOffDay) overtimeMinutes += ws.overtimeMinutes || 0;
 
         switch (rec.status) {
           case "present":
@@ -104,6 +111,11 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
             halfDays++;
             presentDays += 0.5;
             daysWorked += 0.5;
+            break;
+          case "comp_off":
+            compOffUsed++;
+            presentDays++;
+            daysWorked++;
             break;
           case "absent": absentDays++; break;
           case "leave": leaveDays++; break;
@@ -130,7 +142,7 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
     return {
       totalDaysInMonth,
       presentDays, absentDays, leaveDays, holidays, weeklyOffDays: weeklyOffTotal,
-      halfDays, lateDays, daysWorked,
+      halfDays, lateDays, daysWorked, compOffUsed,
       totalPayableMinutes, totalMinutes, overtimeMinutes,
       grossHours, netHours, breakHours, deductedHours, otHours, avgHoursPerDay,
       overtimeHours: otHours
@@ -140,7 +152,7 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
     return {
       totalDaysInMonth: DEFAULT_WORKING_DAYS,
       presentDays: 0, absentDays: 0, leaveDays: 0, holidays: 0, weeklyOffDays: 0,
-      halfDays: 0, lateDays: 0, daysWorked: 0,
+      halfDays: 0, lateDays: 0, daysWorked: 0, compOffUsed: 0,
       totalPayableMinutes: 0, totalMinutes: 0, overtimeMinutes: 0,
       grossHours: 0, netHours: 0, breakHours: 0, deductedHours: 0, otHours: 0, avgHoursPerDay: 0,
       overtimeHours: 0

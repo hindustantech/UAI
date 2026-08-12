@@ -23,7 +23,9 @@ const attendanceRequestSchema = new Schema(
                 "leave",
                 "punch_in_out",
                 "punch_in",
-                "punch_in_and_out"
+                "punch_in_and_out",
+                "overtime",
+                "comp_off"
             ],
             required: true,
             index: true
@@ -64,6 +66,24 @@ const attendanceRequestSchema = new Schema(
 
             punchOutTime: {
                 type: Date
+            }
+
+        },
+
+        /*
+            OVERTIME DETAILS
+            compOff: true  → credit comp-off balance on approval (no cash OT)
+            compOff: false → paid overtime (cash)
+        */
+        otDetails: {
+
+            date: {
+                type: Date
+            },
+
+            compOff: {
+                type: Boolean,
+                default: false
             }
 
         },

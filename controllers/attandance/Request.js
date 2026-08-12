@@ -3,6 +3,11 @@ import Attendance from "../../models/Attandance/Attendance.js";
 import AttendanceRequest from '../../models/Attandance/Request.js'
 import Employee from "../../models/Attandance/Employee.js";
 import Shift from "../../models/Attandance/Shift.js";
+import {
+    getCompOffRule,
+    expireCompOff,
+    deductCompOffFIFO
+} from "./utils/compOff.utils.js";
 
 /*
 ====================================
@@ -182,7 +187,8 @@ export const createAttendanceRequest = async (req, res) => {
             requestType,
             reason,
             leaveDetails,
-            punchDetails
+            punchDetails,
+            otDetails
         } = req.body;
 
         const userId = req.user._id;
@@ -304,6 +310,117 @@ export const createAttendanceRequest = async (req, res) => {
         }
 
         /*
+            ===============================
+            OVERTIME FLOW
+            (compOff: true → bank a comp-off day; false → cash OT)
+            ===============================
+        */
+        if (requestType === "overtime") {
+            if (!otDetails?.date) {
+                return res.status(400).json({
+                    success: false,
+                    message: "otDetails.date is required"
+                });
+            }
+
+            const otDate = normalizeDate(otDetails.date);
+            const today = normalizeDate(new Date());
+
+            if (otDate > today) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Future date not allowed"
+                });
+            }
+
+            const existing = await AttendanceRequest.findOne({
+                employeeId: employee._id,
+                requestType: "overtime",
+                "otDetails.date": otDate,
+                status: { $in: ["pending", "approved"] }
+            });
+
+            if (existing) {
+                return res.status(400).json({
+                    success: false,
+                    message: "OT request already exists for this date"
+                });
+            }
+        }
+
+        /*
+            ===============================
+            COMP OFF FLOW
+            (employee uses banked comp-off days)
+            ===============================
+        */
+        if (requestType === "comp_off") {
+            if (!leaveDetails?.startDate || !leaveDetails?.endDate) {
+                return res.status(400).json({
+                    success: false,
+                    message: "startDate and endDate are required"
+                });
+            }
+
+            const startDate = normalizeDate(leaveDetails.startDate);
+            const endDate = normalizeDate(leaveDetails.endDate);
+
+            if (startDate > endDate) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Start date cannot be after end date"
+                });
+            }
+
+            const overlapping = await AttendanceRequest.findOne({
+                employeeId: employee._id,
+                requestType: "comp_off",
+                status: { $in: ["pending", "approved"] },
+                $or: [
+                    {
+                        "leaveDetails.startDate": { $lte: endDate },
+                        "leaveDetails.endDate": { $gte: startDate }
+                    }
+                ]
+            });
+
+            if (overlapping) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Comp off request overlaps existing request"
+                });
+            }
+
+            const rule = await getCompOffRule(employee.companyId);
+            if (rule.enabled && rule.expireAfterDays > 0) {
+                await expireCompOff(employee, rule.expireAfterDays);
+            }
+
+            const balance = employee.compOff?.balance || 0;
+            const weeklyOff = employee.weeklyOff?.length ? employee.weeklyOff : ["Sunday"];
+            let needed = 0;
+
+            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
+                if (!weeklyOff.includes(dayName)) needed++;
+            }
+
+            if (needed <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "No working days in the requested range"
+                });
+            }
+
+            if (balance < needed) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Insufficient comp-off balance (available: ${balance}, required: ${needed})`
+                });
+            }
+        }
+
+        /*
             STEP 3: CLEAN PAYLOAD (IMPORTANT)
             Avoid storing unnecessary fields
         */
@@ -314,7 +431,7 @@ export const createAttendanceRequest = async (req, res) => {
             reason: reason || ""
         };
 
-        if (requestType === "leave") {
+        if (["leave", "comp_off"].includes(requestType)) {
             payload.leaveDetails = {
                 startDate: normalizeDate(leaveDetails.startDate),
                 endDate: normalizeDate(leaveDetails.endDate)
@@ -329,6 +446,13 @@ export const createAttendanceRequest = async (req, res) => {
                 date: normalizeDate(punchDetails.date),
                 punchInTime: punchDetails.punchInTime || null,
                 punchOutTime: punchDetails.punchOutTime || null
+            };
+        }
+
+        if (requestType === "overtime") {
+            payload.otDetails = {
+                date: normalizeDate(otDetails.date),
+                compOff: !!otDetails.compOff
             };
         }
 
@@ -781,6 +905,97 @@ export const approveAttendanceRequest = async (req, res) => {
                 },
                 { upsert: true, new: true, session }
             );
+        }
+
+        // ============================================================
+        // 🔹 OVERTIME FLOW
+        //    compOff: true  → credit +1 comp-off day (no cash OT)
+        //    compOff: false → no balance change (paid as cash OT)
+        // ============================================================
+        if (request.requestType === "overtime" && request.otDetails?.compOff) {
+            const employee = await Employee.findById(request.employeeId).session(session);
+            if (!employee) throw new Error("Employee not found");
+
+            employee.compOff = employee.compOff || { balance: 0, credits: [] };
+            employee.compOff.balance = (employee.compOff.balance || 0) + 1;
+            employee.compOff.credits.push({
+                earnedAt: new Date(),
+                days: 1,
+                source: `request_${requestId}`
+            });
+
+            await employee.save({ session });
+        }
+
+        // ============================================================
+        // 🔹 COMP OFF FLOW (using banked days → paid day off)
+        // ============================================================
+        if (request.requestType === "comp_off") {
+            const startDate = parseValidDate(request?.leaveDetails?.startDate);
+            const endDate = parseValidDate(request?.leaveDetails?.endDate);
+
+            if (!startDate || !endDate) {
+                throw new Error("Invalid comp-off dates");
+            }
+
+            const employee = await Employee.findById(request.employeeId).session(session);
+            if (!employee) throw new Error("Employee not found");
+
+            const weeklyOff = employee.weeklyOff?.length ? employee.weeklyOff : ["Sunday"];
+            let marked = 0;
+
+            for (
+                let d = new Date(startDate.getTime());
+                d <= endDate;
+                d = new Date(d.getTime() + 86400000)
+            ) {
+                const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
+                if (weeklyOff.includes(dayName)) continue;
+
+                const { start, end } = getDayBounds(d);
+
+                await Attendance.findOneAndUpdate(
+                    {
+                        companyId: request.companyId,
+                        employeeId: request.employeeId,
+                        date: { $gte: start, $lt: end }
+                    },
+                    {
+                        $set: {
+                            date: start,
+                            status: "comp_off",
+                            approvalStatus: "approved",
+                            totalWorkingHours: 0,
+                            workSummary: {
+                                totalMinutes: 0,
+                                payableMinutes: 0,
+                                overtimeMinutes: 0,
+                                lateMinutes: 0,
+                                earlyLeaveMinutes: 0
+                            },
+                            remarks: `Comp off approved via request ${requestId}`,
+                            geoLocation: {
+                                type: "Point",
+                                coordinates: [0, 0],
+                                verified: false,
+                                source: "manual"
+                            }
+                        }
+                    },
+                    { upsert: true, new: true, session }
+                );
+
+                marked++;
+            }
+
+            if (marked > 0) {
+                const balance = employee.compOff?.balance || 0;
+                if (balance < marked) {
+                    throw new Error("Insufficient comp-off balance");
+                }
+                deductCompOffFIFO(employee, marked);
+                await employee.save({ session });
+            }
         }
 
         // ============================================================

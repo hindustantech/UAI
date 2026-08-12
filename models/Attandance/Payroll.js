@@ -80,7 +80,8 @@ const PayrollSchema = new mongoose.Schema(
             presentDays: { type: Number, default: 0 },    // payable working days
             totalPayableMinutes: { type: Number, default: 0 },  // for hourly employees
             totalMinutes: { type: Number, default: 0 },   // gross minutes (incl. breaks)
-            overtimeMinutes: { type: Number, default: 0 } // overtime minutes
+            overtimeMinutes: { type: Number, default: 0 }, // overtime minutes
+            compOffDaysUsed: { type: Number, default: 0 }  // comp-off days taken (paid days)
         },
 
         /* ── Salary Rule Deductions (from SalaryRule model) ── */

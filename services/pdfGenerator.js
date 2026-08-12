@@ -120,6 +120,7 @@ export async function generateSalarySlipPDF(payroll, filePath) {
         ["Present days", att.presentDays ?? "—"],
         ["Absent days", att.absentDays ?? "—"],
         ["Leaves (Paid / Unpaid)", `${att.paidLeaveDays ?? 0} / ${att.unpaidLeaveDays ?? 0}`],
+        ["Comp off used", att.compOffDaysUsed ?? 0],
         ["Holidays / Week off", `${att.holidays ?? 0} / ${att.weeklyOffDays ?? 0}`],
         ["Half days / Late days", `${att.halfDays ?? 0} / ${att.lateDays ?? 0}`],
       ];

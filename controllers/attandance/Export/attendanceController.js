@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import { Parser } from "json2csv";
 import ExcelJS from "exceljs";
 import { Subscription } from "../../../models/Attandance/subscration/Subscription.js";
+import { getCompOffRule } from "../utils/compOff.utils.js";
 
 /* ─────────────────────────────────────────────
    HELPERS
@@ -284,6 +285,7 @@ const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEn
         case "leave": return { code: "L", label: "Leave", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "holiday": return { code: "H", label: "Holiday", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "week_off": return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+        case "comp_off": return { code: "CO", label: "Comp Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "absent": return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         default: {
             let hrs = "0:00";
@@ -363,13 +365,14 @@ const STATUS_FILL = {
     PE: "FFFCE5CD",
     PLE: "FFFFD966",
     HD: "FFFFE599",
+    CO: "FFD6B4D8",
     A: "FFFFC7CE",
     L: "FFD9D2E9",
     WO: "FFD0E4F7",
     H: "FFB7E1CD",
 };
 const STATUS_FONT = {
-    A: "FF9C0006", L: "FF6A0DAD", WO: "FF1155CC", H: "FF137333",
+    A: "FF9C0006", L: "FF6A0DAD", WO: "FF1155CC", H: "FF137333", CO: "FF7D3C98",
     PL: "FF7D6608", PE: "FF7D4604", PLE: "FF7D4604",
 };
 
@@ -413,6 +416,10 @@ const makeDummySummaryRow = (index) => ({
     holiday: "—",
     presentableDays: "—",
     present: "—",
+    otDays: "—",
+    coUsed: "—",
+    coBalance: "—",
+    coExpired: "—",
     halfDay: "—",
     absent: "—",
     leave: "—",
@@ -644,6 +651,7 @@ export const generateAttendanceCSV = async (req, res) => {
                         case "half_day": statusLabel = "Half Day"; break;
                         case "holiday": statusLabel = "Holiday"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;
                         case "week_off": statusLabel = "Week Off"; break;
+                        case "comp_off": statusLabel = "Comp Off"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;
                         case "absent": statusLabel = "Absent"; break;
                         default: {
                             if (isFlexible) {
@@ -1003,6 +1011,7 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             { code: "PE", label: "Early Exit" }, { code: "HD", label: "Half Day" },
             { code: "A", label: "Absent" }, { code: "L", label: "Leave" },
             { code: "WO", label: "Week Off" }, { code: "H", label: "Holiday" },
+            { code: "CO", label: "Comp Off" },
         ];
         legendRow.getCell(1).value = "LEGEND →";
         legendRow.getCell(1).font = { name: "Arial", bold: true, size: 8 };
@@ -1252,6 +1261,12 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         const isPremium = await checkPremiumAccess(companyId);
         const exceedsFreeLimit = !isPremium && employeeCount > PREMIUM_CONFIG.maxFreeRows;
 
+        const compOffRule = await getCompOffRule(companyId);
+        const compOffExpireAfterDays = compOffRule.enabled ? compOffRule.expireAfterDays : 0;
+        const compOffCutoff = compOffExpireAfterDays > 0
+            ? Date.now() - compOffExpireAfterDays * 86400000
+            : 0;
+
         let summaryRows = [];
 
         const employeesToProcess = exceedsFreeLimit
@@ -1268,7 +1283,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const isFlexible = isFlexibleShift(emp);
 
             let present = 0, absent = 0, leave = 0, weekOff = 0, halfDay = 0;
-            let holiday = 0, late = 0, earlyExit = 0;
+            let holiday = 0, late = 0, earlyExit = 0, otDays = 0, coUsed = 0;
             let totalWorkMin = 0, totalOTMin = 0, totalLateMin = 0;
             let totalBreakMin = 0, totalBreakDeductedMin = 0, totalGrossMin = 0;
             
@@ -1285,10 +1300,17 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
 
                 switch (code) {
-                    case "WO": weekOff++; break;
+                    case "WO":
+                        weekOff++;
+                        if (att && att.punchIn && att.punchOut) otDays++;
+                        break;
                     case "A": absent++; break;
                     case "L": leave++; break;
-                    case "H": holiday++; break;
+                    case "CO": coUsed++; break;
+                    case "H":
+                        holiday++;
+                        if (att && att.punchIn && att.punchOut) otDays++;
+                        break;
                     case "HD":
                         halfDay++; present++;
                         if (att) {
@@ -1345,6 +1367,17 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
 
             const presentableDays = totalDays - weekOff - holiday;
             const attPct = presentableDays > 0 ? (present / presentableDays) * 100 : 0;
+
+            let coBalance = emp.compOff?.balance || 0;
+            let coExpired = 0;
+            if (compOffCutoff && emp.compOff?.credits?.length) {
+                for (const c of emp.compOff.credits) {
+                    if (c.earnedAt && new Date(c.earnedAt).getTime() < compOffCutoff) {
+                        coExpired += c.days || 0;
+                    }
+                }
+            }
+            coBalance = Math.max(0, coBalance - coExpired);
             
             // Calculate average only using non-auto-punch-out days for flexible shifts
             const avgHrs = presentDaysForAvg > 0 ? totalWorkMinForAvg / presentDaysForAvg / 60 : 
@@ -1363,6 +1396,10 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 holiday,
                 presentableDays,
                 present,
+                otDays,
+                coUsed,
+                coBalance,
+                coExpired,
                 halfDay,
                 absent,
                 leave,
@@ -1410,7 +1447,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             views: [{ state: "frozen", ySplit: 3 }],
         });
 
-        const sCols = 28;
+        const sCols = 32;
 
         wsSummary.mergeCells(1, 1, 1, sCols);
         const sTitleCell = wsSummary.getCell(1, 1);
@@ -1516,8 +1553,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             { label: "DATE BREAKDOWN", start: 6, span: 9 },
             { label: "WORKING HOURS", start: 15, span: 3 },
             { label: "BREAK SUMMARY", start: 18, span: 2 },
-            { label: "HOURS", start: 20, span: 2 },
-            { label: "SALARY (₹)", start: 25, span: 7 },
+            { label: "HOURS", start: 20, span: 6 },
+            { label: "SALARY (₹)", start: 26, span: 7 },
         ];
         const grpRow = wsSummary.getRow(grpRowNum);
         grpRow.height = 16;
@@ -1537,7 +1574,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             "Present", "Half Day", "Absent", "Leave", "Late Days",
             "Gross Hrs", "Net Hrs", "Avg Hrs/Day",
             "Break Hrs", "Deducted Hrs",
-            "OT Hrs", "Late Hrs",
+            "OT Hrs", "OT Days", "Late Hrs",
+            "CO Used", "CO Bal", "CO Expired",
             "Basic", "HRA", "DA", "Bonus", "Per Day", "Per Hour", "OT Rate",
         ];
         const sHeaderRow = wsSummary.getRow(subRowNum);
@@ -1567,7 +1605,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 r.present, r.halfDay, r.absent, r.leave, r.late,
                 r.totalGrossHrs, r.totalWorkHrs, r.avgWorkHrs,
                 r.totalBreakHrs, r.totalDeductedHrs,
-                r.totalOTHrs, r.totalLateHrs,
+                r.totalOTHrs, r.otDays, r.totalLateHrs,
+                r.coUsed, r.coBalance, r.coExpired,
                 r.basic, r.hra, r.da, r.bonus, r.perDay, r.perHour, r.overtimeRate,
             ];
 
@@ -1584,8 +1623,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 }
                 
                 if (!isDummy && typeof v === "number") {
-                    if (i >= 14 && i <= 20) c.numFmt = "0.00";
-                    if (i >= 21) c.numFmt = "#,##0.00";
+                    if (i >= 14 && i <= 25) c.numFmt = "0.00";
+                    if (i >= 26) c.numFmt = "#,##0.00";
                 }
             });
 
@@ -1624,7 +1663,11 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             [18, `=SUM(R${dataStartRow}:R${lastReal})`],
             [19, `=SUM(S${dataStartRow}:S${lastReal})`],
             [20, `=SUM(T${dataStartRow}:T${lastReal})`],
-            [21, `=AVERAGE(U${dataStartRow}:U${lastReal})`],
+            [21, `=SUM(U${dataStartRow}:U${lastReal})`],
+            [22, `=SUM(V${dataStartRow}:V${lastReal})`],
+            [23, `=SUM(W${dataStartRow}:W${lastReal})`],
+            [24, `=SUM(X${dataStartRow}:X${lastReal})`],
+            [25, `=SUM(Y${dataStartRow}:Y${lastReal})`],
         ].forEach(([col, val]) => {
             const c = totRow.getCell(col);
             c.value = val;
@@ -1640,7 +1683,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const wsDept = wb.addWorksheet("Dept Pivot");
             wsDept.views = [{ state: "frozen", ySplit: 2 }];
 
-            wsDept.mergeCells(1, 1, 1, 12);
+            wsDept.mergeCells(1, 1, 1, 15);
             const dtTitle = wsDept.getCell(1, 1);
             dtTitle.value = `DEPARTMENT-WISE PIVOT  |  ${startDate} to ${endDate}`;
             dtTitle.font = { name: "Arial", bold: true, size: 13, color: { argb: "FFFFFFFF" } };
@@ -1649,7 +1692,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             wsDept.getRow(1).height = 26;
 
             const deptHdrs = ["Department", "Headcount", "Present Days", "Absent Days", "Leave Days",
-                "Week Off", "Half Days", "Late Days", "Total OT Hrs", "Total Late Hrs", "Total Break Hrs", "Avg Att %"];
+                "Week Off", "Half Days", "Late Days", "OT Days", "CO Used", "CO Bal", "Total OT Hrs", "Total Late Hrs", "Total Break Hrs", "Avg Att %"];
             const deptHdrRow = wsDept.getRow(2);
             deptHdrRow.height = 18;
             deptHdrs.forEach((h, i) => {
@@ -1666,7 +1709,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 if (!deptMap.has(dept)) {
                     deptMap.set(dept, {
                         headcount: 0, present: 0, absent: 0, leave: 0, weekOff: 0,
-                        halfDay: 0, late: 0, otHrs: 0, lateHrs: 0, breakHrs: 0, attPctSum: 0,
+                        halfDay: 0, late: 0, otDays: 0, coUsed: 0, coBal: 0,
+                        otHrs: 0, lateHrs: 0, breakHrs: 0, attPctSum: 0,
                     });
                 }
                 const d = deptMap.get(dept);
@@ -1677,6 +1721,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 d.weekOff += r.weekOff || 0;
                 d.halfDay += r.halfDay || 0;
                 d.late += r.late || 0;
+                d.otDays += r.otDays || 0;
+                d.coUsed += r.coUsed || 0;
+                d.coBal += r.coBalance || 0;
                 d.otHrs += r.totalOTHrs || 0;
                 d.lateHrs += r.totalLateHrs || 0;
                 d.breakHrs += r.totalBreakHrs || 0;
@@ -1690,7 +1737,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const avgAtt = d.headcount > 0 ? d.attPctSum / d.headcount / 100 : 0;
 
                 [dept, d.headcount, d.present, d.absent, d.leave, d.weekOff,
-                    d.halfDay, d.late, parseFloat(d.otHrs.toFixed(2)),
+                    d.halfDay, d.late, d.otDays, d.coUsed, d.coBal, parseFloat(d.otHrs.toFixed(2)),
                     parseFloat(d.lateHrs.toFixed(2)), parseFloat(d.breakHrs.toFixed(2)), avgAtt
                 ].forEach((v, i) => {
                     const c = row.getCell(i + 1);
@@ -1698,11 +1745,11 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     c.font = { name: "Arial", size: 9, bold: i === 0 };
                     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
                     c.alignment = { horizontal: i === 0 ? "left" : "center", vertical: "middle" };
-                    if (i === 11) c.numFmt = "0.0%";
+                    if (i === 14) c.numFmt = "0.0%";
                 });
             });
 
-            wsDept.columns = Array(12).fill({ width: 14 });
+            wsDept.columns = Array(15).fill({ width: 14 });
         }
 
         const filename = exceedsFreeLimit

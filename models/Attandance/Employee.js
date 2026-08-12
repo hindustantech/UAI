@@ -150,6 +150,28 @@ const employeeSchema = new mongoose.Schema({
     deactivationReason: {
         type: String,
         maxlength: 500
+    },
+
+    compOff: {
+        balance: {
+            type: Number,
+            default: 0,
+            min: 0
+        },
+        credits: [{
+            earnedAt: {
+                type: Date,
+                default: Date.now
+            },
+            days: {
+                type: Number,
+                default: 1,
+                min: 0
+            },
+            source: {
+                type: String
+            }
+        }]
     }
 
 }, {

@@ -48,6 +48,7 @@ import SalesAnyRoutes from './routes/Attandance/Sales/sales.any.routes.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
+import './cron/compOffExpiry.cron.js'
 import { connectRedis, getRedisClient } from './config/redis.js';
 import { startAllWorkers, stopAllWorkers } from './src/notification/workers/index.js';
 import { initializeSchedulers } from './src/notification/scheduler/index.js';
