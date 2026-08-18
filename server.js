@@ -54,6 +54,7 @@ import { startAllWorkers, stopAllWorkers } from './src/notification/workers/inde
 import { initializeSchedulers } from './src/notification/scheduler/index.js';
 import { closeAllQueues } from './src/notification/queues/index.js';
 import adminNotificationRoutes from './src/notification/routes/adminNotificationRoutes.js';
+import dashboardRoutes from './routes/Dasboard/dashboard.js';
 dotenv.config();
 await connectDB();
 await connectRedis();
@@ -142,6 +143,7 @@ app.use('/api/face', faceRoutes); // Mount the face routes at /api/face
 app.use('/api/face-attendance', faceAttendanceRoutes); // Mount the face attendance routes at /api/face-attendance
 app.use('/api/v1/sales-any', SalesAnyRoutes); // Mount the sales any routes at /api/v1/sales-any
 app.use('/api/admin/notifications', adminNotificationRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 // Add this after your existing middleware setup
 app.use('/uploads', express.static('uploads'));
 
