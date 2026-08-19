@@ -19,6 +19,20 @@ const VALID_ATTENDANCE_STATUSES = [
 
 const CUSTOMER_TYPES = ["retail", "wholesale", "corporate", "customer", "agent"];
 
+const CUSTOMER_KEY_EXPR = {
+    $cond: [
+        { $and: [{ $ne: ["$customer.customerId", null] }, { $ne: ["$customer.customerId", ""] }] },
+        "$customer.customerId",
+        {
+            $cond: [
+                { $and: [{ $ne: ["$customer.phoneNumber", null] }, { $ne: ["$customer.phoneNumber", ""] }] },
+                { $concat: ["phone_", "$customer.phoneNumber"] },
+                { $ifNull: ["$sessionId", { $toString: "$_id" }] }
+            ]
+        }
+    ]
+};
+
 const toFiniteNumber = (value) => {
     const num = Number(value);
     return Number.isFinite(num) ? num : 0;
@@ -138,6 +152,16 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
                                 0
                             ]
                         }
+                    },
+                    present: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "present"] }, 1, 0]
+                        }
+                    },
+                    absent: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "absent"] }, 1, 0]
+                        }
                     }
                 }
             }
@@ -145,6 +169,11 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
 
         const attendanceDaily = fillDaily(buildDayArray(daysInMonth), attendanceAgg, "count");
         const attendanceTotal = attendanceDaily.reduce((sum, count) => sum + count, 0);
+
+        const presentDaily = fillDaily(buildDayArray(daysInMonth), attendanceAgg, "present");
+        const absentDaily = fillDaily(buildDayArray(daysInMonth), attendanceAgg, "absent");
+        const presentTotal = presentDaily.reduce((sum, count) => sum + count, 0);
+        const absentTotal = absentDaily.reduce((sum, count) => sum + count, 0);
 
         /* ============================
            6. SALES ANALYTICS
@@ -206,24 +235,27 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
                         ],
                         customersInMonth: [
                             {
-                                $match: {
-                                    "customer.customerId": { $exists: true, $ne: null, $ne: "" }
-                                }
-                            },
-                            {
                                 $group: {
-                                    _id: "$customer.customerId",
-                                    sessionIds: {
-                                        $addToSet: { $ifNull: ["$sessionId", "$_id"] }
-                                    },
+                                    _id: CUSTOMER_KEY_EXPR,
+                                    customerId: { $first: { $ifNull: ["$customer.customerId", ""] } },
+                                    companyName: { $first: { $ifNull: ["$customer.companyName", ""] } },
+                                    contactName: { $first: { $ifNull: ["$customer.contactName", ""] } },
+                                    phoneNumber: { $first: { $ifNull: ["$customer.phoneNumber", ""] } },
                                     type: { $first: { $ifNull: ["$customer.type", "customer"] } },
+                                    sessionIds: {
+                                        $addToSet: { $ifNull: ["$sessionId", { $toString: "$_id" }] }
+                                    },
                                     firstVisit: { $min: "$createdAt" },
                                     lastVisit: { $max: "$createdAt" }
                                 }
                             },
                             {
                                 $project: {
-                                    customerId: "$_id",
+                                    customerKey: "$_id",
+                                    customerId: 1,
+                                    companyName: 1,
+                                    contactName: 1,
+                                    phoneNumber: 1,
                                     type: 1,
                                     visits: { $size: "$sessionIds" },
                                     firstVisit: 1,
@@ -248,13 +280,12 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
                 {
                     $match: {
                         companyId: companyObjectId,
-                        "customer.customerId": { $exists: true, $ne: null, $ne: "" },
                         createdAt: { $lt: next }
                     }
                 },
                 {
                     $group: {
-                        _id: "$customer.customerId",
+                        _id: CUSTOMER_KEY_EXPR,
                         firstVisit: { $min: "$createdAt" }
                     }
                 }
@@ -280,6 +311,9 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
             const type = CUSTOMER_TYPES.includes(customer.type) ? customer.type : "customer";
             const normalized = {
                 customerId: customer.customerId,
+                companyName: customer.companyName,
+                contactName: customer.contactName,
+                phoneNumber: customer.phoneNumber,
                 type,
                 visits: toFiniteNumber(customer.visits)
             };
@@ -295,7 +329,7 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
                 activeCustomers.push(normalized);
             }
 
-            const firstVisit = firstVisitMap.get(customer.customerId);
+            const firstVisit = firstVisitMap.get(customer.customerKey);
             if (firstVisit instanceof Date && firstVisit >= start && firstVisit < next) {
                 newCustomers.push(normalized);
             }
@@ -325,6 +359,8 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
                     revenue: revenueTotal,
                     sales: salesCount,
                     attendance: attendanceTotal,
+                    present: presentTotal,
+                    absent: absentTotal,
                     totalEmployees
                 },
                 customerActivity: {
@@ -333,6 +369,8 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
                     byType
                 },
                 attendanceDaily,
+                presentDaily,
+                absentDaily,
                 revenueDaily
             }
         });
