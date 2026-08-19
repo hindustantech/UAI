@@ -39,8 +39,7 @@ const fillDaily = (dayArray, entries, valueKey) => {
 
 export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
     try {
-        const { companyId, month, year } = req.query;
-
+          
         /* ============================
            1. VALIDATION
         ============================ */
