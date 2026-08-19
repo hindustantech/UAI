@@ -307,6 +307,13 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
         const newCustomers = [];
         const activeCustomers = [];
 
+        const newByType = {};
+        const activeByType = {};
+        for (const type of CUSTOMER_TYPES) {
+            newByType[type] = 0;
+            activeByType[type] = 0;
+        }
+
         for (const customer of customersInMonth) {
             const type = CUSTOMER_TYPES.includes(customer.type) ? customer.type : "customer";
             const normalized = {
@@ -327,11 +334,13 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
 
             if (normalized.visits >= 2) {
                 activeCustomers.push(normalized);
+                activeByType[normalized.type] += 1;
             }
 
             const firstVisit = firstVisitMap.get(customer.customerKey);
             if (firstVisit instanceof Date && firstVisit >= start && firstVisit < next) {
                 newCustomers.push(normalized);
+                newByType[normalized.type] += 1;
             }
         }
 
@@ -366,7 +375,11 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
                 customerActivity: {
                     new: newCustomers,
                     active: activeCustomers,
-                    byType
+                    newCount: newCustomers.length,
+                    activeCount: activeCustomers.length,
+                    byType,
+                    newByType,
+                    activeByType
                 },
                 attendanceDaily,
                 presentDaily,
