@@ -128,7 +128,7 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
             {
                 $group: {
                     _id: {
-                        $dayOfMonth: { date: "$date", timeZone: "UTC" }
+                        $dateToString: { format: "%d", date: "$date", timeZone: "UTC" }
                     },
                     count: {
                         $sum: {
@@ -185,7 +185,7 @@ export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
                             {
                                 $group: {
                                     _id: {
-                                        $dayOfMonth: { date: "$salesLogs.createdAt", timeZone: "UTC" }
+                                        $dateToString: { format: "%d", date: "$salesLogs.createdAt", timeZone: "UTC" }
                                     },
                                     total: {
                                         $sum: {
