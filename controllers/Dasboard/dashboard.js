@@ -39,10 +39,16 @@ const fillDaily = (dayArray, entries, valueKey) => {
 
 export const getDashboardCompanyMonthlyAttendance = async (req, res) => {
     try {
-          
+        const { companyId, month, year } = req.query;
+
         /* ============================
-           1. VALIDATION
+           0. PARAMETER CHECK
         ============================ */
+
+
+        // ===============
+        //    1. VALIDATION
+        // ============================ */
 
         if (!companyId || !mongoose.Types.ObjectId.isValid(companyId)) {
             return res.status(400).json({
