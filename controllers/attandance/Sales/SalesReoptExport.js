@@ -94,11 +94,7 @@ export const exportSalesPersonReport = async (req, res) => {
 
         let dateFilter = {};
 
-        // FIX: hoisted so we can also apply these bounds per-visitLog below.
-        // Previously the date filter only restricted which SESSIONS were
-        // fetched (via session-level punchInTime), but a session can contain
-        // many visitLogs across different days, so out-of-range visit logs
-        // were still showing up in the export. We now also bound each log.
+ 
         let fromDateBound = null;
         let toDateBound = null;
 
@@ -677,19 +673,7 @@ export const exportSalesReport = async (req, res) => {
             { 'meetingLogs.userId': { $in: targetEmployeeIds } }   // In meeting logs
         ];
 
-        // ============================================
-        // STEP 4: Date range filter (if provided)
-        // ============================================
-        // FIX: The original code pushed the date conditions into the SAME
-        // $or array as the employee conditions:
-        //   query.$or = [...employee conditions...];
-        //   query.$or.push(...date conditions...);
-        // That made Mongo match documents where "ANY employee condition
-        // matches OR ANY date condition matches" instead of
-        // "employee matches AND date matches" — so the date range filter
-        // was effectively ignored (and could even leak in wrong employees).
-        // Fix: keep employee conditions and date conditions in their own
-        // $or blocks, and combine those two blocks with $and.
+      
         if (startDate || endDate) {
             const dateFilter = {};
 
@@ -854,15 +838,13 @@ export const exportSalesReport = async (req, res) => {
             { label: 'Date', value: 'date' },
             { label: 'Employee Code', value: 'empCode' },
             { label: 'Employee Name', value: 'empName' },
-            { label: 'Employee Type', value: 'employeeType' },
-            { label: 'Role', value: 'role' },
             { label: 'Customer ID', value: 'customerId' },
             { label: 'Company Name', value: 'companyName' },
             { label: 'Contact Name', value: 'contactName' },
             { label: 'Phone Number', value: 'phoneNumber' },
             { label: 'Address', value: 'address' },
             { label: 'Landmark', value: 'landmark' },
-            { label: 'Customer Location', value: 'customerLocation' },
+            { label: 'Customer Type', value: 'customerType' },
             { label: 'Sales Logs', value: 'salesLogs' },
             { label: 'Total Sales Amount', value: 'totalSalesAmount' },
             { label: 'Payment Collected', value: 'paymentCollected' },
@@ -872,9 +854,6 @@ export const exportSalesReport = async (req, res) => {
             { label: 'Next Meeting Time', value: 'nextMeetingTime' },
             { label: 'Next Meeting Notes', value: 'nextMeetingNotes' },
             { label: 'Sales Status', value: 'salesStatus' },
-            { label: 'Session Status', value: 'sessionStatus' },
-            { label: 'Form Completed', value: 'formCompleted' },
-            { label: 'Session Created', value: 'sessionCreated' },
             { label: 'Punch In Time', value: 'punchInTime' },
             { label: 'Punch In Location', value: 'punchInLocation' },
             { label: 'Punch Out Time', value: 'punchOutTime' },
@@ -986,8 +965,6 @@ const createCompanyReportRow = (session, employeeData) => {
         date: session.createdAt ? new Date(session.createdAt).toISOString().split('T')[0] : '',
         empCode: employeeData?.empCode || 'N/A',
         empName: employeeData?.user_name || 'Unknown',
-        employeeType: employeeData?.employeeType || 'N/A',
-        role: employeeData?.role || 'N/A',
 
         // Customer Information
         customerId: session.customer?.customerId || '',
@@ -996,7 +973,7 @@ const createCompanyReportRow = (session, employeeData) => {
         phoneNumber: session.customer?.phoneNumber || '',
         address: session.customer?.address || '',
         landmark: session.customer?.landmark || '',
-        customerLocation: formatCoordinates(session.customer?.location),
+        customerType: session.customer?.type || '',
 
         // Sales Information
         salesLogs: salesLogsFormatted || 'No sales logs',
@@ -1014,11 +991,8 @@ const createCompanyReportRow = (session, employeeData) => {
 
         // Status
         salesStatus: session.SalesStatus || 'N/A',
-        sessionStatus: session.status || 'N/A',
-        formCompleted: session.formCompleted ? 'Yes' : 'No',
 
         // Time Tracking
-        sessionCreated: session.createdAt ? new Date(session.createdAt).toLocaleString() : '',
         punchInTime: session.punchInTime ? new Date(session.punchInTime).toLocaleString() : '',
         punchInLocation: formatCoordinates(session.punchInLocation),
         punchOutTime: session.punchOutTime ? new Date(session.punchOutTime).toLocaleString() : '',
