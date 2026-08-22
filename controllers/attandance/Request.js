@@ -397,7 +397,9 @@ export const createAttendanceRequest = async (req, res) => {
             }
 
             const balance = employee.compOff?.balance || 0;
-            const weeklyOff = employee.weeklyOff?.length ? employee.weeklyOff : ["Sunday"];
+            const weeklyOff = employee.weeklyOff?.length 
+                ? employee.weeklyOff 
+                : (employee?.shift?.weeklyOff?.length ? employee.shift.weeklyOff : []);
             let needed = 0;
 
             for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
@@ -941,7 +943,9 @@ export const approveAttendanceRequest = async (req, res) => {
             const employee = await Employee.findById(request.employeeId).session(session);
             if (!employee) throw new Error("Employee not found");
 
-            const weeklyOff = employee.weeklyOff?.length ? employee.weeklyOff : ["Sunday"];
+            const weeklyOff = employee.weeklyOff?.length
+                ? employee.weeklyOff
+                : (employee?.shift?.weeklyOff?.length ? employee.shift.weeklyOff : []);
             let marked = 0;
 
             for (

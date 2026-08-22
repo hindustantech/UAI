@@ -574,7 +574,9 @@ export const generateAttendanceCSV = async (req, res) => {
             : employees;
 
         for (const emp of employeesToProcess) {
-            const weeklyOffDays = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
+            const weeklyOffDays = emp.weeklyOff?.length 
+                ? emp.weeklyOff 
+                : (emp.shift?.weeklyOff?.length ? emp.shift.weeklyOff : []);
             const shiftStart = emp.shift?.startTime || "09:00";
             const shiftEnd = emp.shift?.endTime || "18:00";
             const shiftName = emp.shift?.shiftName || "Default (09:00–18:00)";
@@ -1033,7 +1035,9 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
 
         // Data rows
         employees.forEach((emp, empIdx) => {
-            const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
+            const weeklyOff = emp.weeklyOff?.length 
+                ? emp.weeklyOff 
+                : (emp.shift?.weeklyOff?.length ? emp.shift.weeklyOff : []);
             const shiftStart = emp.shift?.startTime || "09:00";
             const shiftEnd = emp.shift?.endTime || "18:00";
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
@@ -1147,7 +1151,9 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
         let detailRowNum = 3;
         let seq = 1;
         for (const emp of employees) {
-            const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
+            const weeklyOff = emp.weeklyOff?.length 
+                ? emp.weeklyOff 
+                : (emp.shift?.weeklyOff?.length ? emp.shift.weeklyOff : []);
             const shiftStart = emp.shift?.startTime || "09:00";
             const shiftEnd = emp.shift?.endTime || "18:00";
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
@@ -1274,7 +1280,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             : employees;
 
         for (const emp of employeesToProcess) {
-            const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff : ["Sunday"];
+            const weeklyOff = emp.weeklyOff?.length 
+                ? emp.weeklyOff 
+                : (emp.shift?.weeklyOff?.length ? emp.shift.weeklyOff : []);
             const shiftStart = emp.shift?.startTime || "09:00";
             const shiftEnd = emp.shift?.endTime || "18:00";
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
@@ -1505,7 +1513,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const row = wsMaster.addRow([]);
                 row.height = 16;
                 const bg = idx % 2 === 0 ? ALT_ROW : "FFFFFFFF";
-                const weeklyOff = emp.weeklyOff?.length ? emp.weeklyOff.join(", ") : "Sunday";
+                const weeklyOff = emp.weeklyOff?.length 
+                    ? emp.weeklyOff.join(", ") 
+                    : (emp.shift?.weeklyOff?.length ? emp.shift.weeklyOff.join(", ") : "—");
                 const shiftName = emp.shift?.shiftName || "N/A";
                 const shiftStart = emp.shift?.startTime || "09:00";
                 const shiftEnd = emp.shift?.endTime || "18:00";

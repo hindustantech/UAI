@@ -89,7 +89,7 @@ export const checkWeeklyOff = (employee, shift, attendanceDate) => {
 
     const weeklyOff = employee?.weeklyOff?.length
         ? employee.weeklyOff
-        : shift?.weeklyOff || ["Sunday"];
+        : (shift?.weeklyOff?.length ? shift.weeklyOff : []);
 
     if (weeklyOff.includes(day)) {
         throw new Error("ATTENDANCE_ON_WEEKLY_OFF");

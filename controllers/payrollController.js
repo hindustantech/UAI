@@ -101,7 +101,8 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
     let compOffUsed = 0;
 
     const weeklyOffSet = new Set(
-        (employee?.weeklyOff && employee.weeklyOff.length) ? employee.weeklyOff : ["Sunday"]
+        (employee?.weeklyOff && employee.weeklyOff.length) ? employee.weeklyOff 
+        : (employee?.shift?.weeklyOff?.length ? employee.shift.weeklyOff : [])
     );
     const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 

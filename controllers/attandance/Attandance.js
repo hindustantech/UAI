@@ -387,8 +387,8 @@ export const markAttendance = async (req, res) => {
 
             return res.status(403).json({
                 success: false,
-                message: "No active subscription",
-                error: "No active subscription found for this company"
+                message: "please try logout and login again",
+                error: "please try logout and login again found for this company"
             });
         }
         /* ===========================
@@ -1308,8 +1308,8 @@ export const markFaceAttendance = async (req, res) => {
 
             return res.status(403).json({
                 success: false,
-                message: "No active subscription",
-                error: "No active subscription found for this company"
+                message: "please try logout and login again",
+                error: "please try logout and login again found for this company"
             });
         }
         /* ===========================

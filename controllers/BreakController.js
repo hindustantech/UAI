@@ -712,8 +712,8 @@ export const startFaceBreakController = async (req, res) => {
         if (!subscription) {
             return res.status(403).json({
                 success: false,
-                message: 'No active subscription',
-                error: 'No active subscription found for this company'
+                message: 'please try logout and login again',
+                error: 'please try logout and login again found for this company'
             });
         }
 
@@ -948,8 +948,8 @@ export const endFaceBreakController = async (req, res) => {
         if (!subscription) {
             return res.status(403).json({
                 success: false,
-                message: 'No active subscription',
-                error: 'No active subscription found for this company'
+                message: 'please try logout and login again',
+                error: 'please try logout and login again found for this company'
             });
         }
 
@@ -1160,8 +1160,8 @@ export const startFaceBreakIdentifyController = async (req, res) => {
         if (!subscription) {
             return res.status(403).json({
                 success: false,
-                message: 'No active subscription',
-                error: 'No active subscription found for this company'
+                message: 'please try logout and login again',
+                error: 'please try logout and login again found for this company'
             });
         }
 
@@ -1393,8 +1393,8 @@ export const endFaceBreakIdentifyController = async (req, res) => {
         if (!subscription) {
             return res.status(403).json({
                 success: false,
-                message: 'No active subscription',
-                error: 'No active subscription found for this company'
+                message: 'please try logout and login again',
+                error: 'please try logout and login again found for this company'
             });
         }
 

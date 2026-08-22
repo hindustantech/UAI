@@ -175,8 +175,8 @@ export const markAttendanceWithFaceVerify = async (req, res) => {
     if (!subscription) {
       return res.status(403).json({
         success: false,
-        message: 'No active subscription',
-        error: 'No active subscription found for this company'
+        message: 'please try logout and login again',
+        error: 'please try logout and login again '
       });
     }
 
@@ -346,8 +346,8 @@ export const markAttendanceWithFaceIdentify = async (req, res) => {
     if (!subscription) {
       return res.status(403).json({
         success: false,
-        message: 'No active subscription',
-        error: 'No active subscription found for this company'
+        message: 'Plsease try logout and login again',
+        error: 'Plsease try logout and login again found for this company'
       });
     }
 

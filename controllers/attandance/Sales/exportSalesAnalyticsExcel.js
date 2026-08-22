@@ -91,7 +91,7 @@ const styleDataRow = (row) => {
         cell.font = { name: FONT, size: 11 };
         cell.border = {
             top: { style: "thin", color: { argb: "FFE0E0E0" } },
-            left: { style: "thin", color: { argb: "FFE0E0E0" } },
+            left: { style: "thin", color  : { argb: "FFE0E0E0" } },
             bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
             right: { style: "thin", color: { argb: "FFE0E0E0" } }
         };

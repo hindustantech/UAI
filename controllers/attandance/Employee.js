@@ -996,6 +996,7 @@ export const updateEmployee = async (req, res) => {
         const {
             user_name,
             role,
+            empCode,
             jobInfo,
             salaryStructure,
             bankDetails,
@@ -1061,6 +1062,10 @@ export const updateEmployee = async (req, res) => {
         ---------------------------------------------- */
         if (user_name !== undefined) {
             updatePayload.user_name = user_name;
+        }
+
+        if (empCode !== undefined) {
+            updatePayload.empCode = empCode;
         }
 
         if (role && ["employee", "manager", "hr", "admin", "super_admin"].includes(role)) {
