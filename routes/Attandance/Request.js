@@ -11,15 +11,15 @@ import {
     bulkApproveRequests,
     getRequestStatistics
 } from "../../controllers/attandance/Request.js";
-import authMiddleware from "../../middlewares/authMiddleware.js";
+import optionalAuth from "../../middlewares/optionalAuth.js";
 import { checkPermission } from "../../middlewares/checkPermission.js";
 
 const router = express.Router();
 
 // All routes are protected
-router.post("/", authMiddleware, createAttendanceRequest);
-router.get("/", authMiddleware, getAttendanceRequests);
-router.use(authMiddleware  );
+router.post("/", optionalAuth, createAttendanceRequest);
+router.get("/", optionalAuth, getAttendanceRequests);
+router.use(optionalAuth );
 
 /*
 ====================================

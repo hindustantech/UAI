@@ -1205,9 +1205,12 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
                 let overtimeDisplay = "—";
                 
                 if (att && att.punchIn && att.punchOut) {
-                    const workCalc = calculateWorkingHoursWithBreaks(
-                        att.punchIn, att.punchOut, att.breaks, shiftBreaks
-                    );
+                    const workCalc = att.isAutoMarked
+                        ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0 }
+                        : calculateWorkingHoursWithBreaks(
+                            att.punchIn, att.punchOut, att.breaks, shiftBreaks,
+                            getShiftStartRealUTCms(att.punchIn, shiftStart)
+                        );
                     grossHrs = formatWorkingHours(workCalc.totalMinutes);
                     breakDeducted = formatWorkingHours(workCalc.breakDeductedMinutes);
                     overtimeDisplay = att.workSummary?.overtimeMinutes 
@@ -1352,9 +1355,12 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     case "HD":
                         halfDay++; present++;
                         if (att) {
-                            const workCalc = calculateWorkingHoursWithBreaks(
-                                att.punchIn, att.punchOut, att.breaks, shiftBreaks
-                            );
+                            const workCalc = att.isAutoMarked
+                                ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0 }
+                                : calculateWorkingHoursWithBreaks(
+                                    att.punchIn, att.punchOut, att.breaks, shiftBreaks,
+                                    getShiftStartRealUTCms(att.punchIn, shiftStart)
+                                );
                             totalWorkMin += workCalc.payableMinutes;
                             totalGrossMin += workCalc.totalMinutes;
                             totalBreakMin += workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
@@ -1380,9 +1386,12 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                             if (code === "PE" || code === "PLE") earlyExit++;
                         }
                         if (att) {
-                            const workCalc = calculateWorkingHoursWithBreaks(
-                                att.punchIn, att.punchOut, att.breaks, shiftBreaks
-                            );
+                            const workCalc = att.isAutoMarked
+                                ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0 }
+                                : calculateWorkingHoursWithBreaks(
+                                    att.punchIn, att.punchOut, att.breaks, shiftBreaks,
+                                    getShiftStartRealUTCms(att.punchIn, shiftStart)
+                                );
                             totalWorkMin += workCalc.payableMinutes;
                             totalGrossMin += workCalc.totalMinutes;
                             totalBreakMin += workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
