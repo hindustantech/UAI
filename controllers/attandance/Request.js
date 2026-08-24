@@ -515,7 +515,7 @@ export const getAttendanceRequests = async (req, res) => {
             companyId,
         } = req.query;
 
-        const userId = req.user?._id;
+        const userId = req.user?._id||req.query.userId;
         const userRole = req.user?.role || req.user?.type;
 
         // Build query based on user role
@@ -599,9 +599,9 @@ export const getAttendanceRequests = async (req, res) => {
 export const getAttendanceRequestById = async (req, res) => {
     try {
         const { requestId } = req.params;
-        const userId = req.user._id;
-        const userRole = req.user.role;
-        const companyId = req.user.companyId;
+        const userId = req.user?._id|| req.query.userId;
+        const userRole = req.user?.role || req.query?.type;
+        const companyId = req.user?.companyId || req.query.companyId;
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             return res.status(400).json({
@@ -1152,7 +1152,7 @@ export const rejectAttendanceRequest = async (req, res) => {
 export const cancelAttendanceRequest = async (req, res) => {
     try {
         const { requestId, companyId } = req.params;
-        const userId = req.user._id;
+        const userId = req.user?._id || req.query.userId;
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             return res.status(400).json({
@@ -1225,7 +1225,7 @@ export const cancelAttendanceRequest = async (req, res) => {
 export const updateAttendanceRequest = async (req, res) => {
     try {
         const { requestId, companyId } = req.params;
-        const userId = req.user._id;
+        const userId = req.user?._id|| req.query.userId;
         const updates = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
