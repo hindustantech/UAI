@@ -117,15 +117,21 @@ const computeShiftDurationMinutes = (startTime, endTime, isNightShift) => {
 const calculateWorkingHours = (punchIn, punchOut, existingAttendance, overrides = {}) => {
     if (!punchIn || !punchOut) return {};
 
-    const totalMinutes = Math.round(
-        (punchOut.getTime() - punchIn.getTime()) / 60000
-    );
-
-    const totalWorkingHours = parseFloat((totalMinutes / 60).toFixed(2));
-
     const shiftMinutes = existingAttendance?.shift?.shiftMinutes || overrides.shiftMinutes || 540;
     const shiftStartTime = existingAttendance?.shift?.startTime || overrides.startTime || "09:00";
     const shiftEndTime = existingAttendance?.shift?.endTime || overrides.endTime || "18:00";
+
+    // RULE: If punch-in before shift start, working hours count from shift start
+    const [startH, startM] = shiftStartTime.split(":").map(Number);
+    const shiftStartMoment = new Date(punchIn);
+    shiftStartMoment.setHours(startH || 0, startM || 0, 0, 0);
+    const effectivePunchInMs = Math.max(punchIn.getTime(), shiftStartMoment.getTime());
+
+    const totalMinutes = Math.max(0, Math.round(
+        (punchOut.getTime() - effectivePunchInMs) / 60000
+    ));
+
+    const totalWorkingHours = parseFloat((totalMinutes / 60).toFixed(2));
 
     const breakMinutes = calculateTotalBreakMinutes(existingAttendance?.breaks || []);
 

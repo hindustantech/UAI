@@ -29,9 +29,7 @@ export const autoCloseAttendance = async () => {
                 .add(2, "minute")
                 .toDate();
 
-            const workedMinutes =
-                Math.max(0, (autoPunchOutTime - att.punchIn) / 60000);
-
+            // RULE: Auto punch-out (midnight) results in zero working hours
             return {
                 updateOne: {
                     filter: { _id: att._id },
@@ -40,9 +38,11 @@ export const autoCloseAttendance = async () => {
                             punchOut: autoPunchOutTime,
                             lastPunchAt: autoPunchOutTime,
                             isAutoMarked: true,
-                            "workSummary.totalMinutes": workedMinutes,
-                            "workSummary.payableMinutes": workedMinutes,
-                            remarks: "System Auto Punch-Out at 00:02 AM"
+                            totalWorkingHours: 0,
+                            "workSummary.totalMinutes": 0,
+                            "workSummary.payableMinutes": 0,
+                            "workSummary.overtimeMinutes": 0,
+                            remarks: "System Auto Punch-Out at 00:02 AM — Working hours counted as 0 per auto-punch-out policy"
                         },
                         $push: {
                             punchHistory: {

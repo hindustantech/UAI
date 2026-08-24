@@ -275,47 +275,28 @@ class PunchAutomationCron {
         reason,
         session
     ) {
-        const punchInTime = new Date(attendance.punchIn);
         const employee = attendance.employeeId;
 
-        // ---- Work Duration ----
-        const totalWorkMinutes = Math.round(
+        // RULE: Auto punch-out results in zero working hours
+        const punchInTime = new Date(attendance.punchIn);
+        const workDuration = Math.round(
             (punchOutTime.getTime() - punchInTime.getTime()) / (1000 * 60)
         );
-        const workHours = Math.floor(totalWorkMinutes / 60);
-        const workMins = totalWorkMinutes % 60;
-        const totalWorkingHours = parseFloat((totalWorkMinutes / 60).toFixed(2));
+        const workHours = Math.floor(workDuration / 60);
+        const workMins = workDuration % 60;
 
-        // ---- Breaks ----
-        const totalBreakMinutes = (attendance.breaks || []).reduce(
-            (sum, brk) => sum + (brk.durationMinutes || 0),
-            0
-        );
-
-        // ---- Payable & Overtime ----
-        const shiftMinutes = shift.shiftMinutes || 480; // Default 8 hrs
-        let payableMinutes = totalWorkMinutes - totalBreakMinutes;
-        let overtimeMinutes = 0;
-
-        if (payableMinutes > shiftMinutes) {
-            overtimeMinutes = payableMinutes - shiftMinutes;
-            if (!shift.overtime?.allowed) {
-                payableMinutes = shiftMinutes; // Cap at shift duration if OT not allowed
-            }
-        }
-
-        // ---- Persist to DB ----
+        // ---- Persist to DB — working hours zeroed, status stays present ----
         await Attendance.findByIdAndUpdate(
             attendance._id,
             {
                 punchOut: punchOutTime,
                 lastPunchAt: punchOutTime,
                 status: "present",
-                totalWorkingHours,
+                totalWorkingHours: 0,
                 workSummary: {
-                    totalMinutes: totalWorkMinutes,
-                    payableMinutes,
-                    overtimeMinutes,
+                    totalMinutes: 0,
+                    payableMinutes: 0,
+                    overtimeMinutes: 0,
                     lateMinutes: attendance.workSummary?.lateMinutes || 0,
                     earlyLeaveMinutes: 0,
                 },
@@ -327,13 +308,13 @@ class PunchAutomationCron {
                         createdAt: new Date(),
                     },
                 },
-                remarks: reason,
+                remarks: `${reason} — Working hours counted as 0 per auto-punch-out policy`,
             },
             { session, new: true }
         );
 
         console.log(
-            `✅ [PUNCH CRON] Punch-out marked for emp ${employee._id} | Work: ${workHours}h ${workMins}m | Payable: ${payableMinutes}m | OT: ${overtimeMinutes}m`
+            `✅ [PUNCH CRON] Punch-out marked for emp ${employee._id} | Auto-punched at ${workHours}h ${workMins}m elapsed | Working hours set to 0`
         );
     }
 

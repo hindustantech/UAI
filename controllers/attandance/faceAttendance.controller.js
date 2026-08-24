@@ -611,9 +611,15 @@ async function processAttendanceForEmployee({
     let totalMinutes = 0, overtimeMinutes = 0, earlyLeaveMinutes = 0, lateMinutes = 0, isSuspicious = false;
     let finalRemarks = remarks || '';
 
+    // RULE: If punch-in before shift start, working hours count from shift start
+    const earlyCreditMinutes = Math.max(0, diffMinutes(punchInTimeIST, shiftStartTimeIST));
+
     if (isFlexible) {
       if (outTimeUTC) {
         totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+        if (earlyCreditMinutes > 0) {
+          totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutes);
+        }
         if (punchOutTimeIST > shiftEndTimeIST) overtimeMinutes = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
         if (punchOutTimeIST < shiftEndTimeIST) earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
       }
@@ -642,6 +648,9 @@ async function processAttendanceForEmployee({
 
       if (outTimeUTC) {
         totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+        if (earlyCreditMinutes > 0) {
+          totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutes);
+        }
 
         if (punchOutTimeIST > shiftEndTimeIST) {
           const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
@@ -805,7 +814,13 @@ async function processAttendanceForEmployee({
 
   const inTimeUTC = new Date(attendance.punchIn);
   const inTimeIST = getPunchTimeIST(inTimeUTC);
+  // RULE: If punch-in before shift start, working hours count from shift start
+  const earlyCreditMinutes = Math.max(0, diffMinutes(inTimeIST, shiftStartTimeIST));
   let totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+  if (earlyCreditMinutes > 0) {
+    totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutes);
+    console.log(`  Early punch-in credit removed: ${earlyCreditMinutes} mins (counted from shift start)`);
+  }
   let isSuspicious = attendance.isSuspicious || false;
 
   if (isFlexible) {

@@ -633,8 +633,14 @@ export const markAttendance = async (req, res) => {
                 let overtimeMinutes = 0;
                 let earlyLeaveMinutes = 0;
 
+                // RULE: If punch-in before shift start, working hours count from shift start
+                const earlyCreditMinutes = Math.max(0, diffMinutes(punchInTimeIST, shiftStartTimeIST));
+
                 if (outTimeUTC) {
                     totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+                    if (earlyCreditMinutes > 0) {
+                        totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutes);
+                    }
 
                     if (punchOutTimeIST > shiftEndTimeIST) {
                         overtimeMinutes = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
@@ -776,12 +782,18 @@ export const markAttendance = async (req, res) => {
                 let earlyLeaveMinutes = 0;
                 let isSuspicious = false;
 
+                // RULE: If punch-in before shift start, working hours count from shift start
+                const earlyCreditMinutesRegular = Math.max(0, diffMinutes(punchInTimeIST, shiftStartTimeIST));
+
                 // ✅ FIX: For punch-in only, status is "present"
                 let finalStatus = baseStatus === "holiday" ? "holiday" : "present";
 
                 // Only calculate if punch-out is provided
                 if (outTimeUTC) {
                     totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+                    if (earlyCreditMinutesRegular > 0) {
+                        totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutesRegular);
+                    }
 
                     if (punchOutTimeIST > shiftEndTimeIST) {
                         const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
@@ -999,7 +1011,15 @@ export const markAttendance = async (req, res) => {
             /* Recalculate all metrics */
             const inTimeUTC = new Date(attendance.punchIn);
             const inTimeIST = getPunchTimeIST(inTimeUTC);
+
+            // RULE: If punch-in before shift start, working hours count from shift start
+            const earlyCreditMinutesPunchOut = Math.max(0, diffMinutes(inTimeIST, shiftStartTimeIST));
+
             let totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+            if (earlyCreditMinutesPunchOut > 0) {
+                totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutesPunchOut);
+                console.log(`  Early punch-in credit removed: ${earlyCreditMinutesPunchOut} mins (counted from shift start)`);
+            }
             let isSuspicious = attendance.isSuspicious || false;
 
             console.log(`  Punch Out (IST): ${punchOutTimeIST.toISOString()}`);
@@ -1554,8 +1574,14 @@ export const markFaceAttendance = async (req, res) => {
                 let overtimeMinutes = 0;
                 let earlyLeaveMinutes = 0;
 
+                // RULE: If punch-in before shift start, working hours count from shift start
+                const earlyCreditMinutes = Math.max(0, diffMinutes(punchInTimeIST, shiftStartTimeIST));
+
                 if (outTimeUTC) {
                     totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+                    if (earlyCreditMinutes > 0) {
+                        totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutes);
+                    }
 
                     if (punchOutTimeIST > shiftEndTimeIST) {
                         overtimeMinutes = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
@@ -1697,12 +1723,18 @@ export const markFaceAttendance = async (req, res) => {
                 let earlyLeaveMinutes = 0;
                 let isSuspicious = false;
 
+                // RULE: If punch-in before shift start, working hours count from shift start
+                const earlyCreditMinutesRegular = Math.max(0, diffMinutes(punchInTimeIST, shiftStartTimeIST));
+
                 // ✅ FIX: For punch-in only, status is "present"
                 let finalStatus = baseStatus === "holiday" ? "holiday" : "present";
 
                 // Only calculate if punch-out is provided
                 if (outTimeUTC) {
                     totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+                    if (earlyCreditMinutesRegular > 0) {
+                        totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutesRegular);
+                    }
 
                     if (punchOutTimeIST > shiftEndTimeIST) {
                         const earlyExitGrace = shiftData.gracePeriod?.earlyExit || 10;
@@ -1920,7 +1952,15 @@ export const markFaceAttendance = async (req, res) => {
             /* Recalculate all metrics */
             const inTimeUTC = new Date(attendance.punchIn);
             const inTimeIST = getPunchTimeIST(inTimeUTC);
+
+            // RULE: If punch-in before shift start, working hours count from shift start
+            const earlyCreditMinutesPunchOut = Math.max(0, diffMinutes(inTimeIST, shiftStartTimeIST));
+
             let totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
+            if (earlyCreditMinutesPunchOut > 0) {
+                totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutesPunchOut);
+                console.log(`  Early punch-in credit removed: ${earlyCreditMinutesPunchOut} mins (counted from shift start)`);
+            }
             let isSuspicious = attendance.isSuspicious || false;
 
             console.log(`  Punch Out (IST): ${punchOutTimeIST.toISOString()}`);

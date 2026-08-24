@@ -28,6 +28,27 @@ const minutesToHours = (mins = 0) =>
     (Math.abs(mins) / 60).toFixed(2);
 
 /**
+ * Shift start real-UTC from punchIn date + "HH:MM" shift start string.
+ * Uses IST offset so that calendar-day clamping works correctly.
+ */
+const getShiftStartRealUTCms = (punchInDate, shiftStartTimeStr) => {
+    if (!punchInDate || !shiftStartTimeStr) return null;
+    const [h, m] = shiftStartTimeStr.split(":").map(Number);
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const punchInIST = new Date(new Date(punchInDate).getTime() + IST_OFFSET_MS);
+    return (
+        Date.UTC(
+            punchInIST.getUTCFullYear(),
+            punchInIST.getUTCMonth(),
+            punchInIST.getUTCDate(),
+            h || 0,
+            m || 0,
+            0
+        ) - IST_OFFSET_MS
+    );
+};
+
+/**
  * Get break details with deductions
  * Returns array of break info and calculates total deductions
  */
@@ -138,7 +159,7 @@ const getBreakDetails = (actualBreaks = [], shiftBreakConfig = []) => {
 /**
  * Calculate working hours considering breaks
  */
-const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], shiftBreakConfig = []) => {
+const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], shiftBreakConfig = [], shiftStartMS = null) => {
     if (!punchIn || !punchOut) return { 
         totalMinutes: 0, 
         payableMinutes: 0, 
@@ -149,9 +170,14 @@ const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], s
 
     const punchInTime = new Date(punchIn).getTime();
     const punchOutTime = new Date(punchOut).getTime();
+
+    // RULE: If punch-in before shift start, working hours count from shift start
+    const effectivePunchInTime = (shiftStartMS && punchInTime < shiftStartMS)
+        ? shiftStartMS
+        : punchInTime;
     
     // Total gross working minutes (punch to punch)
-    const totalGrossMinutes = Math.round((punchOutTime - punchInTime) / (1000 * 60));
+    const totalGrossMinutes = Math.round((punchOutTime - effectivePunchInTime) / (1000 * 60));
     
     const { breakDetails, totalDeductMinutes, totalExcessMinutes } = getBreakDetails(actualBreaks, shiftBreakConfig);
     
@@ -290,14 +316,15 @@ const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEn
         default: {
             let hrs = "0:00";
             let breakInfo = "";
-            if (attendance.punchIn && attendance.punchOut) {
+            if (attendance.punchIn && attendance.punchOut && !attendance.isAutoMarked) {
                 const shiftBreaks = attendance.shift?.breaks || [];
                 
                 const workCalc = calculateWorkingHoursWithBreaks(
                     attendance.punchIn, 
                     attendance.punchOut, 
                     attendance.breaks, 
-                    shiftBreaks
+                    shiftBreaks,
+                    getShiftStartRealUTCms(attendance.punchIn, shiftStart)
                 );
                 
                 hrs = formatWorkingHours(workCalc.payableMinutes);
@@ -604,12 +631,15 @@ export const generateAttendanceCSV = async (req, res) => {
                     punchInTime = attendance.punchIn ? formatTime(attendance.punchIn) : "—";
                     punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
                     
-                    const workCalc = calculateWorkingHoursWithBreaks(
-                        attendance.punchIn,
-                        attendance.punchOut,
-                        attendance.breaks,
-                        shiftBreaks
-                    );
+                    const workCalc = attendance.isAutoMarked
+                        ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0, breakDetails: [] }
+                        : calculateWorkingHoursWithBreaks(
+                            attendance.punchIn,
+                            attendance.punchOut,
+                            attendance.breaks,
+                            shiftBreaks,
+                            getShiftStartRealUTCms(attendance.punchIn, shiftStart)
+                        );
                     
                     totalHours = formatWorkingHours(workCalc.payableMinutes);
                     grossHours = formatWorkingHours(workCalc.totalMinutes);
