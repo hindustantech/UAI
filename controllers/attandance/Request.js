@@ -197,8 +197,7 @@ export const createAttendanceRequest = async (req, res) => {
             otDetails
         } = req.body;
 
-        const userId = req?.user?._id || req.query.userId;
-
+        const userId = req.query.userId || req.user?._id;
         /*
             STEP 1: GET EMPLOYEE
         */
@@ -403,8 +402,8 @@ export const createAttendanceRequest = async (req, res) => {
             }
 
             const balance = employee.compOff?.balance || 0;
-            const weeklyOff = employee.weeklyOff?.length 
-                ? employee.weeklyOff 
+            const weeklyOff = employee.weeklyOff?.length
+                ? employee.weeklyOff
                 : (employee?.shift?.weeklyOff?.length ? employee.shift.weeklyOff : []);
             let needed = 0;
 
@@ -1407,7 +1406,7 @@ export const bulkApproveRequests = async (req, res) => {
                 // Handle punch requests in bulk
                 if (["punch_in", "punch_in_out", "punch_in_and_out"].includes(request.requestType)) {
                     const baseDate = resolvePunchBaseDate(request?.punchDetails);
-                    
+
                     if (baseDate) {
                         const { start, end } = getDayBounds(baseDate);
                         const existingAttendance = await Attendance.findOne({
@@ -1418,7 +1417,7 @@ export const bulkApproveRequests = async (req, res) => {
 
                         const punchIn = parseValidDate(request?.punchDetails?.punchInTime);
                         const punchOut = parseValidDate(request?.punchDetails?.punchOutTime);
-                        
+
                         const effectivePunchIn = punchIn || existingAttendance?.punchIn;
                         const effectivePunchOut = punchOut || existingAttendance?.punchOut;
 
