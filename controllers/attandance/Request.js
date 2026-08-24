@@ -197,7 +197,7 @@ export const createAttendanceRequest = async (req, res) => {
             otDetails
         } = req.body;
 
-        const userId = req.user._id || req.query.userId;
+        const userId = req?.user?._id || req.query.userId;
 
         /*
             STEP 1: GET EMPLOYEE
