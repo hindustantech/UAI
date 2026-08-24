@@ -17,6 +17,8 @@ import { checkPermission } from "../../middlewares/checkPermission.js";
 const router = express.Router();
 
 // All routes are protected
+router.post("/", authMiddleware, createAttendanceRequest);
+router.get("/", authMiddleware, getAttendanceRequests);
 router.use(authMiddleware  );
 
 /*
@@ -26,10 +28,8 @@ EMPLOYEE ROUTES
 */
 
 // Create a new attendance request (leave/punch correction)
-router.post("/", createAttendanceRequest);
 
 // Get all requests for logged-in user (with filters)
-router.get("/", getAttendanceRequests);
 
 // Get request statistics for dashboard
 router.get("/statistics", getRequestStatistics);
