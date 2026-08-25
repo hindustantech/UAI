@@ -8,6 +8,7 @@ import {
     expireCompOff,
     deductCompOffFIFO
 } from "./utils/compOff.utils.js";
+import logger from "../../utils/logger.js";
 
 /*
 ====================================
@@ -201,8 +202,9 @@ export const createAttendanceRequest = async (req, res) => {
         /*
             STEP 1: GET EMPLOYEE
         */
+       logger.info(`Fetching employee for userId: ${userId}`);
         const employee = await Employee.findOne({ userId });
-
+        logger.info(`Employee fetched: ${employee ? employee._id : 'Not found'}`);
         if (!employee) {
             return res.status(404).json({
                 success: false,
