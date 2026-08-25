@@ -197,7 +197,7 @@ export const createAttendanceRequest = async (req, res) => {
             otDetails
         } = req.body;
 
-        const userId = req.query.userId ;
+        const userId = req.query.userId || req.user?._id;
         /*
             STEP 1: GET EMPLOYEE
         */
@@ -515,7 +515,7 @@ export const getAttendanceRequests = async (req, res) => {
             companyId,
         } = req.query;
 
-        const userId = req.user?._id|| req.query.userId;
+        const userId = req.user?._id||req.query.userId;
         const userRole = req.user?.role || req.user?.type;
 
         // Build query based on user role
