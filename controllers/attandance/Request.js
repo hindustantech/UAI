@@ -518,7 +518,7 @@ export const getAttendanceRequests = async (req, res) => {
         } = req.query;
 
         const userId = req.user?._id||req.query.userId ||req.user?.id ;
-        const userRole = req.user?.role || req.user?.type;
+        const userRole = req.user?.role || req.user?.type || req.query?.type;
 
         // Build query based on user role
         let query = { companyId };
