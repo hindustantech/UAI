@@ -13,11 +13,11 @@ import {
 } from "../../controllers/attandance/Request.js";
 import optionalAuth from "../../middlewares/optionalAuth.js";
 import { checkPermission } from "../../middlewares/checkPermission.js";
-
+import authmiddleware from "../../middlewares/authmiddleware.js";
 const router = express.Router();
 
 // All routes are protected
-router.post("/", optionalAuth, createAttendanceRequest);
+router.post("/", authmiddleware, createAttendanceRequest);
 router.get("/", optionalAuth, getAttendanceRequests);
 router.use(optionalAuth );
 
