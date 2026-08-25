@@ -399,7 +399,7 @@ export const markAttendance = async (req, res) => {
             userId: u_id,
             employmentStatus: "active"
         }).session(session);
-
+        logger.info(`Employee fetched: ${employee ? employee._id : 'Not found'}`);
         if (!employee) {
             return abortAndRespond(
                 session, res, 404, "EMPLOYEE_NOT_FOUND",
