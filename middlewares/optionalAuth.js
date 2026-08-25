@@ -1,6 +1,6 @@
 // middleware/auth.js
 import jwt from "jsonwebtoken";
-import logger from "../utils/logger";
+import logger from "../utils/logger.js";
 
 const optionalAuth = async (req, res, next) => {
   try {
