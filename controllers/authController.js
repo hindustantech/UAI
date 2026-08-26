@@ -20,6 +20,7 @@ import { newgenerateToken } from '../config/new_user_jwt.js';
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; // keep this secret in env
 import Otp from '../models/Otp.js';
 import { Subscription } from '../models/Attandance/subscration/Subscription.js';
+import { logApiAction, logApiError } from '../utils/apiLogger.js';
 
 
 export const generateTheQRCode = async (req, res) => {
@@ -2106,6 +2107,14 @@ export const completOtp = async (req, res) => {
         otpDoc.maxAttempts -
         otpDoc.attempts;
 
+      logApiError(
+        "LOGIN_FAILED",
+        "AUTH",
+        new Error(`Invalid OTP (attempt ${otpDoc.attempts}/${otpDoc.maxAttempts})`),
+        req,
+        { userId: user._id, attemptsLeft: attemptsLeft < 0 ? 0 : attemptsLeft }
+      );
+
       return res.status(400).json({
         success: false,
         message: "Invalid OTP",
@@ -2154,6 +2163,15 @@ export const completOtp = async (req, res) => {
       updatedUser._id,
       updatedUser.type
     );
+
+    logApiAction({
+      action: "LOGIN",
+      model: "AUTH",
+      req,
+      resourceId: updatedUser._id,
+      after: { userId: updatedUser._id, type: updatedUser.type, phone: updatedUser.phone },
+      extra: { isOTPVerified: true },
+    });
 
     /* ---------------- RESPONSE ---------------- */
 
@@ -2886,6 +2904,12 @@ const signout = (req, res) => {
   // Clear device token
   User.findByIdAndUpdate(req.user._id, { devicetoken: null }, { new: true })
     .then(() => {
+      logApiAction({
+        action: "LOGOUT",
+        model: "AUTH",
+        req,
+        resourceId: req.user._id,
+      });
       res.json({ message: 'Signout successful' });
     })
     .catch(error => {

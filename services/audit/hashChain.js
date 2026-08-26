@@ -288,3 +288,135 @@ export async function verifyAuditRange({ chainScope, fromSeq = 1, toSeq = null }
 
     return { ok: true, verifiedCount: verified, brokenAt: null, note };
 }
+
+/**
+ * Detailed chain verification — collects ALL errors in the range
+ * (up to maxErrors) instead of stopping at the first break.
+ * Read-only: never mutates records.
+ *
+ * Detects:
+ *   - SEQUENCE_GAP          missing seq numbers
+ *   - DUPLICATE_SEQ         duplicate sequence numbers
+ *   - CHAIN_BREAK           previousHash does not match predecessor
+ *   - HASH_MISMATCH         currentHash fails recomputation (tampering)
+ *   - MISSING_PREDECESSOR   anchor event absent
+ *
+ * Returns { valid, checked, errors[], notes[] }
+ */
+export async function verifyChainDetailed({ chainScope, fromSeq = 1, toSeq = null, maxErrors = 100 }) {
+    const query = { chainScope, seq: { $gte: fromSeq } };
+    if (toSeq) query.seq.$lte = toSeq;
+
+    const events = await mongoose.model('AuditLog')
+        .find(query)
+        .select('eventId seq timestamp actorType userId organizationId action resource resourceId requestId success oldData newData previousHash currentHash')
+        .sort({ seq: 1 })
+        .limit(5000)
+        .lean();
+
+    if (!events.length) {
+        return { valid: true, checked: 0, errors: [], notes: ['NO_EVENTS_IN_RANGE'] };
+    }
+
+    const errors = [];
+    const notes = [];
+
+    // Seed prevHash from the event immediately before the range
+    let prevHash = null;
+    let expectedSeq = events[0].seq;
+
+    if (fromSeq === 1 || events[0].seq === 1) {
+        prevHash = config.genesisHash;
+    } else {
+        const anchor = await mongoose.model('AuditLog')
+            .findOne({ chainScope, seq: events[0].seq - 1 })
+            .select('currentHash')
+            .lean();
+        if (anchor) {
+            prevHash = anchor.currentHash;
+        } else {
+            const cutoff = retentionCutoff();
+            const firstOld = cutoff && new Date(events[0].timestamp) < cutoff;
+            if (firstOld) {
+                prevHash = events[0].previousHash; // accept stored link across retention boundary
+                notes.push({
+                    type: 'RETENTION_GAP',
+                    message: `Predecessor seq ${events[0].seq - 1} outside retention window — accepted stored link`,
+                });
+            } else {
+                errors.push({
+                    seq: events[0].seq,
+                    type: 'MISSING_PREDECESSOR',
+                    eventId: events[0].eventId,
+                    message: `Anchor seq ${events[0].seq - 1} not found`,
+                });
+                prevHash = events[0].previousHash; // continue checking subsequent links
+            }
+        }
+    }
+
+    let checked = 0;
+    let seenSeqs = new Set();
+
+    for (const evt of events) {
+        if (errors.length >= maxErrors) {
+            notes.push({ type: 'TRUNCATED', message: `Verification stopped after ${maxErrors} errors` });
+            break;
+        }
+
+        /* Duplicate sequence detection */
+        if (seenSeqs.has(evt.seq)) {
+            errors.push({
+                seq: evt.seq,
+                type: 'DUPLICATE_SEQ',
+                eventId: evt.eventId,
+                message: 'Duplicate sequence number within scope',
+            });
+            continue;
+        }
+        seenSeqs.add(evt.seq);
+
+        /* Sequence continuity */
+        if (evt.seq !== expectedSeq) {
+            errors.push({
+                seq: evt.seq,
+                type: 'SEQUENCE_GAP',
+                eventId: evt.eventId,
+                expected: expectedSeq,
+                actual: evt.seq,
+                message: `Missing sequence number(s): ${expectedSeq}…${evt.seq - 1}`,
+            });
+        }
+
+        /* Chain linkage */
+        if (evt.previousHash !== prevHash) {
+            errors.push({
+                seq: evt.seq,
+                type: 'CHAIN_BREAK',
+                eventId: evt.eventId,
+                expected: prevHash,
+                actual: evt.previousHash,
+                message: 'previousHash does not match predecessor currentHash',
+            });
+        }
+
+        /* Content hash */
+        const recomputed = computeEventHash(evt);
+        if (recomputed !== evt.currentHash) {
+            errors.push({
+                seq: evt.seq,
+                type: 'HASH_MISMATCH',
+                eventId: evt.eventId,
+                expected: recomputed,
+                actual: evt.currentHash,
+                message: 'Stored currentHash does not match recomputed hash — record was modified after creation',
+            });
+        }
+
+        prevHash = evt.currentHash;
+        expectedSeq = evt.seq + 1;
+        checked++;
+    }
+
+    return { valid: errors.length === 0, checked, errors, notes };
+}

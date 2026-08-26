@@ -57,6 +57,23 @@ const AuditLogSchema = new mongoose.Schema(
             required: true,
             index: true,
         },
+        operation: {
+            type: String,
+            enum: [
+                'CREATE', 'UPDATE', 'DELETE', 'ACTIVATE', 'DEACTIVATE',
+                'PAYMENT', 'LOGIN', 'LOGOUT', 'APPROVE', 'REJECT',
+                'PROCESS', 'EXPORT', 'READ', 'OTHER'
+            ],
+        },
+        eventType: {
+            type: String,
+            enum: ['READ', 'WRITE', 'SECURITY', 'FINANCIAL', 'SYSTEM'],
+        },
+        severity: {
+            type: String,
+            enum: ['INFO', 'WARNING', 'CRITICAL'],
+            default: 'INFO',
+        },
         category: {
             type: String,
             enum: [
@@ -162,6 +179,26 @@ const AuditLogSchema = new mongoose.Schema(
             }],
             criteria: mongoose.Schema.Types.Mixed,
         },
+        changes: [{
+            field: String,
+            oldValue: mongoose.Schema.Types.Mixed,
+            newValue: mongoose.Schema.Types.Mixed,
+        }],
+        visibilityStatus: {
+            type: String,
+            enum: ['VISIBLE', 'HIDDEN'],
+            default: 'VISIBLE',
+        },
+        deactivatedAt: {
+            type: Date,
+        },
+        deactivatedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+        deactivationReason: {
+            type: String,
+        },
         file: {
             filename: String,
             fileId: String,
@@ -210,10 +247,38 @@ const AuditLogSchema = new mongoose.Schema(
 // Composite unique index per chain scope to enforce linear ordering
 AuditLogSchema.index({ chainScope: 1, seq: 1 }, { unique: true });
 
-// Per-organization timestamp index for query performance
+/* ────────────────────────────────────────────────────────────────
+   INDEX STRATEGY
+   Every investigation query is organization-scoped first, then
+   filtered by one secondary dimension, then ranged/sorted on
+   timestamp DESC. These compound indexes serve that access pattern
+   directly (org prefix + filter key + sort key). oldData/newData are
+   deliberately never indexed — large Mixed blobs with no lookup use.
+   ──────────────────────────────────────────────────────────────── */
+
+// Per-organization timestamp index for query performance (primary listing)
 AuditLogSchema.index({ organizationId: 1, timestamp: -1 });
 
-// Per-user query index
+// Org + action (e.g. "show all EMPLOYEE.UPDATE for org")
+AuditLogSchema.index({ organizationId: 1, action: 1, timestamp: -1 });
+
+// Org + resource (e.g. "all Employee events")
+AuditLogSchema.index({ organizationId: 1, resource: 1, timestamp: -1 });
+
+// Org + resource+ID (employee history timeline)
+AuditLogSchema.index({ organizationId: 1, resourceId: 1, timestamp: -1 });
+AuditLogSchema.index({ organizationId: 1, resource: 1, resourceId: 1, timestamp: -1 });
+
+// Org + actor (user activity view)
+AuditLogSchema.index({ organizationId: 1, userId: 1, timestamp: -1 });
+
+// Org + success flag ("show all failed operations")
+AuditLogSchema.index({ organizationId: 1, success: 1, timestamp: -1 });
+
+// Org + category
+AuditLogSchema.index({ organizationId: 1, category: 1, timestamp: -1 });
+
+// Per-user query index (global/cron scope queries where org is absent)
 AuditLogSchema.index({ userId: 1, timestamp: -1 });
 
 // Resource+ID query index
@@ -225,7 +290,7 @@ AuditLogSchema.index({ action: 1, timestamp: -1 });
 // RequestId query index
 AuditLogSchema.index({ requestId: 1 });
 
-// EventId alias (redundant unique but makes lookup explicit)
-AuditLogSchema.index({ eventId: 1 });
+// NOTE: eventId has a unique index automatically via { unique: true } above.
+// No explicit schema.index() call needed for it.
 
 export default mongoose.model('AuditLog', AuditLogSchema);

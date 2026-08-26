@@ -7,6 +7,7 @@ import mongoose from "mongoose";
 import "../models/AuditLog.js";
 import "../models/AuditSequence.js";
 import auditConfig from "../services/audit/config.js";
+import { deriveOperation, deriveEventType, deriveSeverity } from "../services/audit/taxonomy.js";
 import {
     allocateSequence,
     getPreviousHash,
@@ -34,17 +35,22 @@ async function writeToAuditDb(jobName, status, message) {
         const timestamp = new Date();
         const success = status === "SUCCESS" || status === "COMPLETED";
 
+const fullAction = `CRON.${jobName}.${String(status).toUpperCase()}`;
+
         const eventDoc = {
             eventId: crypto.randomUUID(),
             schemaVersion: 1,
             timestamp,
             actorType: "CRON",
-            action: `CRON.${jobName}.${String(status).toUpperCase()}`,
+            action: fullAction,
             resource: "CronJob",
             resourceId: jobName,
             category: "SYSTEM",
             origin: "CRON",
             cronJobName: jobName,
+            operation: deriveOperation(fullAction),
+            eventType: deriveEventType(fullAction),
+            severity: deriveSeverity(fullAction),
             success,
             result: success ? "SUCCESS" : (status === "FAILED" ? "FAILURE" : "SUCCESS"),
             safeErrorMessage: success ? undefined : String(message).slice(0, 500),

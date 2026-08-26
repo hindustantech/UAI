@@ -4,20 +4,32 @@ const REDACTED = '[REDACTED]';
 
 /**
  * Deep-clone an object, redacting sensitive fields recursively.
- * Non-serializable values (Date, ObjectId) are left as-is.
+ * Circular-reference safe (WeakSet seen-guard), depth-limited,
+ * and handles Date / ObjectId / non-enumerable / bigint gracefully.
  */
-const deepCloneAndRedact = (obj, sensitiveFields, depth = 0) => {
+const deepCloneAndRedact = (obj, sensitiveFields, depth = 0, seen = new WeakSet()) => {
     if (depth > 12) return REDACTED;
-
     if (obj === null || obj === undefined) return obj;
 
-    if (Array.isArray(obj)) {
-        return obj.map(item => deepCloneAndRedact(item, sensitiveFields, depth + 1));
+    // Primitives pass through
+    if (typeof obj === 'boolean' || typeof obj === 'number' || typeof obj === 'string') return obj;
+    if (typeof obj === 'bigint') return String(obj);
+
+    // Date / ObjectId — leave as-is (caller serializes if needed)
+    if (obj instanceof Date) return obj;
+    if (typeof obj?.toHexString === 'function') return obj;
+
+    // Circular guard
+    if (typeof obj === 'object' || typeof obj === 'function') {
+        if (seen.has(obj)) return '[Circular]';
+        seen.add(obj);
     }
 
-    if (typeof obj !== 'object' || obj instanceof Date || obj.constructor?.name === 'ObjectId') {
-        return obj;
+    if (Array.isArray(obj)) {
+        return obj.map(item => deepCloneAndRedact(item, sensitiveFields, depth + 1, seen));
     }
+
+    if (typeof obj !== 'object') return obj;
 
     const cleaned = {};
     for (const [key, value] of Object.entries(obj)) {
@@ -25,17 +37,66 @@ const deepCloneAndRedact = (obj, sensitiveFields, depth = 0) => {
         if (sensitiveFields.has(lowerKey) || lowerKey.endsWith('password') || lowerKey.endsWith('token') || lowerKey === 'otp') {
             cleaned[key] = REDACTED;
         } else {
-            cleaned[key] = deepCloneAndRedact(value, sensitiveFields, depth + 1);
+            cleaned[key] = deepCloneAndRedact(value, sensitiveFields, depth + 1, seen);
         }
     }
     return cleaned;
 };
 
+/* ────────────────────────────────────────────────────────────────
+   FINANCIAL DATA MASKING
+   Masks sensitive card / account numbers while keeping the last 4
+   characters for identification.  Safe for stored metadata.
+   ──────────────────────────────────────────────────────────────── */
+
+const MASKABLE_KEY_FRAGMENTS = [
+    'cardnumber',
+    'cardno',
+    'cvv',
+    'accountnumber',
+    'routingnumber',
+    'upiid',
+    'upinumber',
+];
+
+/** Normalize any casing (camelCase/Snake/kebab) then fragment-match */
+const isMaskableKey = (key) => {
+    const norm = String(key).toLowerCase().replace(/[^a-z]/g, '');
+    return MASKABLE_KEY_FRAGMENTS.some(f => norm.includes(f));
+};
+
+const maskValue = (val) => {
+    if (typeof val !== 'string') return val;
+    if (val.length <= 4) return val;
+    return '*'.repeat(val.length - 4) + val.slice(-4);
+};
+
+const maskSensitiveFinancial = (obj, depth = 0) => {
+    if (depth > 10 || !obj || typeof obj !== 'object') return obj;
+    if (obj instanceof Date) return obj;
+    if (typeof obj?.toHexString === 'function') return obj;
+
+    if (Array.isArray(obj)) return obj.map(v => maskSensitiveFinancial(v, depth + 1));
+
+    const out = {};
+    for (const [key, value] of Object.entries(obj)) {
+        if (typeof value === 'string' && isMaskableKey(key)) {
+            out[key] = maskValue(value);
+        } else if (value && typeof value === 'object' && !(value instanceof Date) && typeof value?.toHexString !== 'function') {
+            out[key] = maskSensitiveFinancial(value, depth + 1);
+        } else {
+            out[key] = value;
+        }
+    }
+    return out;
+};
+
 /**
  * Sanitize a request body for audit storage:
  * - Redact sensitive fields
+ * - Mask financial identifiers (card numbers, account numbers)
  * - Respect maxBodySize (truncate and flag)
- * - Handle non-JSON bodies gracefully
+ * - Handle non-JSON / circular bodies gracefully
  */
 export const sanitizeRequestBody = (body) => {
     if (!body || typeof body !== 'object') return null;
@@ -87,8 +148,6 @@ export const sanitizeResponseMetadata = (resBody, res) => {
 
 /**
  * Recursively collect all field paths containing potentially large nested documents.
- * Used to detect when we should only store the entire data instead of old/new
- * for audit purposes (to avoid huge nested storage).
  */
 export const isLargeNestedDocument = (obj, depth = 0, maxSize = 100) => {
     if (depth > 5 || !obj || typeof obj !== 'object') return false;
@@ -102,7 +161,6 @@ export const isLargeNestedDocument = (obj, depth = 0, maxSize = 100) => {
 
 /**
  * Remove potentially large nested fields from an object.
- * Returns a copy with arrays and deep objects removed.
  */
 export const shallowTrimDocument = (doc, maxArrayLength = 5) => {
     if (!doc || typeof doc !== 'object') return doc;
@@ -122,4 +180,108 @@ export const shallowTrimDocument = (doc, maxArrayLength = 5) => {
         }
     }
     return trimmed;
+};
+
+/* ────────────────────────────────────────────────────────────────
+   CONSOLIDATED SNAPSHOT SANITIZER
+   Used by apiLogger.js and cronLogger.js.  This is the single
+   source of truth — do not duplicate in apiLogger.
+   ──────────────────────────────────────────────────────────────── */
+
+const EXTRA_SENSITIVE = new Set([
+    'password', 'otp', 'pin', 'token', 'refreshtoken', 'accesstoken',
+    'secret', 'apikey', 'privatekey', 'privatekey',
+    'authorization', 'cookie', 'cvv',
+]);
+
+/**
+ * Sanitize an arbitrary data snapshot (before/after, request body, metadata)
+ * for safe audit storage.  Handles circular references via WeakSet.
+ *
+ * @param {*} data  arbitrary JS value
+ * @returns {*}     sanitized shallow copy with redacted sensitive fields
+ */
+export const sanitizeSnapshot = (data) => {
+    if (!data || typeof data !== 'object') return data;
+    if (data instanceof Date) return data.toISOString();
+    if (Array.isArray(data)) return data.slice(0, 50).map(v => sanitizeSnapshot(v));
+
+    const seen = new WeakSet();
+
+    const toJSON = (v) => {
+        if (v && typeof v.toJSON === 'function') return v.toJSON();
+        if (v && typeof v.toObject === 'function') return v.toObject();
+        return v;
+    };
+
+    const redact = (obj, depth = 0) => {
+        if (depth > 8) return '[MaxDepth]';
+        const raw = toJSON(obj);
+        if (!raw || typeof raw !== 'object') return raw;
+        if (raw instanceof Date) return raw.toISOString();
+        if (typeof raw?.toHexString === 'function') return raw.toString();
+        if (Array.isArray(raw)) return raw.slice(0, 50).map(v => redact(v, depth + 1));
+
+        if (seen.has(raw)) return '[Circular]';
+        seen.add(raw);
+
+        const out = {};
+        for (const [k, v] of Object.entries(raw)) {
+            if (EXTRA_SENSITIVE.has(k.toLowerCase()) || config.sensitiveFields.has(k.toLowerCase())) {
+                out[k] = '[REDACTED]';
+            } else if (v instanceof Date) {
+                out[k] = v.toISOString();
+            } else if (typeof v?.toHexString === 'function') {
+                out[k] = v.toString();
+            } else if (v && typeof v === 'object') {
+                out[k] = redact(v, depth + 1);
+            } else {
+                out[k] = v;
+            }
+        }
+        return out;
+    };
+
+    return redact(data);
+};
+
+/**
+ * Mask a metadata object intended for financial events.
+ * Order: mask card/account numbers first, then redact remaining
+ * sensitive fields (passwords, tokens, etc.).
+ */
+export const maskFinancialMetadata = (meta) => {
+    if (!meta || typeof meta !== 'object') return meta;
+    const masked = maskSensitiveFinancial(meta);
+    return redactSensitive(masked);
+};
+
+/** Internal helper used by maskFinancialMetadata */
+function redactSensitive(obj, depth = 0, seen = new WeakSet()) {
+    if (depth > 8 || !obj || typeof obj !== 'object') return obj;
+    if (obj instanceof Date) return obj;
+    if (Array.isArray(obj)) return obj.map(v => redactSensitive(v, depth + 1, seen));
+    if (seen.has(obj)) return '[Circular]';
+    seen.add(obj);
+
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) {
+        if (config.sensitiveFields.has(k.toLowerCase()) || EXTRA_SENSITIVE.has(k.toLowerCase())) {
+            out[k] = '[REDACTED]';
+        } else if (v && typeof v === 'object' && !(v instanceof Date) && typeof v?.toHexString !== 'function') {
+            out[k] = redactSensitive(v, depth + 1, seen);
+        } else {
+            out[k] = v;
+        }
+    }
+    return out;
+}
+
+export default {
+    sanitizeRequestBody,
+    sanitizeResponseMetadata,
+    sanitizeSnapshot,
+    maskFinancialMetadata,
+    isLargeNestedDocument,
+    shallowTrimDocument,
 };

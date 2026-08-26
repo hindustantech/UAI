@@ -9,12 +9,23 @@ import {
     getPreviousHash,
     computeEventHash,
 } from "../services/audit/hashChain.js";
+import {
+    deriveOperation,
+    deriveEventType,
+    deriveSeverity,
+} from "../services/audit/taxonomy.js";
+import {
+    sanitizeRequestBody,
+    sanitizeSnapshot,
+    maskFinancialMetadata,
+} from "../services/audit/sanitizer.js";
+import { diff as deepDiff } from "../services/audit/diff.js";
 
 const GLOBAL_SCOPE = "__GLOBAL__";
 
-/* ────────────────────────────────────────────────
+/* ────────────────────────────────────────────────────────────────
    FIELD EXTRACTORS
-   ──────────────────────────────────────────────── */
+   ──────────────────────────────────────────────────────────────── */
 
 const getActor = (req) => ({
     userId: req?.user?._id?.toString() || req?.user?.id || null,
@@ -36,53 +47,77 @@ function resolveCategory(model) {
     return "DATA";
 }
 
-/* ────────────────────────────────────────────────
-   SANITIZATION
-   ──────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────────────
+   EVENT SCAFFOLDING
+   Derives operation / eventType / severity from the taxonomy and
+   captures WHO / WHERE / WHEN.  Snapshot sanitization happens in
+   services/audit/sanitizer.js — circular-safe, sensitive-redacting.
+   ──────────────────────────────────────────────────────────────── */
 
-function sanitizeSnapshot(data) {
-    if (!data || typeof data !== "object") return data;
-    if (data instanceof Date) return data.toISOString();
-    if (Array.isArray(data)) return data.slice(0, 50).map(sanitizeSnapshot);
+function buildBaseEvent(req, { action, model, resourceId }) {
+    const who = getActor(req);
+    const where = getLocation(req);
 
-    const obj = typeof data.toJSON === "function" ? data.toJSON() : (typeof data.toObject === "function" ? data.toObject() : data);
+    const fullAction = `${String(model).toUpperCase()}.${String(action).toUpperCase()}`;
 
-    const clean = {};
-    for (const [k, v] of Object.entries(obj)) {
-        if (auditConfig.sensitiveFields.has(k.toLowerCase()) ||
-            SENSITIVE_FIELDS.some((f) => k.toLowerCase().includes(f.toLowerCase()))) {
-            clean[k] = "[REDACTED]";
-        } else if (v && typeof v === "object" && !(v instanceof Date) && !(typeof v.toHexString === "function")) {
-            clean[k] = sanitizeSnapshot(v);
-        } else {
-            clean[k] = typeof v?.toHexString === "function" ? v.toString() : v;
-        }
-    }
-    return clean;
+    return {
+        eventId: crypto.randomUUID(),
+        timestamp: new Date(),
+        requestId: req?.headers?.["x-request-id"] || req?.id || null,
+        actorType: "USER",
+        userId: who.userId && mongoose.isValidObjectId(who.userId) ? who.userId : undefined,
+        organizationId: who.companyId && mongoose.isValidObjectId(who.companyId) ? who.companyId : undefined,
+        userRole: who.userType,
+        action: fullAction,
+        resource: String(model),
+        resourceId: resourceId != null ? String(resourceId) : "N/A",
+        http: {
+            method: where.method,
+            route: where.route,
+            url: where.route,
+            ip: where.ip,
+            userAgent: req?.headers?.["user-agent"],
+        },
+        category: resolveCategory(model),
+        origin: "HTTP",
+
+        /* Taxonomy-derived investigation dimensions */
+        operation: deriveOperation(fullAction),
+        eventType: deriveEventType(fullAction),
+        severity: deriveSeverity(fullAction),
+    };
 }
 
-const SENSITIVE_FIELDS = [
-    "password", "otp", "pin", "token", "refreshToken", "accessToken",
-    "secret", "key", "credential", "devicetoken", "deviceToken",
-];
+/* ────────────────────────────────────────────────────────────────
+   CHANGE DETECTION (deep diff over sanitized snapshots)
+   CREATE / DELETE (one-sided) keep empty changedFields — the full
+   snapshot lives in oldData / newData respectively.
+   ──────────────────────────────────────────────────────────────── */
 
-/** Compute top-level keys whose values differ between old & new */
-function computeChangedFields(before, after) {
-    if (!before || !after) return [];
-    const b = typeof before === "object" ? before : {};
-    const a = typeof after === "object" ? after : {};
-    const keys = new Set([...Object.keys(b), ...Object.keys(a)]);
-    const changed = [];
-    for (const k of keys) {
-        if (JSON.stringify(b[k]) !== JSON.stringify(a[k])) changed.push(k);
+function applySnapshots(evt, cleanBefore, cleanAfter) {
+    evt.oldData = cleanBefore ?? null;
+    evt.newData = cleanAfter ?? null;
+
+    if (cleanBefore && cleanAfter) {
+        const d = deepDiff(cleanBefore, cleanAfter);
+        evt.changedFields = d.changedFields;
+        evt.changes = d.changes;
+        evt.noChange = d.noChange;
+    } else {
+        evt.changedFields = [];
+        evt.changes = [];
+        evt.noChange = false;
     }
-    return changed.slice(0, 50);
 }
 
-/* ────────────────────────────────────────────────
+/* ────────────────────────────────────────────────────────────────
    AUDIT DB WRITE (fire-and-forget, tamper-proof)
    Never awaited by business flow — failures are silent.
-   ──────────────────────────────────────────────── */
+   Idempotency: when a reliable x-request-id is present, an
+   idempotencyKey guards against transaction/HTTP retry duplicates.
+   The sparse-unique index absorbs collisions; a dropped duplicate
+   leaves a tolerable seq gap (see AuditSequence docs).
+   ──────────────────────────────────────────────────────────────── */
 
 async function writeToAuditDb(evt) {
     try {
@@ -103,22 +138,37 @@ async function writeToAuditDb(evt) {
             organizationId: evt.organizationId || undefined,
             userRole: evt.userRole,
             action: evt.action,
+            operation: evt.operation,
+            eventType: evt.eventType,
+            severity: evt.severity,
             category: evt.category,
             resource: evt.resource,
             resourceId: evt.resourceId,
+            parentResourceId: evt.parentResourceId || undefined,
             http: evt.http,
             sanitizedRequestBody: evt.sanitizedRequestBody,
             oldData: evt.oldData ?? null,
             newData: evt.newData ?? null,
             changedFields: evt.changedFields,
+            changes: evt.changes ?? [],
+            noChange: Boolean(evt.noChange),
             success: evt.success,
             result: evt.result,
             errorCode: evt.errorCode,
             errorCategory: evt.errorCategory,
             safeErrorMessage: evt.safeErrorMessage,
+            durationMs: evt.durationMs,
+            source: evt.source,
             origin: evt.origin,
+            jobId: evt.jobId,
+            queueName: evt.queueName,
             cronJobName: evt.cronJobName,
+            initiatingUserId: evt.initiatingUserId || undefined,
             metadata: evt.metadata,
+            bulk: evt.bulk,
+            file: evt.file,
+            payloadTruncated: evt.payloadTruncated ?? false,
+            idempotencyKey: evt.idempotencyKey || undefined,
             chainScope,
             seq,
             previousHash,
@@ -147,36 +197,9 @@ async function writeToAuditDb(evt) {
     }
 }
 
-function buildBaseEvent(req, { action, model, resourceId }) {
-    const who = getActor(req);
-    const where = getLocation(req);
-
-    return {
-        eventId: crypto.randomUUID(),
-        timestamp: new Date(),
-        requestId: req?.headers?.["x-request-id"] || req?.id || null,
-        actorType: "USER",
-        userId: who.userId && mongoose.isValidObjectId(who.userId) ? who.userId : undefined,
-        organizationId: who.companyId && mongoose.isValidObjectId(who.companyId) ? who.companyId : undefined,
-        userRole: who.userType,
-        action: `${String(model).toUpperCase()}.${String(action).toUpperCase()}`,
-        resource: String(model),
-        resourceId: resourceId != null ? String(resourceId) : "N/A",
-        http: {
-            method: where.method,
-            route: where.route,
-            url: where.route,
-            ip: where.ip,
-            userAgent: req?.headers?.["user-agent"],
-        },
-        category: resolveCategory(model),
-        origin: "HTTP",
-    };
-}
-
-/* ────────────────────────────────────────────────
+/* ────────────────────────────────────────────────────────────────
    PUBLIC API
-   ──────────────────────────────────────────────── */
+   ──────────────────────────────────────────────────────────────── */
 
 /**
  * Structured API action logger — dual write:
@@ -184,6 +207,11 @@ function buildBaseEvent(req, { action, model, resourceId }) {
  *   2. AuditLog → MongoDB (fire-and-forget, searchable, tamper-proof)
  *
  * Captures WHAT / WHO / WHERE / WHY / WHEN + BEFORE/AFTER snapshots.
+ *
+ * NOTE: call AFTER the DB transaction commits (existing controller
+ * pattern) — audit logging is eventual/after-commit by design so a
+ * MongoDB WriteConflict in the audit path can never abort the
+ * primary business operation.
  */
 export const logApiAction = ({
     level = "info",
@@ -216,16 +244,22 @@ export const logApiAction = ({
         if (auditConfig.enabled) {
             const evt = buildBaseEvent(req, { action, model, resourceId });
             evt.sanitizedRequestBody = auditConfig.requestBodyEnabled && req?.body
-                ? JSON.stringify(sanitizeSnapshot(req.body)).slice(0, auditConfig.maxBodySize)
+                ? JSON.stringify(sanitizeRequestBody(req.body)).slice(0, auditConfig.maxBodySize)
                 : undefined;
-            evt.oldData = cleanBefore;
-            evt.newData = cleanAfter;
-            evt.changedFields = computeChangedFields(cleanBefore, cleanAfter);
-            evt.noChange = Boolean(cleanBefore && cleanAfter && evt.changedFields.length === 0);
+
+            applySnapshots(evt, cleanBefore, cleanAfter);
+
             evt.success = true;
             evt.result = "SUCCESS";
             evt.source = "USER_ACTION";
-            evt.metadata = { reason: reason ?? req?.body?.reason ?? null, ...extra };
+            evt.metadata = maskFinancialMetadata({
+                reason: reason ?? req?.body?.reason ?? null,
+                ...extra,
+            });
+
+            if (evt.requestId) {
+                evt.idempotencyKey = `${evt.requestId}:${evt.action}:${evt.resourceId}`;
+            }
 
             writeToAuditDb(evt); // intentionally not awaited
         }
@@ -256,14 +290,19 @@ export const logApiError = (action, model, error, req, extra = {}) => {
         // 2. AuditLog DB entry (fire-and-forget)
         if (auditConfig.enabled) {
             const evt = buildBaseEvent(req, { action, model, resourceId: extra.resourceId });
-            delete evt.http.statusCode;
             evt.success = false;
             evt.result = "FAILURE";
             evt.errorCode = error?.code || error?.name || "INTERNAL_ERROR";
             evt.errorCategory = error?.name || "Error";
             evt.safeErrorMessage = String(errorMessage).slice(0, 500);
             evt.source = "USER_ACTION";
-            evt.metadata = { ...extra };
+            evt.metadata = maskFinancialMetadata({ ...extra });
+
+            applySnapshots(evt, null, null);
+
+            if (evt.requestId) {
+                evt.idempotencyKey = `${evt.requestId}:${evt.action}:${evt.resourceId}`;
+            }
 
             writeToAuditDb(evt); // intentionally not awaited
         }
