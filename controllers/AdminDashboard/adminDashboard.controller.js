@@ -1,4 +1,4 @@
-import User from "../models/userModel.js";
+import User from "../../models/userModel.js";
 import Subscription from "../models/Attandance/subscration/Subscription.js";
 import PaymentLog from "../models/Attandance/subscration/PaymentLog.js";
 import AuditLog from "../models/AuditLog.js";
