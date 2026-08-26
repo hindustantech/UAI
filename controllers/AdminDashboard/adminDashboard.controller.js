@@ -1,7 +1,7 @@
 import User from "../../models/userModel.js";
-import Subscription from "../../models/Attandance/subscration/Subscription.js";
+import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
 import PaymentLog from "../../models/Attandance/subscration/PaymentLog.js";
-import AuditLog from "../../AssingPermission.js";
+import AuditLog from "../../models/AuditLog.js";
 import { ValidationError } from "../../services/audit/queryBuilder.js";
 
 const sendError = (res, err, fallback = "Dashboard data failed") => {
