@@ -34,7 +34,6 @@ const upload = multer({
 
 // Middleware to handle image upload
 const profileUploadMiddleware = (req, res, next) => {
-    console.log(req.user);
     upload.single('image')(req, res, function (err) {
         if (err instanceof multer.MulterError) {
             return res.status(400).json({ message: 'File upload error: ' + err.message });

@@ -3,10 +3,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Parse the service account JSON from environment variable
-// console.log("process.env.serviceAccount",process.env.serviceAccount)
 const serviceAccount = JSON.parse(process.env.serviceAccount);
 
-console.log("serviceAccount", serviceAccount);
 // Fix private_key (replace escaped "\n" with actual newlines)
 serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 

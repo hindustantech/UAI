@@ -2,9 +2,10 @@
 import cron from "node-cron";
 import Employee from "../models/Attandance/Employee.js";
 import SalaryRule from "../models/salaryRules.js";
+import { logCronExecution } from "../config/cronLogger.js";
 
 cron.schedule("0 2 * * *", async () => {
-    console.log("🕐 [CRON] compOffExpiryCron started:", new Date().toISOString());
+    logCronExecution("compOffExpiryCron", "STARTED", new Date().toISOString());
 
     try {
         const rules = await SalaryRule.find({
@@ -13,7 +14,7 @@ cron.schedule("0 2 * * *", async () => {
         }).lean();
 
         if (!rules.length) {
-            console.log("ℹ️ [CRON] compOffExpiryCron: no company rules with expiry configured.");
+            logCronExecution("compOffExpiryCron", "SUCCESS", "No company rules with expiry configured");
             return;
         }
 
@@ -58,8 +59,8 @@ cron.schedule("0 2 * * *", async () => {
             companiesProcessed++;
         }
 
-        console.log(`✅ [CRON] compOffExpiryCron done. Companies processed: ${companiesProcessed}`);
+        logCronExecution("compOffExpiryCron", "SUCCESS", `Companies processed: ${companiesProcessed}`);
     } catch (err) {
-        console.error("❌ [CRON] compOffExpiryCron failed:", err);
+        logCronExecution("compOffExpiryCron", "FAILED", err.message);
     }
 });

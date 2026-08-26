@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { Subscription } from "../models/Attandance/subscration/Subscription.js";
 import { NotificationService } from "../src/notification/services/NotificationService.js";
 import { acquireLock, releaseLock } from "../src/notification/utils/redisLock.js";
+import { logCronExecution } from "../config/cronLogger.js";
 const BATCH_SIZE = 500;
 
 /**
@@ -15,16 +16,16 @@ cron.schedule("58 23 * * *", async () => {
     const lockValue = await acquireLock(lockKey, 600000);
 
     if (!lockValue) {
-        console.log("[CRON] Expiry job skipped (another instance holds lock)");
+        logCronExecution("subscriptionExpiryCron", "SKIPPED", "Another instance holds lock");
         return;
     }
 
     const now = new Date();
+    let totalExpired = 0;
 
-    console.log("[CRON] Expiry job started:", now);
+    logCronExecution("subscriptionExpiryCron", "STARTED", now.toISOString());
 
     try {
-        let totalExpired = 0;
 
         // Cursor-based streaming (LOW MEMORY + LOW LOAD)
         const cursor = Subscription.find({
@@ -54,12 +55,13 @@ cron.schedule("58 23 * * *", async () => {
             totalExpired += res;
         }
 
-        console.log(`[CRON] Total expired: ${totalExpired}`);
+        logCronExecution("subscriptionExpiryCron", "SUCCESS", `Total expired: ${totalExpired}`);
 
     } catch (err) {
-        console.error("[CRON] Error:", err);
+        logCronExecution("subscriptionExpiryCron", "FAILED", err.message);
     } finally {
         await releaseLock(lockKey, lockValue);
+        logCronExecution("subscriptionExpiryCron", "COMPLETED", `Total expired: ${totalExpired}`);
     }
 }, {
     timezone: "Asia/Kolkata"

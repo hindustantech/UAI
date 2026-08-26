@@ -1,6 +1,8 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import morgan from 'morgan';
+import logger from './utils/logger.js';
 
 import connectDB from './config/db.js';
 import path from 'path';
@@ -74,6 +76,7 @@ const app = express();
 app.set('view engine', 'ejs');
 // Configure CORS (Allow all origins by default)
 app.use(cors());
+app.use(morgan('combined', { stream: logger.stream }));
 
 app.use(express.json({ limit: "50mb" }));          // For JSON requests
 app.use(express.urlencoded({ limit: "50mb", extended: true })); // For 

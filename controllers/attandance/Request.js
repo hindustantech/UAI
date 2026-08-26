@@ -8,7 +8,7 @@ import {
     expireCompOff,
     deductCompOffFIFO
 } from "./utils/compOff.utils.js";
-import logger from "../../utils/logger.js";
+import { logApiAction, logApiError } from "../../utils/apiLogger.js";
 
 /*
 ====================================
@@ -202,9 +202,11 @@ export const createAttendanceRequest = async (req, res) => {
         /*
             STEP 1: GET EMPLOYEE
         */
-       logger.info(`Fetching employee for userId: ${userId}`);
+        logApiAction({ action: "CREATE_START", model: "AttendanceRequest", req, extra: { userId, requestType: req.body?.requestType } });
+
         const employee = await Employee.findOne({ userId });
-        logger.info(`Employee fetched: ${employee ? employee._id : 'Not found'}`);
+        logApiAction({ action: "FETCH_EMPLOYEE", model: "Employee", req, resourceId: employee?._id, after: { employeeId: employee?._id, userId: employee?.userId, companyId: employee?.companyId } });
+
         if (!employee) {
             return res.status(404).json({
                 success: false,
@@ -470,6 +472,8 @@ export const createAttendanceRequest = async (req, res) => {
         */
         const request = await AttendanceRequest.create(payload);
 
+        logApiAction({ action: "CREATE_SUCCESS", model: "AttendanceRequest", req, resourceId: request?._id, after: request });
+
         /*
             STEP 5: POPULATE (FOR UI)
         */
@@ -491,7 +495,7 @@ export const createAttendanceRequest = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("createAttendanceRequest ERROR:", error);
+        logApiError("CREATE", "AttendanceRequest", error, req);
 
         return res.status(500).json({
             success: false,
@@ -586,6 +590,7 @@ export const getAttendanceRequests = async (req, res) => {
         });
 
     } catch (error) {
+        logApiError("GET_LIST", "AttendanceRequest", error, req, { filters: req.query });
         return res.status(500).json({
             success: false,
             message: error.message
@@ -647,6 +652,7 @@ export const getAttendanceRequestById = async (req, res) => {
         });
 
     } catch (error) {
+        logApiError("GET", "AttendanceRequest", error, req, { requestId: req.params.requestId });
         return res.status(500).json({
             success: false,
             message: error.message
@@ -1020,6 +1026,8 @@ export const approveAttendanceRequest = async (req, res) => {
 
         await session.commitTransaction();
 
+        logApiAction({ action: "APPROVE", model: "AttendanceRequest", req, resourceId: request?._id, after: { status: "approved", approvedBy: adminId, requestType: request.requestType } });
+
         return res.status(200).json({
             success: true,
             message: "Request approved successfully",
@@ -1029,10 +1037,7 @@ export const approveAttendanceRequest = async (req, res) => {
     } catch (error) {
         await session.abortTransaction();
 
-        console.error("approveAttendanceRequest ERROR:", {
-            message: error.message,
-            stack: error.stack
-        });
+        logApiError("APPROVE", "AttendanceRequest", error, req, { requestId: req.params.requestId });
 
         return res.status(500).json({
             success: false,
@@ -1092,11 +1097,14 @@ export const rejectAttendanceRequest = async (req, res) => {
         }
 
         // Update request status
+        const beforeStatus = request.status;
         request.status = "rejected";
         request.approvedBy = adminId;
         request.rejectionReason = reason;
         request.approvedAt = new Date();
         await request.save({ session });
+
+        logApiAction({ action: "REJECT", model: "AttendanceRequest", req, resourceId: request?._id, before: { status: beforeStatus }, after: { status: "rejected", rejectionReason: reason, approvedBy: adminId } });
 
         // If it was a leave request, mark any auto-created attendance as rejected
         if (request.requestType === "leave") {
@@ -1137,6 +1145,8 @@ export const rejectAttendanceRequest = async (req, res) => {
 
     } catch (error) {
         await session.abortTransaction();
+        logApiError("REJECT", "AttendanceRequest", error, req, { requestId: req.params.requestId, reason });
+
         return res.status(500).json({
             success: false,
             message: error.message
@@ -1205,6 +1215,8 @@ export const cancelAttendanceRequest = async (req, res) => {
         request.status = "cancelled";
         await request.save();
 
+        logApiAction({ action: "CANCEL", model: "AttendanceRequest", req, resourceId: request?._id, after: { status: "cancelled" } });
+
         return res.json({
             success: true,
             message: "Request cancelled successfully",
@@ -1212,6 +1224,7 @@ export const cancelAttendanceRequest = async (req, res) => {
         });
 
     } catch (error) {
+        logApiError("CANCEL", "AttendanceRequest", error, req, { requestId: req.params.requestId });
         return res.status(500).json({
             success: false,
             message: error.message
@@ -1305,6 +1318,8 @@ export const updateAttendanceRequest = async (req, res) => {
 
         await request.save();
 
+        logApiAction({ action: "UPDATE", model: "AttendanceRequest", req, resourceId: request?._id, after: { status: request.status, reason: request.reason } });
+
         return res.json({
             success: true,
             message: "Request updated successfully",
@@ -1312,6 +1327,7 @@ export const updateAttendanceRequest = async (req, res) => {
         });
 
     } catch (error) {
+        logApiError("UPDATE", "AttendanceRequest", error, req, { requestId: req.params.requestId });
         return res.status(500).json({
             success: false,
             message: error.message
@@ -1503,6 +1519,8 @@ export const bulkApproveRequests = async (req, res) => {
 
         await session.commitTransaction();
 
+        logApiAction({ action: "BULK_APPROVE", model: "AttendanceRequest", req, extra: { requestIds, approved: results.approved.length, failed: results.failed.length } });
+
         return res.json({
             success: true,
             message: `Bulk approval completed. ${results.approved.length} approved, ${results.failed.length} failed`,
@@ -1511,6 +1529,7 @@ export const bulkApproveRequests = async (req, res) => {
 
     } catch (error) {
         await session.abortTransaction();
+        logApiError("BULK_APPROVE", "AttendanceRequest", error, req, { requestIds });
         return res.status(500).json({
             success: false,
             message: error.message
@@ -1598,6 +1617,7 @@ export const getRequestStatistics = async (req, res) => {
         });
 
     } catch (error) {
+        logApiError("GET_STATISTICS", "AttendanceRequest", error, req);
         return res.status(500).json({
             success: false,
             message: error.message

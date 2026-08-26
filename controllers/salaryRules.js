@@ -2,41 +2,30 @@
 
 import SalaryRule from "../models/salaryRules.js";
 import mongoose from "mongoose";
+import { logApiAction, logApiError } from "../utils/apiLogger.js";
 
 /**
  * Create or Update Company Salary Rule
  */
 export const createSalaryRule = async (req, res) => {
     try {
-        let companyId;
-        if (req.user.type === 'partner') {
-            companyId = req.user.id;
-        } else {
-            companyId = req.user.companyId;
-        }
+        const companyId = req.user.type === 'partner' ? req.user.id : req.user.companyId;
 
-        let salaryRule = await SalaryRule.findOne({ companyId });
+        const before = await SalaryRule.findOne({ companyId });
+        const salaryRule = await SalaryRule.findOneAndUpdate(
+            { companyId },
+            req.body,
+            { new: true, runValidators: true }
+        );
 
-        if (salaryRule) {
-            salaryRule = await SalaryRule.findOneAndUpdate(
-                { companyId },
-                req.body,
-                {
-                    new: true,
-                    runValidators: true
-                }
-            );
-
-            return res.status(200).json({
-                success: true,
-                message: "Salary rule updated successfully",
-                data: salaryRule
-            });
-        }
-
-        salaryRule = await SalaryRule.create({
-            companyId,
-            ...req.body
+        logApiAction({
+            level: "info",
+            action: "CREATE",
+            model: "SalaryRule",
+            req,
+            resourceId: salaryRule?._id,
+            before,
+            after: salaryRule,
         });
 
         return res.status(201).json({
@@ -46,6 +35,7 @@ export const createSalaryRule = async (req, res) => {
         });
 
     } catch (error) {
+        logApiError("CREATE", "SalaryRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message
@@ -84,12 +74,22 @@ export const getSalaryRuleById = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "GET",
+            model: "SalaryRule",
+            req,
+            resourceId: salaryRule._id,
+            after: salaryRule,
+        });
+
         return res.status(200).json({
             success: true,
             data: salaryRule
         });
 
     } catch (error) {
+        logApiError("GET", "SalaryRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message
@@ -110,12 +110,21 @@ export const getCompanySalaryRule = async (req, res) => {
 
         const salaryRule = await SalaryRule.findOne({ companyId });
 
+        logApiAction({
+            level: "info",
+            action: "GET_COMPANY",
+            model: "SalaryRule",
+            req,
+            after: salaryRule,
+        });
+
         return res.status(200).json({
             success: true,
             data: salaryRule || null
         });
 
     } catch (error) {
+        logApiError("GET_COMPANY", "SalaryRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message
@@ -135,6 +144,7 @@ export const updateSalaryRule = async (req, res) => {
             companyId = req.user.companyId;
         }
 
+        const before = await SalaryRule.findOne({ companyId });
         const salaryRule = await SalaryRule.findOneAndUpdate(
             { companyId },
             req.body,
@@ -151,6 +161,16 @@ export const updateSalaryRule = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "UPDATE",
+            model: "SalaryRule",
+            req,
+            resourceId: salaryRule._id,
+            before,
+            after: salaryRule,
+        });
+
         return res.status(200).json({
             success: true,
             message: "Salary rule updated successfully",
@@ -158,6 +178,7 @@ export const updateSalaryRule = async (req, res) => {
         });
 
     } catch (error) {
+        logApiError("UPDATE", "SalaryRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message
@@ -172,9 +193,8 @@ export const deleteSalaryRule = async (req, res) => {
     try {
         const companyId = req.user._id;
 
-        const salaryRule = await SalaryRule.findOneAndDelete({
-            companyId
-        });
+        const before = await SalaryRule.findOne({ companyId });
+        const salaryRule = await SalaryRule.findOneAndDelete({ companyId });
 
         if (!salaryRule) {
             return res.status(404).json({
@@ -183,12 +203,22 @@ export const deleteSalaryRule = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "DELETE",
+            model: "SalaryRule",
+            req,
+            resourceId: salaryRule._id,
+            before,
+        });
+
         return res.status(200).json({
             success: true,
             message: "Salary rule deleted successfully"
         });
 
     } catch (error) {
+        logApiError("DELETE", "SalaryRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message
@@ -216,6 +246,14 @@ export const getAllSalaryRules = async (req, res) => {
             SalaryRule.countDocuments()
         ]);
 
+        logApiAction({
+            level: "info",
+            action: "GET_LIST",
+            model: "SalaryRule",
+            req,
+            extra: { count: salaryRules.length, totalRecords: total, page }
+        });
+
         return res.status(200).json({
             success: true,
             page,
@@ -225,6 +263,7 @@ export const getAllSalaryRules = async (req, res) => {
         });
 
     } catch (error) {
+        logApiError("GET_LIST", "SalaryRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message

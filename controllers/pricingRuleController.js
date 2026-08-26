@@ -1,4 +1,5 @@
 import PricingRule from "../models/Slab/SlabRule.js";
+import { logApiAction, logApiError } from "../utils/apiLogger.js";
 
 // @desc    Get all pricing rules
 // @route   GET /api/pricing-rules
@@ -6,6 +7,14 @@ import PricingRule from "../models/Slab/SlabRule.js";
 export const getAllPricingRules = async (req, res) => {
     try {
         const pricingRules = await PricingRule.find();
+
+        logApiAction({
+            level: "info",
+            action: "GET_LIST",
+            model: "PricingRule",
+            req,
+            extra: { count: pricingRules.length },
+        });
 
         if (!pricingRules || pricingRules.length === 0) {
             return res.status(404).json({
@@ -20,6 +29,7 @@ export const getAllPricingRules = async (req, res) => {
             data: pricingRules,
         });
     } catch (error) {
+        logApiError("GET_LIST", "PricingRule", error, req);
         res.status(500).json({
             success: false,
             message: "Error fetching pricing rules",
@@ -52,11 +62,21 @@ export const getPricingRuleById = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "GET",
+            model: "PricingRule",
+            req,
+            resourceId: pricingRule._id,
+            after: pricingRule,
+        });
+
         res.status(200).json({
             success: true,
             data: pricingRule,
         });
     } catch (error) {
+        logApiError("GET", "PricingRule", error, req);
         res.status(500).json({
             success: false,
             message: "Error fetching pricing rule",
@@ -157,12 +177,23 @@ export const createPricingRule = async (req, res) => {
         // Create pricing rule
         const pricingRule = await PricingRule.create({ modules });
 
+        logApiAction({
+            level: "info",
+            action: "CREATE",
+            model: "PricingRule",
+            req,
+            resourceId: pricingRule._id,
+            after: pricingRule,
+        });
+
         res.status(201).json({
             success: true,
             message: "Pricing rule created successfully",
             data: pricingRule,
         });
     } catch (error) {
+        logApiError("CREATE", "PricingRule", error, req);
+
         // Handle duplicate key error
         if (error.code === 11000) {
             return res.status(400).json({
@@ -309,12 +340,23 @@ export const updatePricingRule = async (req, res) => {
             }
         );
 
+        logApiAction({
+            level: "info",
+            action: "UPDATE",
+            model: "PricingRule",
+            req,
+            resourceId: id,
+            after: updatedPricingRule,
+        });
+
         res.status(200).json({
             success: true,
             message: "Pricing rule updated successfully",
             data: updatedPricingRule,
         });
     } catch (error) {
+        logApiError("UPDATE", "PricingRule", error, req);
+
         // Handle duplicate key error
         if (error.code === 11000) {
             return res.status(400).json({
@@ -367,12 +409,23 @@ export const deletePricingRule = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "DELETE",
+            model: "PricingRule",
+            req,
+            resourceId: id,
+            before: pricingRule,
+        });
+
         res.status(200).json({
             success: true,
             message: "Pricing rule deleted successfully",
             data: {},
         });
     } catch (error) {
+        logApiError("DELETE", "PricingRule", error, req);
+
         res.status(500).json({
             success: false,
             message: "Error deleting pricing rule",

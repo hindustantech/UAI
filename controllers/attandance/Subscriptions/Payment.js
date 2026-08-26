@@ -5,6 +5,7 @@ import User from "../../../models/userModel.js";
 import mongoose from "mongoose";
 import Razorpay from "razorpay";
 import crypto from "crypto";
+import { logApiAction, logApiError } from "../../../utils/apiLogger.js";
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -196,22 +197,7 @@ export const createOrder = async (req, res) => {
             },
         });
 
-        console.log("Created Razorpay order:", {
-            companyId,
-            planId,
-            orderId: order.id,
-            amount: order.amount,
-            currency: order.currency,
-            validityDays: plan.validityDays,
-            breakdown: {
-                basePrice: plan.finalPrice,
-                salesCount,
-                salesCost: pricingDetails.salesCost,
-                proSalesCount,
-                proSalesCost: pricingDetails.proSalesCost,
-                total: totalPrice,
-            },
-        });
+        logApiAction({ action: "CREATE_ORDER", model: "PaymentLog", req, resourceId: order.id, after: { planId, orderId: order.id, amount: totalPrice, salesCount, proSalesCount } });
 
         res.status(200).json({
             success: true,
@@ -244,7 +230,7 @@ export const createOrder = async (req, res) => {
             },
         });
     } catch (error) {
-        console.error("Order creation error:", error);
+        logApiError("CREATE_ORDER", "PaymentLog", error, req);
         res.status(500).json({
             success: false,
             message: "Failed to create order",
@@ -438,6 +424,11 @@ export const verifyPayment = async (req, res) => {
                 }
             );
 
+            logApiError("VERIFY_PAYMENT", "Subscription", new Error("Invalid payment signature"), req, {
+                razorpayOrderId: razorpay_order_id,
+                razorpayPaymentId: razorpay_payment_id,
+            });
+
             return res.status(400).json({
                 success: false,
                 message: "Invalid payment signature",
@@ -484,6 +475,8 @@ export const verifyPayment = async (req, res) => {
                     paymentCompletedAt: new Date(),
                 }
             );
+
+            logApiAction({ action: "VERIFY_PAYMENT", model: "Subscription", req, resourceId: existingSubscription._id, after: { status: "ACTIVE", companyId: existingSubscription.company.toString(), transactionId: razorpay_payment_id, totalPaid: totalPrice } });
 
             return res.status(200).json({
                 success: true,
@@ -565,6 +558,8 @@ export const verifyPayment = async (req, res) => {
             }
         );
 
+        logApiAction({ action: "VERIFY_PAYMENT", model: "Subscription", req, resourceId: subscription._id, after: { status: "ACTIVE", companyId, transactionId: razorpay_payment_id, totalPaid: totalPrice } });
+
         res.status(200).json({
             success: true,
             message: "Payment verified and subscription activated successfully",
@@ -591,7 +586,7 @@ export const verifyPayment = async (req, res) => {
             },
         });
     } catch (error) {
-        console.error("Payment verification error:", error);
+        logApiError("VERIFY_PAYMENT", "Subscription", error, req);
         res.status(500).json({
             success: false,
             message: "Failed to verify payment",
@@ -773,6 +768,14 @@ export const createSubscription = async (req, res) => {
             isActive: true,
         });
 
+        logApiAction({
+            action: "CREATE_MANUAL",
+            model: "Subscription",
+            req,
+            resourceId: subscription._id,
+            after: { status: "ACTIVE", companyId: companyId?.toString(), planId: planId?.toString(), amount: plan.finalPrice || plan.price }
+        });
+
         return res.status(201).json({
             success: true,
             message: "Subscription created successfully",
@@ -780,7 +783,7 @@ export const createSubscription = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Create Subscription Error:", error);
+        logApiError("CREATE_MANUAL", "Subscription", error, req);
 
         return res.status(500).json({
             success: false,
@@ -850,13 +853,15 @@ export const cancelSubscription = async (req, res) => {
         subscription.isActive = false;
         await subscription.save();
 
+        logApiAction({ action: "CANCEL", model: "Subscription", req, resourceId: subscription._id, after: { status: "CANCELLED", companyId } });
+
         res.status(200).json({
             success: true,
             message: "Subscription cancelled successfully",
             data: subscription,
         });
     } catch (error) {
-        console.error("Cancel subscription error:", error);
+        logApiError("CANCEL", "Subscription", error, req);
         res.status(500).json({
             success: false,
             message: "Failed to cancel subscription",

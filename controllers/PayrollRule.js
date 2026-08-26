@@ -1,4 +1,5 @@
 import PayrollRule from "../models/PayrollRuleSchema.js";
+import { logApiAction, logApiError } from "../utils/apiLogger.js";
 
 /**
  * Create Payroll Rule
@@ -21,12 +22,22 @@ export const createPayrollRule = async (req, res) => {
             deductions,
         });
 
+        logApiAction({
+            level: "info",
+            action: "CREATE",
+            model: "PayrollRule",
+            req,
+            resourceId: payrollRule._id,
+            after: payrollRule,
+        });
+
         return res.status(201).json({
             success: true,
             message: "Payroll rule created successfully",
             data: payrollRule,
         });
     } catch (error) {
+        logApiError("CREATE", "PayrollRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message,
@@ -42,12 +53,21 @@ export const getAllPayrollRules = async (req, res) => {
         const payrollRules = await PayrollRule.find()
             .populate("companyId", "name email");
 
+        logApiAction({
+            level: "info",
+            action: "GET_LIST",
+            model: "PayrollRule",
+            req,
+            extra: { count: payrollRules.length },
+        });
+
         return res.status(200).json({
             success: true,
             count: payrollRules.length,
             data: payrollRules,
         });
     } catch (error) {
+        logApiError("GET_LIST", "PayrollRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message,
@@ -70,11 +90,21 @@ export const getPayrollRuleById = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "GET",
+            model: "PayrollRule",
+            req,
+            resourceId: payrollRule._id,
+            after: payrollRule,
+        });
+
         return res.status(200).json({
             success: true,
             data: payrollRule,
         });
     } catch (error) {
+        logApiError("GET", "PayrollRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message,
@@ -116,6 +146,7 @@ export const getPayrollRuleByCompany = async (req, res) => {
  */
 export const updatePayrollRule = async (req, res) => {
     try {
+        const before = await PayrollRule.findById(req.params.id);
         const payrollRule = await PayrollRule.findByIdAndUpdate(
             req.params.id,
             req.body,
@@ -132,12 +163,23 @@ export const updatePayrollRule = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "UPDATE",
+            model: "PayrollRule",
+            req,
+            resourceId: payrollRule._id,
+            before,
+            after: payrollRule,
+        });
+
         return res.status(200).json({
             success: true,
             message: "Payroll rule updated successfully",
             data: payrollRule,
         });
     } catch (error) {
+        logApiError("UPDATE", "PayrollRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message,
@@ -150,6 +192,7 @@ export const updatePayrollRule = async (req, res) => {
  */
 export const deletePayrollRule = async (req, res) => {
     try {
+        const before = await PayrollRule.findById(req.params.id);
         const payrollRule = await PayrollRule.findByIdAndDelete(req.params.id);
 
         if (!payrollRule) {
@@ -159,11 +202,21 @@ export const deletePayrollRule = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "DELETE",
+            model: "PayrollRule",
+            req,
+            resourceId: req.params.id,
+            before,
+        });
+
         return res.status(200).json({
             success: true,
             message: "Payroll rule deleted successfully",
         });
     } catch (error) {
+        logApiError("DELETE", "PayrollRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message,
@@ -176,26 +229,37 @@ export const deletePayrollRule = async (req, res) => {
  */
 export const togglePayrollRuleStatus = async (req, res) => {
     try {
-        const payrollRule = await PayrollRule.findById(req.params.id);
+        const before = await PayrollRule.findById(req.params.id);
 
-        if (!payrollRule) {
+        if (!before) {
             return res.status(404).json({
                 success: false,
                 message: "Payroll rule not found",
             });
         }
 
-        payrollRule.isActive = !payrollRule.isActive;
+        before.isActive = !before.isActive;
+        await before.save();
 
-        await payrollRule.save();
+        const after = await PayrollRule.findById(req.params.id);
+
+        logApiAction({
+            level: "info",
+            action: "TOGGLE_STATUS",
+            model: "PayrollRule",
+            req,
+            resourceId: req.params.id,
+            before,
+            after,
+        });
 
         return res.status(200).json({
             success: true,
-            message: `Payroll rule ${payrollRule.isActive ? "activated" : "deactivated"
-                } successfully`,
-            data: payrollRule,
+            message: `Payroll rule ${after.isActive ? "activated" : "deactivated"} successfully`,
+            data: after,
         });
     } catch (error) {
+        logApiError("TOGGLE_STATUS", "PayrollRule", error, req);
         return res.status(500).json({
             success: false,
             message: error.message,

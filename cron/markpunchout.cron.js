@@ -2,13 +2,15 @@
 
 import cron from "node-cron";
 import PunchAutomationCron from "../controllers/attandance/crons/punchAutomationCron.js";
+import { logCronExecution } from "../config/cronLogger.js";
 
 cron.schedule("*/5 * * * *", async () => {
-    console.log("Running Mark PunchOut Cron Every 5 Minutes");
+    logCronExecution("markpunchoutCron", "STARTED", new Date().toISOString());
 
     try {
         await PunchAutomationCron.processPunchOutAutomation();
+        logCronExecution("markpunchoutCron", "SUCCESS", "Punch out automation completed");
     } catch (error) {
-        console.error("Mark PunchOut Cron Error:", error);
+        logCronExecution("markpunchoutCron", "FAILED", error.message);
     }
 });

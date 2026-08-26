@@ -1,5 +1,6 @@
 import Shift from "../../models/Attandance/Shift.js";
 import mongoose from "mongoose";
+import { logApiAction } from "../../utils/apiLogger.js";
 
 
 /**
@@ -65,6 +66,15 @@ export const createShift = async (req, res) => {
             isNightShift
         });
 
+        logApiAction({
+            level: "info",
+            action: "CREATE",
+            model: "Shift",
+            req,
+            resourceId: shift._id,
+            after: shift,
+        });
+
         return res.status(201).json({
             success: true,
             data: shift
@@ -102,6 +112,9 @@ export const updateShift = async (req, res) => {
             });
         }
 
+        // Capture before state
+        const beforeShift = await Shift.findOne({ _id: id, companyId });
+
         const updateData = { ...req.body };
 
         // Prevent critical overwrite
@@ -136,6 +149,16 @@ export const updateShift = async (req, res) => {
                 message: "Shift not found"
             });
         }
+
+        logApiAction({
+            level: "info",
+            action: "UPDATE",
+            model: "Shift",
+            req,
+            resourceId: id,
+            before: beforeShift,
+            after: shift,
+        });
 
         return res.status(200).json({
             success: true,
@@ -183,6 +206,15 @@ export const deleteShift = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "DELETE",
+            model: "Shift",
+            req,
+            resourceId: id,
+            before: { shiftCode: shift.shiftCode, shiftName: shift.shiftName },
+        });
+
         return res.status(200).json({
             success: true,
             message: "Shift deleted successfully"
@@ -222,6 +254,15 @@ export const toggleNightShift = async (req, res) => {
         shift.isNightShift = !shift.isNightShift;
         await shift.save();
 
+        logApiAction({
+            level: "info",
+            action: "TOGGLE_NIGHT",
+            model: "Shift",
+            req,
+            resourceId: id,
+            after: { isNightShift: shift.isNightShift },
+        });
+
         return res.status(200).json({
             success: true,
             data: shift
@@ -255,6 +296,15 @@ export const toggleOvertime = async (req, res) => {
 
         shift.overtime.allowed = !shift.overtime.allowed;
         await shift.save();
+
+        logApiAction({
+            level: "info",
+            action: "TOGGLE_OVERTIME",
+            model: "Shift",
+            req,
+            resourceId: id,
+            after: { overtimeAllowed: shift.overtime.allowed },
+        });
 
         return res.status(200).json({
             success: true,
@@ -298,6 +348,15 @@ export const toggleWeeklyOff = async (req, res) => {
 
         await shift.save();
 
+        logApiAction({
+            level: "info",
+            action: "TOGGLE_WEEKLY_OFF",
+            model: "Shift",
+            req,
+            resourceId: id,
+            after: { weeklyOff: shift.weeklyOff },
+        });
+
         return res.status(200).json({
             success: true,
             data: shift
@@ -339,7 +398,15 @@ export const getAllShifts = async (req, res) => {
             .limit(Number(limit))
             .lean();
 
-        const total = await Shift.countDocuments(query);
+                const total = await Shift.countDocuments(query);
+
+        logApiAction({
+            level: "info",
+            action: "GET_LIST",
+            model: "Shift",
+            req,
+            extra: { count: shifts.length, total, page: Number(page) },
+        });
 
         return res.status(200).json({
             success: true,

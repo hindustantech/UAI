@@ -1,5 +1,6 @@
 import Attendance from "../models/Attandance/Attendance.js";
 import cron from "node-cron";
+import { logCronExecution } from "../config/cronLogger.js";
 
 export const fixInvalidPunch = async () => {
     try {
@@ -15,9 +16,9 @@ export const fixInvalidPunch = async () => {
             }
         );
 
-        console.log(`Fixed ${result.modifiedCount} invalid punch records`);
+        logCronExecution("fixInvalidPunch", "SUCCESS", `Fixed ${result.modifiedCount} invalid punch records`);
     } catch (error) {
-        console.error("FixInvalidPunch Error:", error);
+        logCronExecution("fixInvalidPunch", "FAILED", error.message);
     }
 };
 
@@ -25,6 +26,6 @@ export const fixInvalidPunch = async () => {
 
 // Run every hour (you can adjust)
 cron.schedule("* * * * *", async () => {
-    console.log("Running punch fix cron...");
+    logCronExecution("fixInvalidPunch", "STARTED", new Date().toISOString());
     await fixInvalidPunch();
 });

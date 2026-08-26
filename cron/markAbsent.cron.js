@@ -5,11 +5,12 @@ import Attendance from "../models/Attandance/Attendance.js";
 import Shift from "../models/Attandance/Shift.js";
 import User from "../models/userModel.js";
 import { NotificationService } from "../src/notification/services/NotificationService.js";
+import { logCronExecution } from "../config/cronLogger.js";
 
 
 
 cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
-    console.log("🕐 [CRON] markAbsentCron started:", new Date().toISOString());
+    logCronExecution("markAbsentCron", "STARTED", new Date().toISOString());
 
     try {
         const now = new Date();
@@ -188,9 +189,9 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
             }
         }
 
-        console.log(`✅ [CRON] Done. Total marked absent: ${markedCount}`);
+        logCronExecution("markAbsentCron", "SUCCESS", `Marked absent: ${markedCount} employees`);
 
     } catch (err) {
-        console.error("❌ [CRON] markAbsentCron failed:", err);
+        logCronExecution("markAbsentCron", "FAILED", err.message);
     }
 });

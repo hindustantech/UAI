@@ -51,7 +51,7 @@ export const QuicksendWhatsAppOtp = async (number, code) => {
 
         logger.info("Sending WhatsApp OTP", {
             number: formattedNumber,
-            code
+            code: "[REDACTED]"
         });
 
         const response = await axios.post(

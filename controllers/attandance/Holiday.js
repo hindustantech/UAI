@@ -1,6 +1,7 @@
 import Holiday from "../../models/Attandance/Holiday.js";
 import Employee from "../../models/Attandance/Employee.js";
 import mongoose from "mongoose";
+import { logApiAction, logApiError } from "../../utils/apiLogger.js";
 
 
 
@@ -105,6 +106,15 @@ export const createHoliday = async (req, res) => {
             createdBy: companyId
         });
 
+        logApiAction({
+            level: "info",
+            action: "CREATE",
+            model: "Holiday",
+            req,
+            resourceId: holiday._id,
+            after: holiday,
+        });
+
         return res.status(201).json({
             success: true,
             message: "Holiday created successfully",
@@ -142,6 +152,8 @@ export const updateHoliday = async (req, res) => {
             });
         }
 
+        const beforeHoliday = await Holiday.findOne({ _id: holidayId, companyId }).lean();
+
         const holiday = await Holiday.findOneAndUpdate(
             {
                 _id: holidayId,
@@ -157,6 +169,16 @@ export const updateHoliday = async (req, res) => {
                 message: "Holiday not found"
             });
         }
+
+        logApiAction({
+            level: "info",
+            action: "UPDATE",
+            model: "Holiday",
+            req,
+            resourceId: holidayId,
+            before: beforeHoliday,
+            after: holiday,
+        });
 
         return res.status(200).json({
             success: true,
@@ -206,6 +228,15 @@ export const deleteHoliday = async (req, res) => {
                 message: "Holiday not found"
             });
         }
+
+        logApiAction({
+            level: "info",
+            action: "DELETE",
+            model: "Holiday",
+            req,
+            resourceId: holidayId,
+            before: holiday,
+        });
 
         return res.status(200).json({
             success: true,
@@ -265,6 +296,14 @@ export const getAllHolidays = async (req, res) => {
             .sort({ date: 1 })
             .lean();
 
+        logApiAction({
+            level: "info",
+            action: "GET_LIST",
+            model: "Holiday",
+            req,
+            extra: { count: holidays.length, filters: { year, type, isPaid } },
+        });
+
         return res.status(200).json({
             success: true,
             count: holidays.length,
@@ -316,14 +355,22 @@ export const getHolidayById = async (req, res) => {
             });
         }
 
+        logApiAction({
+            level: "info",
+            action: "GET",
+            model: "Holiday",
+            req,
+            resourceId: holidayId,
+            after: holiday,
+        });
+
         return res.status(200).json({
             success: true,
             data: holiday
         });
 
     } catch (error) {
-        console.error("GetHolidayById Error:", error);
-
+        logApiError("GET", "Holiday", error, req, { holidayId });
         return res.status(500).json({
             success: false,
             message: "Failed to fetch holiday"

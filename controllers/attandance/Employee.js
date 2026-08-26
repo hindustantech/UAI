@@ -20,6 +20,7 @@ import {
 } from "../../services/featureAccess.service.js";
 // controllers/companyController.js
 import { hasPlanType } from "../../services/featureAccess.service.js";
+import { logApiAction, logApiError } from "../../utils/apiLogger.js";
 
 
 export const uploadEmployeeDeductions = async (req, res) => {
@@ -200,6 +201,15 @@ export const activateEmployee = async (req, res) => {
 
         await employee.save({ session });
 
+        logApiAction({
+            level: "info",
+            action: "ACTIVATE",
+            model: "Employee",
+            req,
+            resourceId: empId,
+            after: { employmentStatus: "active", deactivatedAt: null, deactivatedBy: null, deactivationReason: null },
+        });
+
         await session.commitTransaction();
 
         return res.status(200).json({
@@ -213,6 +223,8 @@ export const activateEmployee = async (req, res) => {
 
     } catch (error) {
         await session.abortTransaction();
+
+        logApiError("ACTIVATE", "Employee", error, req, { empId: req.params.empId });
 
         return res.status(500).json({
             success: false,
@@ -691,6 +703,15 @@ export const createEmployee = async (req, res) => {
 
         const [employee] = await Employee.create([employeeData], { session });
 
+        logApiAction({
+            level: "info",
+            action: "CREATE",
+            model: "Employee",
+            req,
+            resourceId: employee?._id,
+            after: { ...employeeData, employmentStatus: "active" },
+        });
+
         /* =============================================
            8. UPDATE SUBSCRIPTION USAGE (TYPE-AWARE)
         ============================================= */
@@ -842,7 +863,7 @@ export const createEmployee = async (req, res) => {
             await session.abortTransaction();
         }
 
-        console.error("Create Employee Error:", error.message);
+        logApiError("CREATE", "Employee", error, req, { employeeType, empCode });
 
         // Determine status code and error type
         let statusCode = 400;
@@ -978,7 +999,7 @@ export const updateEmployee = async (req, res) => {
             });
         }
 
-        const existingEmployee = await Employee.findOne({
+                const existingEmployee = await Employee.findOne({
             _id: employeeId,
             companyId
         }).session(session);
@@ -989,6 +1010,9 @@ export const updateEmployee = async (req, res) => {
                 message: "Employee not found",
             });
         }
+
+        // Capture before state for audit
+        const beforeEmployee = existingEmployee.toObject();
 
         /* ---------------------------------------------
            3. Extract Input
@@ -1271,6 +1295,16 @@ export const updateEmployee = async (req, res) => {
         delete updatedEmployee._oldType;
         delete updatedEmployee._newType;
 
+        logApiAction({
+            level: "info",
+            action: "UPDATE",
+            model: "Employee",
+            req,
+            resourceId: employeeId,
+            before: beforeEmployee,
+            after: updatedEmployee,
+        });
+
         return res.status(200).json({
             success: true,
             message: "Employee updated successfully",
@@ -1280,6 +1314,8 @@ export const updateEmployee = async (req, res) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
+
+        logApiError("UPDATE", "Employee", error, req, { employeeId: req.params.employeeId });
 
         // Handle duplicate index error (DB level safety)
         if (error.code === 11000) {
@@ -1613,6 +1649,16 @@ export const deactivateEmployee = async (req, res) => {
 
         await employee.save({ session });
 
+        logApiAction({
+            level: "info",
+            action: "DEACTIVATE",
+            model: "Employee",
+            req,
+            resourceId: empId,
+            before: { employmentStatus: "active", deactivatedAt: null },
+            after: { employmentStatus: "inactive", deactivatedAt: employee.deactivatedAt, deactivatedBy: adminId, deactivationReason: employee.deactivationReason },
+        });
+
         /* ===========================
            OPTIONAL: CASCADE EFFECTS
         ============================ */
@@ -1641,6 +1687,8 @@ export const deactivateEmployee = async (req, res) => {
 
     } catch (error) {
         await session.abortTransaction();
+
+        logApiError("DEACTIVATE", "Employee", error, req, { empId: req.params.empId, reason: req.body?.reason });
 
         return res.status(400).json({
             success: false,
