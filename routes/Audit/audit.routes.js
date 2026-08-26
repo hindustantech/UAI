@@ -11,6 +11,7 @@ import {
     exportAuditLogs,
     deactivateAuditEvent,
 } from '../../controllers/Audit/auditLog.controller.js';
+import { getAuditDashboard } from '../../controllers/Audit/auditDashboard.controller.js';
 import authMiddleware from '../../middlewares/authMiddleware.js';
 import { requireAuditPermission } from '../../middlewares/requireAuditPermission.js';
 
@@ -27,6 +28,9 @@ router.get('/logs', authMiddleware, requireAuditPermission('audit.read'), getAll
 
 /* ── Stats ── */
 router.get('/stats', authMiddleware, requireAuditPermission('audit.read'), getAuditLogStats);
+
+/* ── Dashboard (single round-trip: summary + time-series + recent activity) ── */
+router.get('/dashboard', authMiddleware, requireAuditPermission('audit.read'), getAuditDashboard);
 
 /* ── Summary ── */
 router.get('/summary', authMiddleware, requireAuditPermission('audit.read'), getAuditLogStats);

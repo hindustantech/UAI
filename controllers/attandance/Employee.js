@@ -1448,8 +1448,20 @@ export const getAllEmployees = async (req, res) => {
         }
 
         if (search) {
+            const escapedSearch = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Also search by linked user's name/email/phone
+            const User = mongoose.model('User');
+            const matchingUserIds = await User.find({
+                $or: [
+                    { name: { $regex: escapedSearch, $options: 'i' } },
+                    { email: { $regex: escapedSearch, $options: 'i' } },
+                    { phone: { $regex: escapedSearch, $options: 'i' } },
+                ],
+            }).select('_id').lean();
+            const userIds = matchingUserIds.map((u) => u._id);
             filter.$or = [
-                { empCode: { $regex: search, $options: "i" } },
+                { empCode: { $regex: escapedSearch, $options: 'i' } },
+                ...(userIds.length > 0 ? [{ userId: { $in: userIds } }] : []),
             ];
         }
 
