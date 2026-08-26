@@ -36,6 +36,7 @@ import salesR from './routes/Attandance/Sales/salses.js';
 import onboardingRoutes from './routes/onboarding.routes.js';
 import bulkUploadSalesRoute from './routes/Attandance/bulkUploadSalesSessions.js'
 import payrollrule from './routes/PayrollRule.js'
+import auditRoutes from './routes/Audit/audit.routes.js'
 import salaryRules from './routes/salaryRuleRoutes.js'
 import payrollroutes from './routes/Attandance/payrollRoutes.js'
 import customorder from './routes/orderRoutes.js'
@@ -144,6 +145,7 @@ app.use('/api/face-attendance', faceAttendanceRoutes); // Mount the face attenda
 app.use('/api/v1/sales-any', SalesAnyRoutes); // Mount the sales any routes at /api/v1/sales-any
 app.use('/api/admin/notifications', adminNotificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/audit', auditRoutes);
 // Add this after your existing middleware setup
 app.use('/uploads', express.static('uploads'));
 
