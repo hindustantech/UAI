@@ -58,6 +58,7 @@ import { initializeSchedulers } from './src/notification/scheduler/index.js';
 import { closeAllQueues } from './src/notification/queues/index.js';
 import adminNotificationRoutes from './src/notification/routes/adminNotificationRoutes.js';
 import dashboardRoutes from './routes/Dasboard/dashboard.js';
+import adminDashboardRoutes from './routes/AdminDashboard/adminDashboard.routes.js';
 dotenv.config();
 await connectDB();
 await connectRedis();
@@ -148,6 +149,7 @@ app.use('/api/face-attendance', faceAttendanceRoutes); // Mount the face attenda
 app.use('/api/v1/sales-any', SalesAnyRoutes); // Mount the sales any routes at /api/v1/sales-any
 app.use('/api/admin/notifications', adminNotificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/admin-dashboard', adminDashboardRoutes);
 app.use('/api/audit', auditRoutes);
 // Add this after your existing middleware setup
 app.use('/uploads', express.static('uploads'));
