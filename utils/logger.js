@@ -55,6 +55,9 @@ logger.add(
   })
 );
 
+// NOTE: Database storage is handled by AuditLog (MongoDB) via utils/apiLogger.js —
+// NOT via a winston-mongodb transport. See logApiAction()/logApiError().
+
 // Optional: Stream for Morgan (HTTP request logging)
 logger.stream = {
   write: (message) => {
