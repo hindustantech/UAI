@@ -1521,7 +1521,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const wsMaster = wb.addWorksheet("Employee Master");
             wsMaster.views = [{ state: "frozen", ySplit: 2 }];
 
-            const mCols = 23;
+            const mCols = 29;
             wsMaster.mergeCells(1, 1, 1, mCols);
             const mTitle = wsMaster.getCell(1, 1);
             mTitle.value = `EMPLOYEE MASTER DATA  |  Generated on ${new Date().toLocaleDateString("en-IN")}`;
@@ -1537,6 +1537,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 "Grace (Late Entry)", "Grace (Early Exit)",
                 "Email", "Phone", "Date of Joining",
                 "basic", "HRA", "DA", "Bonus", "PerDay", "PerHour", "OvertimeRate",
+                "Latitude", "Longitude", "Location Type", "Radius (m)", "Manual Location",
             ];
             const mHdrRow = wsMaster.getRow(2);
             mHdrRow.height = 18;
@@ -1575,6 +1576,11 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                     emp.salaryStructure?.da || 0, emp.salaryStructure?.bonus || 0,
                     emp.salaryStructure?.perDay || 0, emp.salaryStructure?.perHour || 0,
                     emp.salaryStructure?.overtimeRate || 0,
+                    emp.officeLocation?.coordinates?.[1] ?? "N/A",
+                    emp.officeLocation?.coordinates?.[0] ?? "N/A",
+                    emp.officeLocation?.locationtype || "N/A",
+                    emp.officeLocation?.radius ?? 0,
+                    emp.officeLocation?.manual || "N/A",
                 ];
 
                 vals.forEach((v, i) => {
