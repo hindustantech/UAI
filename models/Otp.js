@@ -39,6 +39,11 @@ const otpSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+
+        sms_uid: {
+            type: String,
+            default: null,
+        },
     },
     {
         timestamps: true,

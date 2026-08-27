@@ -6,7 +6,6 @@ import {
     updateUserLocation,
     UpdateManualAddress,
 
-
     resendOtp,
     signout,
 
@@ -21,8 +20,8 @@ import {
     getUserIdsAndNamesByReferralCodesController,
     getUserProfile,
     deleteUser,
-    startAuth,
-    completOtp,
+    SMSstartAuth,
+    SMScompletOtp,
     completeProfile,
     findUserByReferralOwner,
     exportUsersByLocation,
@@ -77,8 +76,11 @@ router.get("/getUserProfile", authMiddleware, getUserProfile);
 router.delete("/deleteUser", authMiddleware, deleteUser);
 
 
-router.post('/startAuth', startAuth);
-router.post('/completOtp', completOtp);
+router.post('/startAuth', SMSstartAuth);
+router.post('/completOtp', SMScompletOtp);
+
+
+
 router.post('/startAdminAuth', startAdminAuth);
 router.post('/completeAdminOtp', completeAdminOtp);
 router.post('/completeProfile',

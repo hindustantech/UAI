@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import User from '../models/userModel.js';
 import { generateToken } from '../config/jwt.js';
 import { sendWhatsAppOtp, verifyWhatsAppOtp, generateOTP } from '../utils/whatapp.js';
-import { QuicksendWhatsAppOtp } from '../utils/whatapp_otp.js';
+import { QuicksendWhatsAppOtp ,Smsotpverify} from '../utils/whatapp_otp.js';
 import { generateReferralCode } from '../utils/Referalcode.js';
 import fs from 'fs';
 import path from 'path';
@@ -1821,7 +1821,7 @@ export const getEmployeeById = async (req, res) => {
 };
 
 
-export const startAuth = async (req, res) => {
+export const SMSstartAuth = async (req, res) => {
   try {
     const {
       phone,
@@ -1975,6 +1975,18 @@ export const startAuth = async (req, res) => {
       });
     }
 
+    /* ---------------- SAVE SMS UID FROM API RESPONSE ---------------- */
+
+    const smsUid = otpResponse.data?.uid || otpResponse.data?.data?.uid || null;
+
+    if (smsUid) {
+      await Otp.findOneAndUpdate(
+        { userId: user._id, phone: cleanPhone },
+        { sms_uid: smsUid },
+        { upsert: true, new: true }
+      );
+    }
+
     /* ---------------- RESPONSE ---------------- */
 
     return res.status(200).json({
@@ -2010,7 +2022,7 @@ export const startAuth = async (req, res) => {
 
 
 
-export const completOtp = async (req, res) => {
+export const SMScompletOtp = async (req, res) => {
   try {
     const {
       userId,
@@ -2097,10 +2109,23 @@ export const completOtp = async (req, res) => {
 
     /* ---------------- INVALID OTP ---------------- */
 
-    if (otp !== "1234" && otpDoc.otp !== otp) {
+    let isOtpValid = false;
 
+    /* CHECK VIA EXTERNAL SMS API IF sms_uid EXISTS */
+    if (otpDoc.sms_uid) {
+      const verifyResponse = await Smsotpverify(otp, otpDoc.sms_uid);
+      if (verifyResponse.success) {
+        isOtpValid = true;
+      }
+    }
+
+    /* FALLBACK: LOCAL DB CHECK */
+    if (!isOtpValid && (otp === "1234" || otpDoc.otp === otp)) {
+      isOtpValid = true;
+    }
+
+    if (!isOtpValid) {
       otpDoc.attempts += 1;
-
       await otpDoc.save();
 
       const attemptsLeft =
@@ -2204,6 +2229,390 @@ export const completOtp = async (req, res) => {
     });
   }
 };
+
+// export const startAuth = async (req, res) => {
+//   try {
+//     const {
+//       phone,
+//       type,
+//       referralCode,
+//     } = req.body;
+
+//     /* ---------------- VALIDATION ---------------- */
+
+//     if (!phone || !type) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "phone and type required",
+//       });
+//     }
+
+//     const allowedTypes = [
+//       "user",
+//       "partner",
+//       "agency",
+//       "admin",
+//       "super_admin",
+//     ];
+
+//     if (!allowedTypes.includes(type)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid type",
+//       });
+//     }
+
+//     const cleanPhone = phone.trim();
+
+//     /* ---------------- RATE LIMIT ---------------- */
+
+//     const recentOtp = await Otp.findOne({
+//       phone: cleanPhone,
+//       createdAt: {
+//         $gt: new Date(
+//           Date.now() - 60 * 1000
+//         ),
+//       },
+//     }).lean();
+
+//     if (recentOtp) {
+//       return res.status(429).json({
+//         success: false,
+//         message:
+//           "Please wait 1 minute before requesting another OTP",
+//       });
+//     }
+
+//     /* ---------------- FIND USER ---------------- */
+
+//     let user = await User.findOne({
+//       phone: cleanPhone,
+//     });
+
+//     let isNewUser = false;
+
+//     /* ---------------- CREATE USER ---------------- */
+
+//     if (!user) {
+
+//       /* OPTIONAL REFERRAL VALIDATION */
+
+//       let referredUser = null;
+
+//       if (referralCode) {
+
+//         referredUser = await User.findOne({
+//           referalCode: referralCode,
+//         }).select("_id referalCode");
+
+//         if (!referredUser) {
+//           return res.status(400).json({
+//             success: false,
+//             message: "Invalid referral code",
+//           });
+//         }
+//       }
+
+//       /* USER OWN REFERRAL CODE */
+
+//       const ownReferralCode =
+//         await generateUniqueReferralCode();
+
+//       user = await User.create({
+//         phone: cleanPhone,
+//         type,
+
+//         /* USER OWN CODE */
+//         referalCode: ownReferralCode,
+
+//         /* OPTIONAL */
+//         referredBy: referralCode || null,
+
+//         isVerified: false,
+//       });
+
+//       isNewUser = true;
+//     }
+
+//     /* ---------------- SUSPEND CHECK ---------------- */
+
+//     if (user.suspend) {
+//       return res.status(403).json({
+//         success: false,
+//         message: "Account suspended",
+//       });
+//     }
+
+//     /* ---------------- DELETE OLD OTP ---------------- */
+
+//     await Otp.deleteMany({
+//       userId: user._id,
+//     });
+
+//     /* ---------------- GENERATE OTP ---------------- */
+
+//     const code = generateOTP();
+
+//     /* ---------------- SAVE OTP ---------------- */
+
+//     await Otp.create({
+//       userId: user._id,
+//       phone: cleanPhone,
+//       otp: code,
+
+//       attempts: 0,
+
+//       expiresAt: new Date(
+//         Date.now() + 5 * 60 * 1000
+//       ),
+//     });
+
+//     /* ---------------- SEND OTP ---------------- */
+
+//     const otpResponse =
+//       await QuicksendWhatsAppOtp(
+//         cleanPhone,
+//         code
+//       );
+
+//     if (!otpResponse.success) {
+
+//       return res.status(500).json({
+//         success: false,
+//         message: "Failed to send OTP",
+//         error: otpResponse.error,
+//       });
+//     }
+
+//     /* ---------------- RESPONSE ---------------- */
+
+//     return res.status(200).json({
+//       success: true,
+
+//       message: isNewUser
+//         ? "Registered successfully. OTP sent"
+//         : "Login OTP sent",
+
+//       userId: user._id,
+
+//       isNewUser,
+
+//       type: user.type,
+//     });
+
+//   } catch (error) {
+
+//     console.error(
+//       "startAuth Error:",
+//       error
+//     );
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Auth start failed",
+//       error: error.message,
+//     });
+//   }
+// };
+
+
+
+
+
+// export const completOtp = async (req, res) => {
+//   try {
+//     const {
+//       userId,
+//       otp,
+//       deviceId,
+//     } = req.body;
+
+//     /* ---------------- VALIDATION ---------------- */
+
+//     if (!userId || !otp) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "userId and otp required",
+//       });
+//     }
+
+//     /* ---------------- FIND USER ---------------- */
+
+//     const user = await User.findById(userId)
+//       .select(
+//         "_id phone type suspend isVerified"
+//       )
+//       .lean();
+
+//     if (!user) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "User not found",
+//       });
+//     }
+
+//     /* ---------------- SUSPEND CHECK ---------------- */
+
+//     if (user.suspend) {
+//       return res.status(403).json({
+//         success: false,
+//         message: "Account suspended",
+//       });
+//     }
+
+//     /* ---------------- FIND OTP ---------------- */
+
+//     const otpDoc = await Otp.findOne({
+//       userId: user._id,
+//       verified: false,
+//     });
+
+//     if (!otpDoc) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "OTP expired or not found",
+//       });
+//     }
+
+//     /* ---------------- EXPIRE CHECK ---------------- */
+
+//     if (
+//       new Date() > new Date(otpDoc.expiresAt)
+//     ) {
+
+//       await Otp.deleteMany({
+//         userId: user._id,
+//       });
+
+//       return res.status(400).json({
+//         success: false,
+//         message: "OTP expired",
+//       });
+//     }
+
+//     /* ---------------- ATTEMPTS CHECK ---------------- */
+
+//     if (
+//       otpDoc.attempts >=
+//       otpDoc.maxAttempts
+//     ) {
+
+//       return res.status(429).json({
+//         success: false,
+//         message:
+//           "Too many invalid attempts",
+//       });
+//     }
+
+//     /* ---------------- INVALID OTP ---------------- */
+
+//     if (otp !== "1234" && otpDoc.otp !== otp) {
+
+//       otpDoc.attempts += 1;
+
+//       await otpDoc.save();
+
+//       const attemptsLeft =
+//         otpDoc.maxAttempts -
+//         otpDoc.attempts;
+
+//       logApiError(
+//         "LOGIN_FAILED",
+//         "AUTH",
+//         new Error(`Invalid OTP (attempt ${otpDoc.attempts}/${otpDoc.maxAttempts})`),
+//         req,
+//         { userId: user._id, attemptsLeft: attemptsLeft < 0 ? 0 : attemptsLeft }
+//       );
+
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid OTP",
+//         attemptsLeft:
+//           attemptsLeft < 0
+//             ? 0
+//             : attemptsLeft,
+//       });
+//     }
+
+//     /* ---------------- MARK VERIFIED ---------------- */
+
+//     otpDoc.verified = true;
+
+//     if (deviceId) {
+//       otpDoc.deviceId = deviceId;
+//     }
+
+//     await otpDoc.save();
+
+//     /* ---------------- UPDATE USER ---------------- */
+
+//     const updatedUser =
+//       await User.findByIdAndUpdate(
+//         user._id,
+//         {
+//           $set: {
+//             isVerified: true,
+//             lastLoginAt: new Date(),
+//           },
+//         },
+//         {
+//           new: true,
+//         }
+//       ).lean();
+
+//     /* ---------------- DELETE OTP ---------------- */
+
+//     await Otp.deleteMany({
+//       userId: user._id,
+//     });
+
+//     /* ---------------- GENERATE JWT ---------------- */
+
+//     const token = await generateToken(
+//       updatedUser._id,
+//       updatedUser.type
+//     );
+
+//     logApiAction({
+//       action: "LOGIN",
+//       model: "AUTH",
+//       req,
+//       resourceId: updatedUser._id,
+//       after: { userId: updatedUser._id, type: updatedUser.type, phone: updatedUser.phone },
+//       extra: { isOTPVerified: true },
+//     });
+
+//     /* ---------------- RESPONSE ---------------- */
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Login success",
+
+//       token,
+
+//       user: {
+//         id: updatedUser._id,
+//         phone: updatedUser.phone,
+//         type: updatedUser.type,
+//         isVerified:
+//           updatedUser.isVerified,
+//       },
+//     });
+
+//   } catch (error) {
+
+//     console.error(
+//       "completOtp Error:",
+//       error
+//     );
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "OTP verification failed",
+//       error: error.message,
+//     });
+//   }
+// };
 
 
 

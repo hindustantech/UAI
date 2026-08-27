@@ -9,6 +9,11 @@ const WHATSAPP_API_URL =
 
 const WHATSAPP_API_KEY = process.env.QUICKHUB_API_KEY;
 
+const SMS_API_URL =
+    "https://smsmediaapi.patronservices.in/api/sms/send-otp-api";
+
+const SMS_API_KEY = process.env.SMS_API_KEY;
+
 /**
  * Format phone number to E.164
  */
@@ -30,43 +35,38 @@ const formatPhoneNumber = (number) => {
 };
 
 /**
- * Send WhatsApp OTP
+ * Send SMS OTP
  * @param {string} number
  * @param {string|number} code
  */
 export const QuicksendWhatsAppOtp = async (number, code) => {
-    const formattedNumber = formatPhoneNumber(number);
+    const cleanedNumber = String(number).replace(/\D/g, "");
+    const mobile = cleanedNumber.length === 10
+        ? cleanedNumber
+        : cleanedNumber.startsWith("91") && cleanedNumber.length === 12
+            ? cleanedNumber.slice(2)
+            : cleanedNumber;
 
-    logger.info("Attempting to send WhatsApp OTP", {
+    logger.info("Attempting to send SMS OTP", {
         original: number,
-        formatted: formattedNumber
+        mobile: mobile
     });
 
     try {
-        const payload = {
-            to: formattedNumber,
-            templateName: "otp_auth",
-            params: [String(code)],
-        };
+        const smstext = `Your OTP is ${code}`;
 
-        logger.info("Sending WhatsApp OTP", {
-            number: formattedNumber,
-            code: "[REDACTED]"
+        const response = await axios.get(SMS_API_URL, {
+            params: {
+                apikey: SMS_API_KEY,
+                senderid: "SMEDIA",
+                mobile: mobile,
+                smstext: smstext,
+                serviceid: 16,
+            },
         });
 
-        const response = await axios.post(
-            WHATSAPP_API_URL,
-            payload,
-            {
-                headers: {
-                    Authorization: `Bearer ${WHATSAPP_API_KEY}`,
-                    "Content-Type": "application/json",
-                },
-            }
-        );
-
-        logger.info("WhatsApp OTP sent successfully", {
-            number: formattedNumber,
+        logger.info("SMS OTP sent successfully", {
+            number: mobile,
             response: response.data
         });
 
@@ -77,10 +77,46 @@ export const QuicksendWhatsAppOtp = async (number, code) => {
 
     } catch (error) {
 
-        logger.error("WhatsApp OTP Send Error:", {
-            number: formattedNumber,
+        logger.error("SMS OTP Send Error:", {
+            number: mobile,
             error: error?.response?.data || error.message
         });
+
+        return {
+            success: false,
+            error: error?.response?.data || error.message,
+        };
+    }
+}
+
+
+/**
+ * Verify SMS OTP
+ * @param {string} otp
+ * @param {string} uid
+ */
+export const Smsotpverify = async (otp, uid) => {
+    logger.info("Attempting to verify SMS OTP", { uid, otp });
+
+    try {
+        const url = `${SMS_API_URL}/verify-otp-api`;
+
+        const response = await axios.get(url, {
+            params: {
+                apikey: SMS_API_KEY,
+                uid: uid,
+                otp: otp,
+            },
+        });
+
+        logger.info("SMS OTP verified successfully", { uid, response: response.data });
+
+        return {
+            success: true,
+            data: response.data,
+        };
+    } catch (error) {
+        logger.error("SMS OTP Verify Error:", { uid, error: error?.response?.data || error.message });
 
         return {
             success: false,
