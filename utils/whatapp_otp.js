@@ -53,7 +53,7 @@ export const QuicksendWhatsAppOtp = async (number, code) => {
     });
 
     try {
-        const smstext = `Your OTP is ${code}`;
+        const smstext = `Dear Concern, ${code} is your OTP. Patron Services`;
 
         const response = await axios.get(SMS_API_URL, {
             params: {
