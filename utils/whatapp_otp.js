@@ -58,10 +58,12 @@ export const QuicksendWhatsAppOtp = async (number, code) => {
         const response = await axios.get(SMS_API_URL, {
             params: {
                 apikey: SMS_API_KEY,
-                senderid: "SMEDIA",
+                senderid: "PATSER",
                 mobile: mobile,
                 smstext: smstext,
-                serviceid: 16,
+                serviceid: 6,
+                peid:'1201159825774033626',
+                templateid:'1207161845816576472'
             },
         });
 
