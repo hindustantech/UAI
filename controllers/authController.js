@@ -2788,6 +2788,197 @@ export const startAdminAuth = async (
 };
 
 
+// logging  super admin to any user
+export const loginUserSuperadmin = async (req, res) => {
+  try {
+    const {
+      userId,
+      deviceId,
+    } = req.body;
+
+    /* ---------------- VALIDATION ---------------- */
+    if(req.user.type !== "super_admin" && req.user.role !== "super_admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
+    if (!userId ) {
+      return res.status(400).json({
+        success: false,
+        message: "userId and otp required",
+      });
+    }
+
+    /* ---------------- FIND USER ---------------- */
+
+    const user = await User.findById(userId)
+      .select(
+        "_id phone type suspend isVerified"
+      )
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+    
+
+
+  
+
+    /* ---------------- UPDATE USER ---------------- */
+
+    const updatedUser =
+      await User.findByIdAndUpdate(
+        user._id,
+        {
+          $set: {
+            isVerified: true,
+            lastLoginAt: new Date(),
+          },
+        },
+        {
+          new: true,
+        }
+      ).lean();
+
+
+
+    /* ---------------- GENERATE JWT ---------------- */
+
+    const token = await generateToken(
+      updatedUser._id,
+      updatedUser.type
+    );
+
+    logApiAction({
+      action: "LOGIN",
+      model: "AUTH",
+      req,
+      resourceId: updatedUser._id,
+      after: { userId: updatedUser._id, type: updatedUser.type, phone: updatedUser.phone },
+      extra: { isOTPVerified: true },
+    });
+
+    /* ---------------- RESPONSE ---------------- */
+
+    return res.status(200).json({
+      success: true,
+      message: "Login success",
+
+      token,
+
+      user: {
+        id: updatedUser._id,
+        phone: updatedUser.phone,
+        type: updatedUser.type,
+        isVerified:
+          updatedUser.isVerified,
+      },
+    });
+
+  } catch (error) {
+
+    console.error(
+      "completOtp Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "OTP verification failed",
+      error: error.message,
+    });
+  }
+};
+
+// get All user 
+// get All user with cursor-based pagination, search, and composite cursor for better stability
+export const getAllUsersSuperadmin = async (req, res) => {
+  try {
+    if(req.user.type !== "super_admin" && req.user.role !== "super_admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
+    const { cursor, limit = 20, search = '', sort = 'createdAt', order = 'desc' } = req.query;
+
+    // Convert limit to number and ensure it's within reasonable bounds
+    const pageSize = Math.min(Math.max(parseInt(limit) || 20, 1), 100);
+
+    // Build search query
+    let query = {};
+
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      query.$or = [
+        { phone: searchRegex },
+        { name: searchRegex },
+        { email: searchRegex },
+        { uid: searchRegex },
+        { referalCode: searchRegex }
+      ];
+    }
+
+    // Determine sort direction
+    const sortDirection = order === 'asc' ? 1 : -1;
+    const sortField = sort;
+    
+    // Add cursor condition if provided
+    if (cursor) {
+      // For simple cursor pagination (single field)
+      query[sortField] = sortDirection === 1 ? { $gt: cursor } : { $lt: cursor };
+    }
+
+    // Fetch one extra item to determine if there's a next page
+    const users = await User.find(query)
+      .select("_id phone type suspend isVerified createdAt updatedAt uid name email")
+      .sort({ [sortField]: sortDirection, _id: sortDirection })
+      .limit(pageSize + 1)
+      .lean();
+
+    // Check if there are more results
+    const hasMore = users.length > pageSize;
+    const results = hasMore ? users.slice(0, pageSize) : users;
+
+    // Determine next cursor - encode it properly
+    let nextCursor = null;
+    if (hasMore && results.length > 0) {
+      const lastItem = results[results.length - 1];
+      // Use the sort field value as cursor
+      nextCursor = lastItem[sortField] instanceof Date 
+        ? lastItem[sortField].toISOString() 
+        : lastItem[sortField];
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Users fetched successfully",
+      data: {
+        users: results,
+        pagination: {
+          nextCursor,
+          hasMore,
+          limit: pageSize
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("getAllUsersSuperadmin Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+}
 
 /* =========================================================
    COMPLETE SUPER ADMIN OTP

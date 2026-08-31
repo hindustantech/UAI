@@ -32,8 +32,9 @@ import {
     startAdminAuth, completeAdminOtp,
     oauthAuthController,
     UpdatePhone,
-
-    createOrUpdateEmployee, getAllEmployees, getEmployeeById
+    loginUserSuperadmin,
+    createOrUpdateEmployee, getAllEmployees, getEmployeeById,
+    getAllUsersSuperadmin
 } from '../controllers/authController.js';
 import { checkLimit } from '../middlewares/checkLimt/checklimit.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
@@ -47,7 +48,8 @@ upload.single("images")
 router.post('/updateUserLocation', authMiddleware, updateUserLocation);
 router.post('/oauthAuthController', oauthAuthController);
 router.post('/UpdatePhone', authMiddleware, UpdatePhone);
-
+router.post('/loginUserSuperadmin', authMiddleware, loginUserSuperadmin);
+router.get('/getAllUsersSuperadmin', authMiddleware, getAllUsersSuperadmin);
 router.get('/getuserbyreferal', getUserIdsAndNamesByReferralCodesController);
 router.get('/generateTheQRCode', authMiddleware, generateTheQRCode);
 
