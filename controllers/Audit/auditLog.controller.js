@@ -613,63 +613,70 @@ export const exportAuditLogs = async (req, res) => {
                 path: 'employeeId',
                 select: 'empCode user_name jobInfo employeeType role',
                 populate: { path: 'userId', select: 'name phone' }
-            })
-            .lean();
+            });
 
-        const rows = docs.map(d => ({
-            eventId: d.eventId,
-            timestamp: d.timestamp
-                ? new Date(d.timestamp).toLocaleString('en-IN', {
-                    timeZone: 'Asia/Kolkata',
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: true,
-                  })
-                : '',
-            organizationId: d.organizationId?.toString() ?? '',
-            empId: d.employeeId?.empCode ?? '',
-            empName: d.employeeId?.user_name ?? d.employeeId?.userId?.name ?? '',
-            empPhone: d.employeeId?.userId?.phone ?? '',
-            empDepartment: d.employeeId?.jobInfo?.department ?? '',
-            empDesignation: d.employeeId?.jobInfo?.designation ?? '',
-            empType: d.employeeId?.employeeType ?? '',
-            empRole: d.employeeId?.role ?? '',
-            userName: d.userId?.name ?? '',
-            userEmail: d.userId?.email ?? '',
-            userPhone: d.userId?.phone ?? '',
-            userRole: d.userRole ?? '',
-            action: d.action,
-            operation: d.operation ?? '',
-            eventType: d.eventType ?? '',
-            category: d.category ?? '',
-            resource: d.resource,
-            resourceId: d.resourceId,
-            success: d.success,
-            result: d.result ?? '',
-            method: d.http?.method ?? '',
-            route: d.http?.route ?? '',
-            ip: d.http?.ip ?? '',
-            changedFields: (d.changedFields ?? []).join(';'),
-            errorCode: d.errorCode ?? '',
-            safeErrorMessage: d.safeErrorMessage ?? '',
-            seq: d.seq,
-            currentHash: d.currentHash,
-        }));
+        const rows = docs.map(d => {
+            const emp = d.employeeId || {};
+            const empUser = emp.userId || {};
+            const actorUser = d.userId || {};
+            return {
+                eventId: d.eventId ?? '',
+                timestamp: d.timestamp
+                    ? new Date(d.timestamp).toLocaleString('en-IN', {
+                        timeZone: 'Asia/Kolkata',
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: true,
+                      })
+                    : '',
+                organizationId: d.organizationId?.toString() ?? '',
+                empId: emp.empCode ?? '',
+                empName: emp.user_name ?? empUser.name ?? '',
+                empPhone: empUser.phone ?? '',
+                empDepartment: emp.jobInfo?.department ?? '',
+                empDesignation: emp.jobInfo?.designation ?? '',
+                empType: emp.employeeType ?? '',
+                empRole: emp.role ?? '',
+                userName: actorUser.name ?? '',
+                userEmail: actorUser.email ?? '',
+                userPhone: actorUser.phone ?? '',
+                userRole: d.userRole ?? '',
+                action: d.action ?? '',
+                operation: d.operation ?? '',
+                eventType: d.eventType ?? '',
+                category: d.category ?? '',
+                resource: d.resource ?? '',
+                resourceId: d.resourceId ?? '',
+                success: d.success ? 'Yes' : 'No',
+                result: d.result ?? '',
+                method: d.http?.method ?? '',
+                route: d.http?.route ?? '',
+                ip: d.http?.ip ?? '',
+                changedFields: (d.changedFields ?? []).join(';'),
+                errorCode: d.errorCode ?? '',
+                safeErrorMessage: d.safeErrorMessage ?? '',
+                seq: d.seq ?? '',
+                currentHash: d.currentHash ?? '',
+            };
+        });
 
         if (rows.length === 0) {
             return res.status(200).json({ success: true, message: 'No audit logs match the filters', data: [] });
         }
 
         const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet('Audit Logs');
+        const worksheet = workbook.addWorksheet('Audit Logs', {
+            views: [{ state: 'frozen', ySplit: 1 }],
+        });
 
         const headers = [
             'Event ID',
             'Timestamp (IST)',
+            'Organization ID',
             'Emp ID',
             'Emp Name',
             'Emp Phone',
@@ -677,9 +684,9 @@ export const exportAuditLogs = async (req, res) => {
             'Emp Designation',
             'Emp Type',
             'Emp Role',
-            'User Name',
-            'User Email',
-            'User Phone',
+            'Actor Name',
+            'Actor Email',
+            'Actor Phone',
             'User Role',
             'Action',
             'Operation',
@@ -691,7 +698,7 @@ export const exportAuditLogs = async (req, res) => {
             'Result',
             'HTTP Method',
             'Route',
-            'IP',
+            'IP Address',
             'Changed Fields',
             'Error Code',
             'Error Message',
@@ -699,12 +706,35 @@ export const exportAuditLogs = async (req, res) => {
             'Hash',
         ];
 
-        worksheet.columns = headers.map(h => ({ header: h, key: h.toLowerCase().replace(/[^a-z0-9]/g, '_'), width: 20 }));
+        worksheet.columns = headers.map(h => ({
+            header: h,
+            key: h.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+            width: h.length + 4,
+        }));
 
-        rows.forEach((row, rowIndex) => {
+        worksheet.getRow(1).eachCell((cell) => {
+            cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+            cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FF4472C4' },
+            };
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FF2F5496' } },
+                left: { style: 'thin', color: { argb: 'FF2F5496' } },
+                bottom: { style: 'medium', color: { argb: 'FF2F5496' } },
+                right: { style: 'thin', color: { argb: 'FF2F5496' } },
+            };
+        });
+
+        const lightBlue = 'FFD6E4F0';
+
+        rows.forEach((row) => {
             const r = worksheet.addRow({
                 eventId: row.eventId,
                 timestamp: row.timestamp,
+                organizationId: row.organizationId,
                 empId: row.empId,
                 empName: row.empName,
                 empPhone: row.empPhone,
@@ -733,23 +763,65 @@ export const exportAuditLogs = async (req, res) => {
                 seq: row.seq,
                 currentHash: row.currentHash,
             });
-            r.eachCell((cell) => {
+
+            const rowNum = r.number;
+            const isEven = rowNum % 2 === 0;
+
+            r.eachCell({ includeEmpty: true }, (cell) => {
                 cell.border = {
-                    top: { style: 'thin' },
-                    left: { style: 'thin' },
-                    bottom: { style: 'thin' },
-                    right: { style: 'thin' },
+                    top: { style: 'thin', color: { argb: 'FFB4C6E7' } },
+                    left: { style: 'thin', color: { argb: 'FFB4C6E7' } },
+                    bottom: { style: 'thin', color: { argb: 'FFB4C6E7' } },
+                    right: { style: 'thin', color: { argb: 'FFB4C6E7' } },
                 };
+                cell.alignment = { vertical: 'middle', wrapText: false };
+                cell.font = { size: 10 };
+                if (isEven) {
+                    cell.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: lightBlue },
+                    };
+                }
             });
+
+            const successCell = r.getCell('success');
+            if (row.success === 'Yes') {
+                successCell.font = { bold: true, color: { argb: 'FF006100' }, size: 10 };
+                successCell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFC6EFCE' },
+                };
+            } else {
+                successCell.font = { bold: true, color: { argb: 'FF9C0006' }, size: 10 };
+                successCell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFFFC7CE' },
+                };
+            }
         });
 
-        worksheet.getRow(1).eachCell((cell) => {
-            cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-            cell.fill = {
-                type: 'pattern',
-                fgColor: { rgb: '4472C4' },
-            };
+        const autoColWidths = headers.map((h, i) => {
+            let maxLen = h.length;
+            rows.forEach(row => {
+                const val = Object.values(row)[i];
+                if (val != null) maxLen = Math.max(maxLen, String(val).length);
+            });
+            return Math.min(Math.max(maxLen + 2, 12), 50);
         });
+        worksheet.columns.forEach((col, i) => { col.width = autoColWidths[i]; });
+
+        worksheet.autoFilter = {
+            from: { row: 1, column: 1 },
+            to: { row: 1, column: headers.length },
+        };
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="audit-logs-${Date.now()}.xlsx"`);
+
+        await workbook.xlsx.write(res);
 
         logApiAction({
             action: 'EXPORT',
@@ -761,10 +833,6 @@ export const exportAuditLogs = async (req, res) => {
             },
         });
 
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename="audit-logs-${Date.now()}.xlsx"`);
-
-        await workbook.xlsx.write(res);
         return res.status(200).send();
 
     } catch (err) {
