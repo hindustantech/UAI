@@ -10,6 +10,7 @@ import {
 import auditConfig from '../../services/audit/config.js';
 import { logApiAction } from '../../utils/apiLogger.js';
 import ExcelJS from 'exceljs';
+import Employee from '../../models/Attandance/Employee.js';
 
 /* ────────────────────────────────────────────────────────────────
    HELPERS
@@ -616,9 +617,16 @@ export const exportAuditLogs = async (req, res) => {
             });
 
         const rows = docs.map(d => {
-            const emp = d.employeeId || {};
-            const empUser = emp.userId || {};
+            // Use employeeId from populate first, fall back to resourceId (which is the emp ID for attendance events)
+            const empResourceId = d.resourceId || '';
+            const emp = d.employeeId || { empCode: empResourceId };
+            const empUser = (d.employeeId?.userId || {}).toObject?.() || {};
             const actorUser = d.userId || {};
+
+            // Try to get employee name/phone from resourceId if employeeId populate didn't resolve
+            const fallbackEmpName = emp.user_name || empResourceId || '';
+            const fallbackEmpPhone = empUser.phone || '';
+
             return {
                 eventId: d.eventId ?? '',
                 timestamp: d.timestamp
@@ -634,9 +642,9 @@ export const exportAuditLogs = async (req, res) => {
                       })
                     : '',
                 organizationId: d.organizationId?.toString() ?? '',
-                empId: emp.empCode ?? '',
-                empName: emp.user_name ?? empUser.name ?? '',
-                empPhone: empUser.phone ?? '',
+                empId: emp.empCode ?? empResourceId ?? '',
+                empName: fallbackEmpName ?? '',
+                empPhone: fallbackEmpPhone || empUser.phone || '',
                 empDepartment: emp.jobInfo?.department ?? '',
                 empDesignation: emp.jobInfo?.designation ?? '',
                 empType: emp.employeeType ?? '',
@@ -650,7 +658,7 @@ export const exportAuditLogs = async (req, res) => {
                 eventType: d.eventType ?? '',
                 category: d.category ?? '',
                 resource: d.resource ?? '',
-                resourceId: d.resourceId ?? '',
+                resourceId: empResourceId,
                 success: d.success ? 'Yes' : 'No',
                 result: d.result ?? '',
                 method: d.http?.method ?? '',
@@ -708,7 +716,6 @@ export const exportAuditLogs = async (req, res) => {
 
         worksheet.columns = headers.map(h => ({
             header: h,
-            key: h.toLowerCase().replace(/[^a-z0-9]/g, '_'),
             width: h.length + 4,
         }));
 
@@ -731,38 +738,38 @@ export const exportAuditLogs = async (req, res) => {
         const lightBlue = 'FFD6E4F0';
 
         rows.forEach((row) => {
-            const r = worksheet.addRow({
-                eventId: row.eventId,
-                timestamp: row.timestamp,
-                organizationId: row.organizationId,
-                empId: row.empId,
-                empName: row.empName,
-                empPhone: row.empPhone,
-                empDepartment: row.empDepartment,
-                empDesignation: row.empDesignation,
-                empType: row.empType,
-                empRole: row.empRole,
-                userName: row.userName,
-                userEmail: row.userEmail,
-                userPhone: row.userPhone,
-                userRole: row.userRole,
-                action: row.action,
-                operation: row.operation,
-                eventType: row.eventType,
-                category: row.category,
-                resource: row.resource,
-                resourceId: row.resourceId,
-                success: row.success,
-                result: row.result,
-                method: row.method,
-                route: row.route,
-                ip: row.ip,
-                changedFields: row.changedFields,
-                errorCode: row.errorCode,
-                errorMessage: row.safeErrorMessage,
-                seq: row.seq,
-                currentHash: row.currentHash,
-            });
+            const r = worksheet.addRow([
+                row.eventId,
+                row.timestamp,
+                row.organizationId,
+                row.empId,
+                row.empName,
+                row.empPhone,
+                row.empDepartment,
+                row.empDesignation,
+                row.empType,
+                row.empRole,
+                row.userName,
+                row.userEmail,
+                row.userPhone,
+                row.userRole,
+                row.action,
+                row.operation,
+                row.eventType,
+                row.category,
+                row.resource,
+                row.resourceId,
+                row.success,
+                row.result,
+                row.method,
+                row.route,
+                row.ip,
+                row.changedFields,
+                row.errorCode,
+                row.errorMessage,
+                row.seq,
+                row.currentHash,
+            ]);
 
             const rowNum = r.number;
             const isEven = rowNum % 2 === 0;
@@ -785,7 +792,7 @@ export const exportAuditLogs = async (req, res) => {
                 }
             });
 
-            const successCell = r.getCell('success');
+            const successCell = r.getCell(21);
             if (row.success === 'Yes') {
                 successCell.font = { bold: true, color: { argb: 'FF006100' }, size: 10 };
                 successCell.fill = {
