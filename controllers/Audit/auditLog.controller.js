@@ -9,6 +9,7 @@ import {
 } from '../../services/audit/hashChain.js';
 import auditConfig from '../../services/audit/config.js';
 import { logApiAction } from '../../utils/apiLogger.js';
+import ExcelJS from 'exceljs';
 
 /* ────────────────────────────────────────────────────────────────
    HELPERS
@@ -607,16 +608,39 @@ export const exportAuditLogs = async (req, res) => {
             .sort(sort)
             .limit(auditConfig.exportMaxRows)
             .select('-oldData -newData -changes -sanitizedRequestBody')
-            .populate('userId', 'name email')
+            .populate('userId', 'name email phone')
+            .populate({
+                path: 'employeeId',
+                select: 'empCode user_name jobInfo employeeType role',
+                populate: { path: 'userId', select: 'name phone' }
+            })
             .lean();
 
         const rows = docs.map(d => ({
             eventId: d.eventId,
-            timestamp: d.timestamp instanceof Date ? d.timestamp.toISOString() : d.timestamp,
+            timestamp: d.timestamp
+                ? new Date(d.timestamp).toLocaleString('en-IN', {
+                    timeZone: 'Asia/Kolkata',
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true,
+                  })
+                : '',
             organizationId: d.organizationId?.toString() ?? '',
-            userId: d.userId?._id?.toString() ?? d.userId?.toString() ?? '',
+            empId: d.employeeId?.empCode ?? '',
+            empName: d.employeeId?.user_name ?? d.employeeId?.userId?.name ?? '',
+            empPhone: d.employeeId?.userId?.phone ?? '',
+            empDepartment: d.employeeId?.jobInfo?.department ?? '',
+            empDesignation: d.employeeId?.jobInfo?.designation ?? '',
+            empType: d.employeeId?.employeeType ?? '',
+            empRole: d.employeeId?.role ?? '',
             userName: d.userId?.name ?? '',
             userEmail: d.userId?.email ?? '',
+            userPhone: d.userId?.phone ?? '',
             userRole: d.userRole ?? '',
             action: d.action,
             operation: d.operation ?? '',
@@ -640,12 +664,93 @@ export const exportAuditLogs = async (req, res) => {
             return res.status(200).json({ success: true, message: 'No audit logs match the filters', data: [] });
         }
 
-        // Lazy import keeps startup fast
-        const { Parser } = await import('json2csv');
-        const parser = new Parser();
-        const csv = parser.parse(rows);
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Audit Logs');
 
-        // Audit the export itself
+        const headers = [
+            'Event ID',
+            'Timestamp (IST)',
+            'Emp ID',
+            'Emp Name',
+            'Emp Phone',
+            'Emp Department',
+            'Emp Designation',
+            'Emp Type',
+            'Emp Role',
+            'User Name',
+            'User Email',
+            'User Phone',
+            'User Role',
+            'Action',
+            'Operation',
+            'Event Type',
+            'Category',
+            'Resource',
+            'Resource ID',
+            'Success',
+            'Result',
+            'HTTP Method',
+            'Route',
+            'IP',
+            'Changed Fields',
+            'Error Code',
+            'Error Message',
+            'Seq',
+            'Hash',
+        ];
+
+        worksheet.columns = headers.map(h => ({ header: h, key: h.toLowerCase().replace(/[^a-z0-9]/g, '_'), width: 20 }));
+
+        rows.forEach((row, rowIndex) => {
+            const r = worksheet.addRow({
+                eventId: row.eventId,
+                timestamp: row.timestamp,
+                empId: row.empId,
+                empName: row.empName,
+                empPhone: row.empPhone,
+                empDepartment: row.empDepartment,
+                empDesignation: row.empDesignation,
+                empType: row.empType,
+                empRole: row.empRole,
+                userName: row.userName,
+                userEmail: row.userEmail,
+                userPhone: row.userPhone,
+                userRole: row.userRole,
+                action: row.action,
+                operation: row.operation,
+                eventType: row.eventType,
+                category: row.category,
+                resource: row.resource,
+                resourceId: row.resourceId,
+                success: row.success,
+                result: row.result,
+                method: row.method,
+                route: row.route,
+                ip: row.ip,
+                changedFields: row.changedFields,
+                errorCode: row.errorCode,
+                errorMessage: row.safeErrorMessage,
+                seq: row.seq,
+                currentHash: row.currentHash,
+            });
+            r.eachCell((cell) => {
+                cell.border = {
+                    top: { style: 'thin' },
+                    left: { style: 'thin' },
+                    bottom: { style: 'thin' },
+                    right: { style: 'thin' },
+                };
+            });
+        });
+
+        worksheet.getRow(1).eachCell((cell) => {
+            cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            cell.fill = {
+                type: 'pattern',
+                fgColor: { rgb: '4472C4' },
+            };
+        });
+
         logApiAction({
             action: 'EXPORT',
             model: 'Audit',
@@ -656,9 +761,12 @@ export const exportAuditLogs = async (req, res) => {
             },
         });
 
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="audit-logs-${Date.now()}.csv"`);
-        return res.status(200).send(csv);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="audit-logs-${Date.now()}.xlsx"`);
+
+        await workbook.xlsx.write(res);
+        return res.status(200).send();
+
     } catch (err) {
         return sendError(res, err, 'Export failed');
     }
