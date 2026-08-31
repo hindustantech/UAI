@@ -617,15 +617,76 @@ export const exportAuditLogs = async (req, res) => {
             });
 
         const rows = docs.map(d => {
-            // Use employeeId from populate first, fall back to resourceId (which is the emp ID for attendance events)
-            const empResourceId = d.resourceId || '';
-            const emp = d.employeeId || { empCode: empResourceId };
-            const empUser = (d.employeeId?.userId || {}).toObject?.() || {};
+            const resourceId = d.resourceId || '';
             const actorUser = d.userId || {};
 
-            // Try to get employee name/phone from resourceId if employeeId populate didn't resolve
-            const fallbackEmpName = emp.user_name || empResourceId || '';
-            const fallbackEmpPhone = empUser.phone || '';
+            // ── TIER 1: Populated employeeId (Employee.* events) ──
+            if (d.employeeId && d.employeeId.empCode) {
+                const emp = d.employeeId;
+                const empUser = emp.userId || {};
+                return {
+                    eventId: d.eventId ?? '',
+                    timestamp: d.timestamp
+                        ? new Date(d.timestamp).toLocaleString('en-IN', {
+                            timeZone: 'Asia/Kolkata',
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: true,
+                          })
+                        : '',
+                    organizationId: d.organizationId?.toString() ?? '',
+                    empId: emp.empCode ?? '',
+                    empName: emp.user_name ?? empUser.name ?? '',
+                    empPhone: empUser.phone ?? '',
+                    empDepartment: emp.jobInfo?.department ?? '',
+                    empDesignation: emp.jobInfo?.designation ?? '',
+                    empType: emp.employeeType ?? '',
+                    empRole: emp.role ?? '',
+                    userName: actorUser.name ?? '',
+                    userEmail: actorUser.email ?? '',
+                    userPhone: actorUser.phone ?? '',
+                    userRole: d.userRole ?? '',
+                    action: d.action ?? '',
+                    operation: d.operation ?? '',
+                    eventType: d.eventType ?? '',
+                    category: d.category ?? '',
+                    resource: d.resource ?? '',
+                    resourceId: resourceId,
+                    success: d.success ? 'Yes' : 'No',
+                    result: d.result ?? '',
+                    method: d.http?.method ?? '',
+                    route: d.http?.route ?? '',
+                    ip: d.http?.ip ?? '',
+                    changedFields: (d.changedFields ?? []).join(';'),
+                    errorCode: d.errorCode ?? '',
+                    safeErrorMessage: d.safeErrorMessage ?? '',
+                    seq: d.seq ?? '',
+                    currentHash: d.currentHash ?? '',
+                };
+            }
+
+            // ── TIER 2: Action-aware resolution ──
+            let empId = '';
+            let empName = '';
+            let empPhone = '';
+            let empDepartment = '';
+            let empDesignation = '';
+            let empType = '';
+            let empRole = '';
+
+            if (d.resource === 'AttendanceRequest' && resourceId) {
+                empId = String(resourceId).replace(/['"]/g, '').trim();
+            } else if (d.resource === 'Employee' && resourceId) {
+                empId = String(resourceId).replace(/['"]/g, '').trim();
+            } else if (d.resource === 'AUTH' && resourceId) {
+                empId = '';
+            } else if (resourceId) {
+                empId = String(resourceId).replace(/['"]/g, '').trim();
+            }
 
             return {
                 eventId: d.eventId ?? '',
@@ -642,13 +703,13 @@ export const exportAuditLogs = async (req, res) => {
                       })
                     : '',
                 organizationId: d.organizationId?.toString() ?? '',
-                empId: emp.empCode ?? empResourceId ?? '',
-                empName: fallbackEmpName ?? '',
-                empPhone: fallbackEmpPhone || empUser.phone || '',
-                empDepartment: emp.jobInfo?.department ?? '',
-                empDesignation: emp.jobInfo?.designation ?? '',
-                empType: emp.employeeType ?? '',
-                empRole: emp.role ?? '',
+                empId,
+                empName,
+                empPhone,
+                empDepartment,
+                empDesignation,
+                empType,
+                empRole,
                 userName: actorUser.name ?? '',
                 userEmail: actorUser.email ?? '',
                 userPhone: actorUser.phone ?? '',
@@ -658,7 +719,7 @@ export const exportAuditLogs = async (req, res) => {
                 eventType: d.eventType ?? '',
                 category: d.category ?? '',
                 resource: d.resource ?? '',
-                resourceId: empResourceId,
+                resourceId,
                 success: d.success ? 'Yes' : 'No',
                 result: d.result ?? '',
                 method: d.http?.method ?? '',
