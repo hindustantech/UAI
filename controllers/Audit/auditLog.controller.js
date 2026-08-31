@@ -616,6 +616,57 @@ export const exportAuditLogs = async (req, res) => {
                 populate: { path: 'userId', select: 'name phone' }
             });
 
+        // ── PHASE B: Batch-fetch employee details for unresolved resourceIds ──
+        const unresolvedEmpIds = new Set();
+        const attendanceRequestIds = new Set();
+        docs.forEach(d => {
+            if (!d.employeeId?.empCode && d.resourceId) {
+                if (d.resource === 'AttendanceRequest') {
+                    attendanceRequestIds.add(String(d.resourceId));
+                } else if (d.resource !== 'AUTH') {
+                    unresolvedEmpIds.add(String(d.resourceId));
+                }
+            }
+        });
+
+        const employeeMap = {};
+        const requestToEmployeeMap = {};
+
+        // 1. Fetch AttendanceRequest docs → get employeeIds → add to unresolvedEmpIds
+        const { default: AttendanceRequest } = await import('../../models/Attandance/Request.js');
+        if (attendanceRequestIds.size > 0) {
+            const arIds = [...attendanceRequestIds]
+                .filter(id => mongoose.Types.ObjectId.isValid(id))
+                .map(id => new mongoose.Types.ObjectId(id));
+            if (arIds.length > 0) {
+                const requests = await AttendanceRequest.find({ _id: { $in: arIds } })
+                    .select('employeeId')
+                    .lean();
+                requests.forEach(req => {
+                    if (req.employeeId) {
+                        unresolvedEmpIds.add(String(req.employeeId));
+                        requestToEmployeeMap[String(req._id)] = String(req.employeeId);
+                    }
+                });
+            }
+        }
+
+        // 2. Batch-fetch Employee details for ALL collected IDs
+        if (unresolvedEmpIds.size > 0) {
+            const empIds = [...unresolvedEmpIds]
+                .filter(id => mongoose.Types.ObjectId.isValid(id))
+                .map(id => new mongoose.Types.ObjectId(id));
+            if (empIds.length > 0) {
+                const employees = await Employee.find({ _id: { $in: empIds } })
+                    .select('empCode user_name jobInfo employeeType role userId')
+                    .populate('userId', 'name phone')
+                    .lean();
+                employees.forEach(emp => {
+                    employeeMap[emp._id.toString()] = emp;
+                });
+            }
+        }
+
         const rows = docs.map(d => {
             const resourceId = d.resourceId || '';
             const actorUser = d.userId || {};
@@ -669,7 +720,7 @@ export const exportAuditLogs = async (req, res) => {
                 };
             }
 
-            // ── TIER 2: Action-aware resolution ──
+// ── TIER 2: Action-aware resolution ──
             let empId = '';
             let empName = '';
             let empPhone = '';
@@ -678,12 +729,33 @@ export const exportAuditLogs = async (req, res) => {
             let empType = '';
             let empRole = '';
 
-            if (d.resource === 'AttendanceRequest' && resourceId) {
+            // Try batch-fetched Employee map (direct Employee _id → Employee fields)
+            const empFromMap = resourceId ? employeeMap[String(resourceId).replace(/['"]/g, '').trim()] : null;
+
+            // Try AttendanceRequest → Employee mapping (request._id → empId → Employee fields)
+            const empFromRequestMap = resourceId && requestToEmployeeMap[String(resourceId).replace(/['"]/g, '').trim()]
+                ? employeeMap[String(requestToEmployeeMap[String(resourceId).replace(/['"]/g, '').trim()])] : null;
+
+            if (empFromMap) {
+                const empUser = empFromMap.userId || {};
+                empId = empFromMap.empCode ?? String(resourceId).replace(/['"]/g, '').trim();
+                empName = empFromMap.user_name ?? empUser.name ?? '';
+                empPhone = empUser.phone ?? '';
+                empDepartment = empFromMap.jobInfo?.department ?? '';
+                empDesignation = empFromMap.jobInfo?.designation ?? '';
+                empType = empFromMap.employeeType ?? '';
+                empRole = empFromMap.role ?? '';
+            } else if (empFromRequestMap) {
+                const empUser = empFromRequestMap.userId || {};
+                empId = empFromRequestMap.empCode ?? '';
+                empName = empFromRequestMap.user_name ?? empUser.name ?? '';
+                empPhone = empUser.phone ?? '';
+                empDepartment = empFromRequestMap.jobInfo?.department ?? '';
+                empDesignation = empFromRequestMap.jobInfo?.designation ?? '';
+                empType = empFromRequestMap.employeeType ?? '';
+                empRole = empFromRequestMap.role ?? '';
+            } else if (d.resource === 'AttendanceRequest' && resourceId) {
                 empId = String(resourceId).replace(/['"]/g, '').trim();
-            } else if (d.resource === 'Employee' && resourceId) {
-                empId = String(resourceId).replace(/['"]/g, '').trim();
-            } else if (d.resource === 'AUTH' && resourceId) {
-                empId = '';
             } else if (resourceId) {
                 empId = String(resourceId).replace(/['"]/g, '').trim();
             }
