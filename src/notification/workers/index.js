@@ -1,5 +1,6 @@
 import { createEmailTierWorker } from './emailTierWorker.js';
 import { createWhatsAppTierWorker } from './whatsappTierWorker.js';
+import { createPushTierWorker } from './pushTierWorker.js';
 import { createDeadLetterWorker } from './deadLetterWorker.js';
 import { createRetryWorker } from './retryWorker.js';
 import { createSchedulerWorker } from './schedulerWorker.js';
@@ -36,6 +37,8 @@ export async function startAllWorkers() {
         let worker;
         if (channel === 'email') {
           worker = createEmailTierWorker(tierScore);
+        } else if (channel === 'push') {
+          worker = createPushTierWorker(tierScore);
         } else {
           worker = createWhatsAppTierWorker(tierScore);
         }

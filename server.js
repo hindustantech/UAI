@@ -48,10 +48,12 @@ import categoryblog from './routes/Blog/categoryRoutes.js'
 import faceRoutes from './routes/face/index.js'; // Import the face routes
 import faceAttendanceRoutes from './routes/faceAttendance.routes.js'; // Import the face attendance routes
 import SalesAnyRoutes from './routes/Attandance/Sales/sales.any.routes.js';
+import taskRoutes from './routes/tasks/index.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
 import './cron/compOffExpiry.cron.js'
+import { startTaskSchedulers } from './cron/taskScheduler.cron.js'
 import { connectRedis, getRedisClient } from './config/redis.js';
 import { startAllWorkers, stopAllWorkers } from './src/notification/workers/index.js';
 import { initializeSchedulers } from './src/notification/scheduler/index.js';
@@ -147,6 +149,7 @@ app.use('/api/today/pi', TodayAttendanceRoute);
 app.use('/api/face', faceRoutes); // Mount the face routes at /api/face
 app.use('/api/face-attendance', faceAttendanceRoutes); // Mount the face attendance routes at /api/face-attendance
 app.use('/api/v1/sales-any', SalesAnyRoutes); // Mount the sales any routes at /api/v1/sales-any
+app.use('/api/v1/tasks', taskRoutes); // Mount task management routes
 app.use('/api/admin/notifications', adminNotificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin-dashboard', adminDashboardRoutes);
@@ -171,6 +174,7 @@ const server = app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
 
   startAttendanceCron();
+  startTaskSchedulers(); // Task management schedulers
 });
 // Increase server-level timeouts (CRITICAL for /uploader-infoong operations)
 server.timeout = 15 * 60 * 1000; // 15 minutes

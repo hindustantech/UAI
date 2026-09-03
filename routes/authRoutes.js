@@ -34,7 +34,9 @@ import {
     UpdatePhone,
     loginUserSuperadmin,
     createOrUpdateEmployee, getAllEmployees, getEmployeeById,
-    getAllUsersSuperadmin
+    getAllUsersSuperadmin,
+    registerDeviceToken,
+    removeDeviceToken
 } from '../controllers/authController.js';
 import { checkLimit } from '../middlewares/checkLimt/checklimit.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
@@ -106,5 +108,9 @@ router.get('/getOwner/:ownerId', authMiddleware, getOwner);
 
 router.post('/upload-profile-image', authMiddleware, profileUploadMiddleware, uploadProfileImage);
 router.get('/profile-image-url', authMiddleware, profileUploadMiddleware, getProfileImageUrl);
+
+// Device token management for push notifications
+router.post('/device-token', authMiddleware, registerDeviceToken);
+router.delete('/device-token', authMiddleware, removeDeviceToken);
 
 export default router;

@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import { logApiAction, logApiError } from "../../../utils/apiLogger.js";
+import NotificationService from "../../../src/notification/services/NotificationService.js";
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -560,6 +561,26 @@ export const verifyPayment = async (req, res) => {
 
         logApiAction({ action: "VERIFY_PAYMENT", model: "Subscription", req, resourceId: subscription._id, after: { status: "ACTIVE", companyId, transactionId: razorpay_payment_id, totalPaid: totalPrice } });
 
+        // === FIRE AND FORGET: Push notification for subscription activated ===
+        try {
+            const ownerUser = await User.findById(companyId).select('devicetoken email name').lean();
+            const deviceTokens = ownerUser?.devicetoken?.filter(Boolean) || [];
+            if (deviceTokens.length > 0) {
+                await NotificationService.sendSubscriptionActivated({
+                    companyId,
+                    companyName: ownerUser?.name || 'Company',
+                    planName: plan.name,
+                    startDate: startDate.toISOString().split('T')[0],
+                    endDate: endDate.toISOString().split('T')[0],
+                    email: ownerUser?.email,
+                    phone: null,
+                    deviceToken: deviceTokens.length === 1 ? deviceTokens[0] : deviceTokens,
+                });
+            }
+        } catch (notifErr) {
+            console.error('Push notification failed (payment):', notifErr.message);
+        }
+
         res.status(200).json({
             success: true,
             message: "Payment verified and subscription activated successfully",
@@ -854,6 +875,26 @@ export const cancelSubscription = async (req, res) => {
         await subscription.save();
 
         logApiAction({ action: "CANCEL", model: "Subscription", req, resourceId: subscription._id, after: { status: "CANCELLED", companyId } });
+
+        // === FIRE AND FORGET: Push notification for subscription cancelled ===
+        try {
+            const cancelOwner = await User.findById(companyId).select('devicetoken email name').lean();
+            const cancelTokens = cancelOwner?.devicetoken?.filter(Boolean) || [];
+            if (cancelTokens.length > 0) {
+                await NotificationService.sendSubscriptionExpired({
+                    companyId,
+                    companyName: cancelOwner?.name || 'Company',
+                    planName: subscription.planSnapshot?.name || 'Subscription',
+                    endDate: new Date().toISOString().split('T')[0],
+                    email: cancelOwner?.email,
+                    phone: null,
+                    subscriptionId: subscription._id,
+                    deviceToken: cancelTokens.length === 1 ? cancelTokens[0] : cancelTokens,
+                });
+            }
+        } catch (notifErr) {
+            console.error('Push notification failed (cancel subscription):', notifErr.message);
+        }
 
         res.status(200).json({
             success: true,

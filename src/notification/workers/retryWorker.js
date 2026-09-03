@@ -25,7 +25,9 @@ async function processRetry(job) {
 
   await DeadLetter.findByIdAndUpdate(deadLetterId, { status: 'retrying' });
 
-  const channel = deadLetter.originalQueue?.startsWith('whatsapp') ? 'whatsapp' : 'email';
+  const channel = deadLetter.originalQueue?.startsWith('whatsapp') ? 'whatsapp'
+    : deadLetter.originalQueue?.startsWith('push') ? 'push'
+    : 'email';
   const tierScore = deadLetter.payload?.tierScore ?? TIER_SCORES.NORMAL;
   const targetQueue = getTierQueue(channel, tierScore);
   if (!targetQueue) {

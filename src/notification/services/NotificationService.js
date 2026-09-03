@@ -9,30 +9,50 @@ import Notification from '../models/Notification.js';
 import mongoose from 'mongoose';
 
 const CHANNEL_MAP = {
-  [NOTIFICATION_TYPES.SUBSCRIPTION_ACTIVATED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.SUBSCRIPTION_RENEWED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.SUBSCRIPTION_EXPIRED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
+  [NOTIFICATION_TYPES.SUBSCRIPTION_ACTIVATED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.SUBSCRIPTION_RENEWED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.SUBSCRIPTION_EXPIRED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
   [NOTIFICATION_TYPES.SUBSCRIPTION_EXPIRING_SOON]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.TRIAL_STARTED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
+  [NOTIFICATION_TYPES.TRIAL_STARTED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
   [NOTIFICATION_TYPES.TRIAL_ENDING]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.EMPLOYEE_ADDED]: [CHANNELS.EMAIL],
-  [NOTIFICATION_TYPES.EMPLOYEE_REMOVED]: [CHANNELS.EMAIL],
-  [NOTIFICATION_TYPES.EMPLOYEE_CHECK_IN]: [CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.EMPLOYEE_CHECK_OUT]: [CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.LATE_ATTENDANCE]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.ABSENT]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
+  [NOTIFICATION_TYPES.EMPLOYEE_ADDED]: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.EMPLOYEE_REMOVED]: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.EMPLOYEE_CHECK_IN]: [CHANNELS.WHATSAPP, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.EMPLOYEE_CHECK_OUT]: [CHANNELS.WHATSAPP, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.LATE_ATTENDANCE]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.ABSENT]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
   [NOTIFICATION_TYPES.DAILY_REPORT]: [CHANNELS.EMAIL],
   [NOTIFICATION_TYPES.WEEKLY_REPORT]: [CHANNELS.EMAIL],
   [NOTIFICATION_TYPES.MONTHLY_REPORT]: [CHANNELS.EMAIL],
-  [NOTIFICATION_TYPES.LEAVE_APPROVED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.LEAVE_REJECTED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.MEETING_REMINDER]: [CHANNELS.WHATSAPP],
+  [NOTIFICATION_TYPES.LEAVE_APPROVED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.LEAVE_REJECTED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.MEETING_REMINDER]: [CHANNELS.WHATSAPP, CHANNELS.PUSH],
   [NOTIFICATION_TYPES.FOLLOWUP_REMINDER]: [CHANNELS.WHATSAPP],
   [NOTIFICATION_TYPES.VISIT_REMINDER]: [CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.WELCOME]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP],
+  [NOTIFICATION_TYPES.WELCOME]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
   [NOTIFICATION_TYPES.PASSWORD_RESET]: [CHANNELS.EMAIL],
   [NOTIFICATION_TYPES.OTP]: [CHANNELS.WHATSAPP],
-  [NOTIFICATION_TYPES.LOGIN_ALERT]: [CHANNELS.EMAIL],
+  [NOTIFICATION_TYPES.LOGIN_ALERT]: [CHANNELS.EMAIL, CHANNELS.PUSH],
+
+  // Task notifications - push enabled
+  task_created: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_assigned: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_invited: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_invitation_accepted: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_invitation_rejected: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_started: [CHANNELS.PUSH],
+  task_stopped: [CHANNELS.PUSH],
+  task_resumed: [CHANNELS.PUSH],
+  task_submitted: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_verified: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_rejected: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_reopened: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_closed: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_deactivated: [CHANNELS.PUSH],
+  task_cancelled: [CHANNELS.PUSH],
+  task_due_soon: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  task_overdue: [CHANNELS.EMAIL, CHANNELS.PUSH],
+  work_session_auto_stopped: [CHANNELS.PUSH],
 };
 
 function generateObjectId() {
@@ -162,6 +182,32 @@ export class NotificationService {
             notificationLogger.error('No tier queue found for whatsapp', { tierScore });
             results.push({ channel, error: 'No tier queue found', status: 'failed' });
           }
+        } else if (channel === CHANNELS.PUSH && (deviceToken || userId)) {
+          const tierQueue = getTierQueue('push', tierScore);
+
+          if (tierQueue) {
+            const pushTitle = data.title || data.message || 'Notification';
+            const pushBody = data.body || data.message || '';
+
+            job = await tierQueue.add(type, {
+              ...jobPayload,
+              title: pushTitle,
+              body: pushBody,
+            }, {
+              priority: tierScore,
+              delay,
+              removeOnComplete: NOTIFICATION_JOB_REMOVE_COMPLETE,
+              removeOnFail: NOTIFICATION_JOB_REMOVE_FAIL,
+            });
+
+            results.push({ channel, tierScore, jobId: job.id, status: 'queued' });
+            notificationLogger.info('Push notification queued to tier', {
+              type, tierScore, jobId: job.id,
+            });
+          } else {
+            notificationLogger.error('No tier queue found for push', { tierScore });
+            results.push({ channel, error: 'No tier queue found', status: 'failed' });
+          }
         }
       } catch (error) {
         notificationLogger.error('Failed to queue notification', {
@@ -197,14 +243,22 @@ export class NotificationService {
     });
   }
 
-  static async sendSubscriptionActivated({ companyId, companyName, planName, startDate, endDate, email, phone }) {
+  static async sendSubscriptionActivated({ companyId, companyName, planName, startDate, endDate, email, phone, deviceToken }) {
     return NotificationService.send({
       type: NOTIFICATION_TYPES.SUBSCRIPTION_ACTIVATED,
       companyId,
       userId: companyId,
       email,
       phone,
-      data: { companyName, planName, startDate, endDate },
+      deviceToken,
+      data: {
+        companyName,
+        planName,
+        startDate,
+        endDate,
+        title: 'Subscription Activated',
+        body: `Your ${planName} subscription has been activated! Valid until ${endDate}`,
+      },
     });
   }
 
@@ -230,13 +284,21 @@ export class NotificationService {
     });
   }
 
-  static async sendEmployeeCheckIn({ companyId, employeeId, employeeName, time, type, phone }) {
+  static async sendEmployeeCheckIn({ companyId, employeeId, employeeName, time, type, phone, deviceToken }) {
     return NotificationService.send({
       type: type === 'check_out' ? NOTIFICATION_TYPES.EMPLOYEE_CHECK_OUT : NOTIFICATION_TYPES.EMPLOYEE_CHECK_IN,
       companyId,
       userId: employeeId,
       phone,
-      data: { employeeName, time, type, date: new Date().toISOString().split('T')[0] },
+      deviceToken,
+      data: {
+        employeeName,
+        time,
+        type,
+        date: new Date().toISOString().split('T')[0],
+        title: type === 'check_out' ? 'Punch Out' : 'Punch In',
+        body: `${employeeName} ${type === 'check_out' ? 'punched out' : 'punched in'} at ${time}`,
+      },
     });
   }
 

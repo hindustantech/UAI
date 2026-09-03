@@ -89,7 +89,8 @@ const userSchema = new mongoose.Schema({
     default: []
   },
   devicetoken: {
-    type: String,
+    type: [String],
+    default: [],
   },
   availedCouponsId: [
     {

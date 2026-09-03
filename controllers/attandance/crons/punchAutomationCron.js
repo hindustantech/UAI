@@ -292,6 +292,7 @@ class PunchAutomationCron {
                 punchOut: punchOutTime,
                 lastPunchAt: punchOutTime,
                 status: "present",
+                isAutoMarked: true,
                 totalWorkingHours: 0,
                 workSummary: {
                     totalMinutes: 0,

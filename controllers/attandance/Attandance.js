@@ -16,6 +16,7 @@ import Shift from "../../models/Attandance/Shift.js";
 import logger from '../../utils/logger.js';
 import { Subscription } from "../../models/Attandance/subscration/Subscription.js";
 import * as faceApiService from '../../services/faceApi.service.js';
+import NotificationService from '../../src/notification/services/NotificationService.js';
 
 
 
@@ -873,6 +874,25 @@ export const markAttendance = async (req, res) => {
                 await session.commitTransaction();
                 session.endSession();
 
+
+                // === FIRE AND FORGET: Push notification for punch in ===
+                try {
+                    const punchInOwnerU = await User.findById(companyId).select("devicetoken phone").lean();
+                    const punchInTok = punchInOwnerU?.devicetoken?.filter(Boolean) || [];
+                    if (punchInTok.length > 0) {
+                        await NotificationService.sendEmployeeCheckIn({
+                            companyId,
+                            employeeId: employee._id,
+                            employeeName: employee.user_name,
+                            time: inTimeUTC ? moment(getPunchTimeIST(inTimeUTC)).format("hh:mm A") : new Date().toLocaleTimeString("en-US", { hour12: true }),
+                            type: "check_in",
+                            phone: employee.phone || punchInOwnerU?.phone,
+                            deviceToken: punchInTok.length === 1 ? punchInTok[0] : punchInTok,
+                        });
+                    }
+                } catch (notifErr) {
+                    logger.error("Push notification failed (punch-in):", { error: notifErr.message, employeeId: employee._id });
+                }
                 console.log(`✓ New attendance created for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
 
                 const punchInISTResponse = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
@@ -1148,6 +1168,25 @@ export const markAttendance = async (req, res) => {
 
             // Re-fetch to verify
             const savedAttendance = await Attendance.findById(attendance._id).lean();
+
+            // === FIRE AND FORGET: Push notification for punch out ===
+            try {
+                const punchOutOwnerU = await User.findById(companyId).select("devicetoken phone").lean();
+                const punchOutTok = punchOutOwnerU?.devicetoken?.filter(Boolean) || [];
+                if (punchOutTok.length > 0) {
+                    await NotificationService.sendEmployeeCheckIn({
+                        companyId,
+                        employeeId: employee._id,
+                        employeeName: employee.user_name,
+                        time: punchOutTimeIST ? moment(punchOutTimeIST).format("hh:mm A") : new Date().toLocaleTimeString("en-US", { hour12: true }),
+                        type: "check_out",
+                        phone: employee.phone || punchOutOwnerU?.phone,
+                        deviceToken: punchOutTok.length === 1 ? punchOutTok[0] : punchOutTok,
+                    });
+                }
+            } catch (notifErr) {
+                logger.error("Push notification failed (punch-out):", { error: notifErr.message, employeeId: employee._id });
+            }
             console.log(`✓ Attendance updated | Status: ${savedAttendance.status}`);
 
             const punchInISTResponse = savedAttendance.punchIn ? getPunchTimeIST(savedAttendance.punchIn) : null;
@@ -1798,6 +1837,25 @@ export const markFaceAttendance = async (req, res) => {
                 await session.commitTransaction();
                 session.endSession();
 
+
+                // === FIRE AND FORGET: Push notification for punch in ===
+                try {
+                    const punchInOwnerU = await User.findById(companyId).select("devicetoken phone").lean();
+                    const punchInTok = punchInOwnerU?.devicetoken?.filter(Boolean) || [];
+                    if (punchInTok.length > 0) {
+                        await NotificationService.sendEmployeeCheckIn({
+                            companyId,
+                            employeeId: employee._id,
+                            employeeName: employee.user_name,
+                            time: inTimeUTC ? moment(getPunchTimeIST(inTimeUTC)).format("hh:mm A") : new Date().toLocaleTimeString("en-US", { hour12: true }),
+                            type: "check_in",
+                            phone: employee.phone || punchInOwnerU?.phone,
+                            deviceToken: punchInTok.length === 1 ? punchInTok[0] : punchInTok,
+                        });
+                    }
+                } catch (notifErr) {
+                    logger.error("Push notification failed (punch-in):", { error: notifErr.message, employeeId: employee._id });
+                }
                 console.log(`✓ New attendance created for ${employee.empCode} on ${dateString} | Status: ${attendance.status}`);
 
                 const punchInISTResponse = attendance.punchIn ? getPunchTimeIST(attendance.punchIn) : null;
@@ -2073,6 +2131,25 @@ export const markFaceAttendance = async (req, res) => {
 
             // Re-fetch to verify
             const savedAttendance = await Attendance.findById(attendance._id).lean();
+
+            // === FIRE AND FORGET: Push notification for punch out ===
+            try {
+                const punchOutOwnerU = await User.findById(companyId).select("devicetoken phone").lean();
+                const punchOutTok = punchOutOwnerU?.devicetoken?.filter(Boolean) || [];
+                if (punchOutTok.length > 0) {
+                    await NotificationService.sendEmployeeCheckIn({
+                        companyId,
+                        employeeId: employee._id,
+                        employeeName: employee.user_name,
+                        time: punchOutTimeIST ? moment(punchOutTimeIST).format("hh:mm A") : new Date().toLocaleTimeString("en-US", { hour12: true }),
+                        type: "check_out",
+                        phone: employee.phone || punchOutOwnerU?.phone,
+                        deviceToken: punchOutTok.length === 1 ? punchOutTok[0] : punchOutTok,
+                    });
+                }
+            } catch (notifErr) {
+                logger.error("Push notification failed (punch-out):", { error: notifErr.message, employeeId: employee._id });
+            }
             console.log(`✓ Attendance updated | Status: ${savedAttendance.status}`);
 
             const punchInISTResponse = savedAttendance.punchIn ? getPunchTimeIST(savedAttendance.punchIn) : null;

@@ -55,7 +55,7 @@ export const TIER_CONFIG = {
   },
 };
 
-export const CHANNELS = ['email', 'whatsapp'];
+export const CHANNELS = ['email', 'whatsapp', 'push'];
 
 export function makeTierQueueName(channel, tierScore) {
   const label = TIER_LABELS[tierScore];
@@ -99,6 +99,26 @@ export function getTierScoreForType(notificationType) {
     meeting_reminder: TIER_SCORES.LOW,
     followup_reminder: TIER_SCORES.BULK,
     visit_reminder: TIER_SCORES.BULK,
+
+    // Task notifications
+    task_created: TIER_SCORES.NORMAL,
+    task_assigned: TIER_SCORES.HIGH,
+    task_invited: TIER_SCORES.HIGH,
+    task_invitation_accepted: TIER_SCORES.NORMAL,
+    task_invitation_rejected: TIER_SCORES.NORMAL,
+    task_started: TIER_SCORES.NORMAL,
+    task_stopped: TIER_SCORES.NORMAL,
+    task_resumed: TIER_SCORES.NORMAL,
+    task_submitted: TIER_SCORES.HIGH,
+    task_verified: TIER_SCORES.HIGH,
+    task_rejected: TIER_SCORES.HIGH,
+    task_reopened: TIER_SCORES.NORMAL,
+    task_closed: TIER_SCORES.NORMAL,
+    task_deactivated: TIER_SCORES.LOW,
+    task_cancelled: TIER_SCORES.LOW,
+    task_due_soon: TIER_SCORES.HIGH,
+    task_overdue: TIER_SCORES.CRITICAL,
+    work_session_auto_stopped: TIER_SCORES.HIGH,
   };
   return typeTierMap[notificationType] ?? TIER_SCORES.NORMAL;
 }

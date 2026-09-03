@@ -774,7 +774,7 @@ export const oauthAuthController = async (req, res) => {
             referredBy: referralCode || null,
             deviceId: deviceId || null,
             type: type || "user",
-            devicetoken: devicetoken || null,
+            devicetoken: devicetoken ? [devicetoken] : [],
             oauthProviders: {
               google: {
                 id: googleId,
@@ -792,6 +792,7 @@ export const oauthAuthController = async (req, res) => {
       isNewUser = true;
     } else {
       let updatePayload = {};
+      let deviceTokenToAdd = null;
       let needsUpdate = false;
 
       // 🔗 Link Google if not linked
@@ -809,9 +810,9 @@ export const oauthAuthController = async (req, res) => {
         needsUpdate = true;
       }
 
-      // 🔔 Device Token update
-      if (devicetoken && user.devicetoken !== devicetoken) {
-        updatePayload.devicetoken = devicetoken;
+      // 🔔 Device Token update (array - use $addToSet)
+      if (devicetoken) {
+        deviceTokenToAdd = devicetoken;
         needsUpdate = true;
       }
 
@@ -822,9 +823,16 @@ export const oauthAuthController = async (req, res) => {
       }
 
       if (needsUpdate) {
+        const updateOps = {};
+        if (Object.keys(updatePayload).length > 0) {
+          updateOps.$set = updatePayload;
+        }
+        if (deviceTokenToAdd) {
+          updateOps.$addToSet = { devicetoken: deviceTokenToAdd };
+        }
         user = await User.findByIdAndUpdate(
           user._id,
-          { $set: updatePayload },
+          updateOps,
           { new: true, session }
         );
       }
@@ -2028,6 +2036,7 @@ export const SMScompletOtp = async (req, res) => {
       userId,
       otp,
       deviceId,
+      devicetoken,
     } = req.body;
 
     /* ---------------- VALIDATION ---------------- */
@@ -2162,15 +2171,20 @@ export const SMScompletOtp = async (req, res) => {
 
     /* ---------------- UPDATE USER ---------------- */
 
+    const userUpdateOps = {
+      $set: {
+        isVerified: true,
+        lastLoginAt: new Date(),
+      },
+    };
+    if (devicetoken) {
+      userUpdateOps.$addToSet = { devicetoken };
+    }
+
     const updatedUser =
       await User.findByIdAndUpdate(
         user._id,
-        {
-          $set: {
-            isVerified: true,
-            lastLoginAt: new Date(),
-          },
-        },
+        userUpdateOps,
         {
           new: true,
         }
@@ -3501,8 +3515,13 @@ const resendOtp = async (
 
 
 const signout = (req, res) => {
-  // Clear device token
-  User.findByIdAndUpdate(req.user._id, { devicetoken: null }, { new: true })
+  // Clear device token(s) - remove specific or all
+  const { deviceToken } = req.body || {};
+  const updateOps = deviceToken
+    ? { $pull: { devicetoken: deviceToken } }
+    : { devicetoken: [] };
+
+  User.findByIdAndUpdate(req.user._id, updateOps, { new: true })
     .then(() => {
       logApiAction({
         action: "LOGOUT",
@@ -3617,6 +3636,48 @@ const getProfileImageUrl = async (req, res) => {
     return res.json({ profileImage: user.profileImage });
   } catch (error) {
     return res.status(500).json({ message: 'Error fetching profile image URL' });
+  }
+};
+
+export const registerDeviceToken = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { deviceToken, deviceId } = req.body;
+
+    if (!deviceToken || typeof deviceToken !== 'string' || deviceToken.length < 20) {
+      return res.status(400).json({ success: false, message: 'Invalid device token' });
+    }
+
+    const user = await User.findById(userId).select('devicetoken').lean();
+    const tokens = user?.devicetoken || [];
+
+    if (!tokens.includes(deviceToken)) {
+      const updateOps = { $addToSet: { devicetoken: deviceToken } };
+      if (deviceId) updateOps.$set = { deviceId };
+      await User.findByIdAndUpdate(userId, updateOps);
+    } else if (deviceId) {
+      await User.findByIdAndUpdate(userId, { deviceId });
+    }
+
+    res.status(200).json({ success: true, message: 'Device token registered' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to register device token', error: error.message });
+  }
+};
+
+export const removeDeviceToken = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { deviceToken } = req.body;
+
+    if (!deviceToken) {
+      return res.status(400).json({ success: false, message: 'deviceToken required' });
+    }
+
+    await User.findByIdAndUpdate(userId, { $pull: { devicetoken: deviceToken } });
+    res.status(200).json({ success: true, message: 'Device token removed' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to remove device token', error: error.message });
   }
 };
 
