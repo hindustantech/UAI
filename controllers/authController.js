@@ -3681,6 +3681,70 @@ export const removeDeviceToken = async (req, res) => {
   }
 };
 
+export const sendTestPushNotification = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Fetch user with devicetoken array
+    const user = await User.findById(userId).select('devicetoken name email').lean();
+
+    if (!user || !user.devicetoken?.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'No device tokens found. Please login from mobile app first.',
+      });
+    }
+
+    // Resolve Firebase Admin
+    const { default: admin } = await import('../utils/firebaseadmin.js');
+
+    // Build message - send to all valid tokens
+    const message = {
+      tokens: user.devicetoken.filter(Boolean),
+      notification: {
+        title: req.body?.title || 'Test Notification',
+        body: req.body?.body || `Hello ${user.name}, this is a test push notification!`,
+      },
+      data: { userId: String(userId), type: 'test' },
+    };
+
+    const response = await admin.messaging().sendEachForMulticast(message);
+
+    // Clean invalid tokens from DB
+    const invalidTokens = [];
+    response.responses.forEach((resp, idx) => {
+      if (!resp.success) {
+        const errCode = resp.error?.code;
+        if (['messaging/invalid-registration-token', 'messaging/registration-token-not-registered'].includes(errCode)) {
+          invalidTokens.push(user.devicetoken[idx]);
+        }
+      }
+    });
+
+    if (invalidTokens.length > 0) {
+      await User.findByIdAndUpdate(userId, { $pull: { devicetoken: { $in: invalidTokens } } });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Push notification sent',
+      data: {
+        totalTokens: user.devicetoken.length,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+        invalidTokensRemoved: invalidTokens.length,
+        response: response,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to send test notification',
+      error: error.message,
+    });
+  }
+};
+
 export {
 
   resendOtp,
