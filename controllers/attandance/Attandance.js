@@ -631,26 +631,10 @@ export const markAttendance = async (req, res) => {
 
                 let totalMinutes = 0;
                 let overtimeMinutes = 0;
-                let earlyLeaveMinutes = 0;
 
-                // RULE: If punch-in before shift start, working hours count from shift start
-                const earlyCreditMinutes = Math.max(0, diffMinutes(punchInTimeIST, shiftStartTimeIST));
-
+                // FLEX SHIFT: Calculate purely from punch-in to punch-out, ignore shift times
                 if (outTimeUTC) {
                     totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
-                    if (earlyCreditMinutes > 0) {
-                        totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutes);
-                    }
-
-                    if (punchOutTimeIST > shiftEndTimeIST) {
-                        overtimeMinutes = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
-                        console.log(`  Overtime: ${overtimeMinutes} mins`);
-                    }
-
-                    if (punchOutTimeIST < shiftEndTimeIST) {
-                        earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
-                        console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
-                    }
                 }
 
                 const finalPayableMinutes = calculatePayableMinutes(totalMinutes, breaks || []);
@@ -683,7 +667,7 @@ export const markAttendance = async (req, res) => {
                         payableMinutes: Math.max(0, finalPayableMinutes),
                         overtimeMinutes: Math.max(0, overtimeMinutes),
                         lateMinutes: 0,
-                        earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                        earlyLeaveMinutes: 0
                     },
                     lateByMinutes: 0,
                     totalWorkingHours: Math.max(0, totalMinutes / 60),
@@ -1572,26 +1556,10 @@ export const markFaceAttendance = async (req, res) => {
 
                 let totalMinutes = 0;
                 let overtimeMinutes = 0;
-                let earlyLeaveMinutes = 0;
 
-                // RULE: If punch-in before shift start, working hours count from shift start
-                const earlyCreditMinutes = Math.max(0, diffMinutes(punchInTimeIST, shiftStartTimeIST));
-
+                // FLEX SHIFT: Calculate purely from punch-in to punch-out, ignore shift times
                 if (outTimeUTC) {
                     totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
-                    if (earlyCreditMinutes > 0) {
-                        totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutes);
-                    }
-
-                    if (punchOutTimeIST > shiftEndTimeIST) {
-                        overtimeMinutes = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
-                        console.log(`  Overtime: ${overtimeMinutes} mins`);
-                    }
-
-                    if (punchOutTimeIST < shiftEndTimeIST) {
-                        earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
-                        console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
-                    }
                 }
 
                 const finalPayableMinutes = calculatePayableMinutes(totalMinutes, breaks || []);
@@ -1624,7 +1592,7 @@ export const markFaceAttendance = async (req, res) => {
                         payableMinutes: Math.max(0, finalPayableMinutes),
                         overtimeMinutes: Math.max(0, overtimeMinutes),
                         lateMinutes: 0,
-                        earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                        earlyLeaveMinutes: 0
                     },
                     lateByMinutes: 0,
                     totalWorkingHours: Math.max(0, totalMinutes / 60),

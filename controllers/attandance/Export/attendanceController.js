@@ -16,11 +16,11 @@ const timeStrToMinutes = (timeStr = "00:00") => {
     return (h || 0) * 60 + (m || 0);
 };
 
-/** minutes → "H:MM" */
+/** minutes → "HH:MM" (zero-padded, 24-hour format) */
 const formatMinutes = (mins = 0) => {
     const h = Math.floor(Math.abs(mins) / 60);
     const m = Math.abs(mins) % 60;
-    return `${h}:${String(m).padStart(2, "0")}`;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 };
 
 /** minutes → decimal hours rounded to 2dp  e.g. 90 → "1.50" */
@@ -158,8 +158,9 @@ const getBreakDetails = (actualBreaks = [], shiftBreakConfig = []) => {
 
 /**
  * Calculate working hours considering breaks
+ * @param {boolean} isFlexible - If true, calculate purely from punch-in to punch-out (ignore shift start)
  */
-const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], shiftBreakConfig = [], shiftStartMS = null) => {
+const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], shiftBreakConfig = [], shiftStartMS = null, isFlexible = false) => {
     if (!punchIn || !punchOut) return { 
         totalMinutes: 0, 
         payableMinutes: 0, 
@@ -171,10 +172,14 @@ const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], s
     const punchInTime = new Date(punchIn).getTime();
     const punchOutTime = new Date(punchOut).getTime();
 
-    // RULE: If punch-in before shift start, working hours count from shift start
-    const effectivePunchInTime = (shiftStartMS && punchInTime < shiftStartMS)
-        ? shiftStartMS
-        : punchInTime;
+    let effectivePunchInTime;
+    if (isFlexible) {
+        effectivePunchInTime = punchInTime;
+    } else {
+        effectivePunchInTime = (shiftStartMS && punchInTime < shiftStartMS)
+            ? shiftStartMS
+            : punchInTime;
+    }
     
     // Total gross working minutes (punch to punch)
     const totalGrossMinutes = Math.round((punchOutTime - effectivePunchInTime) / (1000 * 60));
@@ -267,10 +272,10 @@ export function formatTime(date) {
 
 // Helper function to format working hours as HH:MM
 function formatWorkingHours(minutes) {
-    if (!minutes || minutes === 0) return "0:00";
+    if (!minutes || minutes === 0) return "00:00";
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
-    return `${hours}:${mins.toString().padStart(2, '0')}`;
+    return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
 // Helper to check if shift is flexible
@@ -324,7 +329,8 @@ const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEn
                     attendance.punchOut, 
                     attendance.breaks, 
                     shiftBreaks,
-                    getShiftStartRealUTCms(attendance.punchIn, shiftStart)
+                    getShiftStartRealUTCms(attendance.punchIn, shiftStart),
+                    isFlexible
                 );
                 
                 hrs = formatWorkingHours(workCalc.payableMinutes);
@@ -638,7 +644,8 @@ export const generateAttendanceCSV = async (req, res) => {
                             attendance.punchOut,
                             attendance.breaks,
                             shiftBreaks,
-                            getShiftStartRealUTCms(attendance.punchIn, shiftStart)
+                            getShiftStartRealUTCms(attendance.punchIn, shiftStart),
+                            isFlexible
                         );
                     
                     totalHours = formatWorkingHours(workCalc.payableMinutes);
@@ -1204,12 +1211,13 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
                 let breakDeducted = "0:00";
                 let overtimeDisplay = "—";
                 
-                if (att && att.punchIn && att.punchOut) {
+if (att && att.punchIn && att.punchOut) {
                     const workCalc = att.isAutoMarked
                         ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0 }
                         : calculateWorkingHoursWithBreaks(
                             att.punchIn, att.punchOut, att.breaks, shiftBreaks,
-                            getShiftStartRealUTCms(att.punchIn, shiftStart)
+                            getShiftStartRealUTCms(att.punchIn, shiftStart),
+                            isFlexible
                         );
                     grossHrs = formatWorkingHours(workCalc.totalMinutes);
                     breakDeducted = formatWorkingHours(workCalc.breakDeductedMinutes);
@@ -1359,7 +1367,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                                 ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0 }
                                 : calculateWorkingHoursWithBreaks(
                                     att.punchIn, att.punchOut, att.breaks, shiftBreaks,
-                                    getShiftStartRealUTCms(att.punchIn, shiftStart)
+                                    getShiftStartRealUTCms(att.punchIn, shiftStart),
+                                    isFlexible
                                 );
                             totalWorkMin += workCalc.payableMinutes;
                             totalGrossMin += workCalc.totalMinutes;
@@ -1390,7 +1399,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                                 ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0 }
                                 : calculateWorkingHoursWithBreaks(
                                     att.punchIn, att.punchOut, att.breaks, shiftBreaks,
-                                    getShiftStartRealUTCms(att.punchIn, shiftStart)
+                                    getShiftStartRealUTCms(att.punchIn, shiftStart),
+                                    isFlexible
                                 );
                             totalWorkMin += workCalc.payableMinutes;
                             totalGrossMin += workCalc.totalMinutes;

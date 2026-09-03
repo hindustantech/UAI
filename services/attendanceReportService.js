@@ -3,7 +3,16 @@
 import mongoose from "mongoose";
 import Attendance from "../models/Attandance/Attendance.js";
 import Employee from '../models/Attandance/Employee.js';
+import Shift from '../models/Attandance/Shift.js';
 import User from '../models/userModel.js';
+
+/** Convert minutes to HH:MM (2-digit padded) */
+const convertMinutesToHHMM = (minutes) => {
+    if (!Number.isFinite(minutes) || minutes < 0) return "00:00";
+    const hrs = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+};
 class AttendanceReportService {
 
     /**
@@ -75,6 +84,20 @@ class AttendanceReportService {
                 }
             },
             {
+                $lookup: {
+                    from: "shifts",
+                    localField: "shift",
+                    foreignField: "_id",
+                    as: "shiftInfo"
+                }
+            },
+            {
+                $unwind: {
+                    path: "$shiftInfo",
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
                 $group: {
                     _id: {
                         employeeId: "$employeeId",
@@ -85,7 +108,8 @@ class AttendanceReportService {
                     workSummary: { $first: "$workSummary" },
                     punchIn: { $first: "$punchIn" },
                     punchOut: { $first: "$punchOut" },
-                    totalWorkingHours: { $first: "$totalWorkingHours" }
+                    totalWorkingHours: { $first: "$totalWorkingHours" },
+                    shiftType: { $first: "$shiftInfo.shiftType" }
                 }
             }
         ]);
@@ -130,8 +154,10 @@ class AttendanceReportService {
                     punchOut: null,
                     lateByMinutes: 0,
                     workingHours: 0,
+                    workingHoursHHMM: '00:00',
                     overtime: 0,
-                    isWeekend: isWeekend
+                    isWeekend: isWeekend,
+                    shiftType: attendance?.shiftType || 'fixed'
                 };
 
                 if (attendance) {
@@ -140,7 +166,9 @@ class AttendanceReportService {
                     record.punchOut = attendance.punchOut;
                     record.lateByMinutes = attendance.lateByMinutes || 0;
                     record.workingHours = attendance.totalWorkingHours || 0;
+                    record.workingHoursHHMM = convertMinutesToHHMM(Math.round((attendance.totalWorkingHours || 0) * 60));
                     record.overtime = attendance.workSummary?.overtimeMinutes || 0;
+                    record.shiftType = attendance.shiftType || 'fixed';
 
                     // Count statistics
                     switch (attendance.status) {
@@ -199,9 +227,10 @@ class AttendanceReportService {
                     weekOff,
                     leave,
                     attendancePercentage: attendancePercentage.toFixed(2),
-                    totalWorkingHours: (totalWorkingMinutes / 60).toFixed(2),
-                    totalLateHours: (totalLateMinutes / 60).toFixed(2),
-                    totalOvertimeHours: (totalOvertimeMinutes / 60).toFixed(2)
+                    totalWorkingHours: convertMinutesToHHMM(Math.round(totalWorkingMinutes)),
+                    totalWorkingHoursDecimal: (totalWorkingMinutes / 60).toFixed(2),
+                    totalLateHours: convertMinutesToHHMM(Math.round(totalLateMinutes)),
+                    totalOvertimeHours: convertMinutesToHHMM(Math.round(totalOvertimeMinutes))
                 },
                 dailyRecords
             });
@@ -504,7 +533,7 @@ class AttendanceReportService {
         let totalHoliday = 0;
         let totalWeekOff = 0;
         let totalLeave = 0;
-        let totalWorkingHours = 0;
+        let totalWorkingMinutes = 0;
 
         employeeReports.forEach(emp => {
             totalPresent += emp.summary.present;
@@ -514,7 +543,7 @@ class AttendanceReportService {
             totalHoliday += emp.summary.holiday;
             totalWeekOff += emp.summary.weekOff;
             totalLeave += emp.summary.leave;
-            totalWorkingHours += parseFloat(emp.summary.totalWorkingHours);
+            totalWorkingMinutes += parseFloat(emp.summary.totalWorkingHoursDecimal || 0) * 60;
         });
 
         const totalEmployees = employeeReports.length;
@@ -534,8 +563,10 @@ class AttendanceReportService {
             totalWeekOff,
             totalLeave,
             overallAttendancePercentage: overallAttendancePercentage.toFixed(2),
-            averageWorkingHours: (totalWorkingHours / totalEmployees).toFixed(2),
-            totalWorkingHours: totalWorkingHours.toFixed(2)
+            averageWorkingHours: totalEmployees > 0 ? convertMinutesToHHMM(Math.round(totalWorkingMinutes / totalEmployees)) : '00:00',
+            totalWorkingHours: convertMinutesToHHMM(Math.round(totalWorkingMinutes)),
+            averageWorkingHoursDecimal: (totalWorkingMinutes / totalEmployees / 60).toFixed(2),
+            totalWorkingHoursDecimal: (totalWorkingMinutes / 60).toFixed(2)
         };
     }
 

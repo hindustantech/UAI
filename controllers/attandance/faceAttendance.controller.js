@@ -615,13 +615,9 @@ async function processAttendanceForEmployee({
     const earlyCreditMinutes = Math.max(0, diffMinutes(punchInTimeIST, shiftStartTimeIST));
 
     if (isFlexible) {
+      // FLEX SHIFT: Calculate purely from punch-in to punch-out, ignore shift times
       if (outTimeUTC) {
         totalMinutes = diffMinutes(inTimeUTC, outTimeUTC);
-        if (earlyCreditMinutes > 0) {
-          totalMinutes = Math.max(0, totalMinutes - earlyCreditMinutes);
-        }
-        if (punchOutTimeIST > shiftEndTimeIST) overtimeMinutes = diffMinutes(shiftEndTimeIST, punchOutTimeIST);
-        if (punchOutTimeIST < shiftEndTimeIST) earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
       }
       if (!finalRemarks) finalRemarks = 'Flexible shift - Punch-in recorded';
     } else {
