@@ -35,7 +35,7 @@ import {
     loginUserSuperadmin,
     createOrUpdateEmployee, getAllEmployees, getEmployeeById,
     getAllUsersSuperadmin,
-    registerDeviceToken,
+    syncDeviceToken,
     removeDeviceToken,
     sendTestPushNotification
 } from '../controllers/authController.js';
@@ -111,7 +111,7 @@ router.post('/upload-profile-image', authMiddleware, profileUploadMiddleware, up
 router.get('/profile-image-url', authMiddleware, profileUploadMiddleware, getProfileImageUrl);
 
 // Device token management for push notifications
-router.post('/device-token', authMiddleware, registerDeviceToken);
+router.post('/device-token', authMiddleware, syncDeviceToken);
 router.delete('/device-token', authMiddleware, removeDeviceToken);
 
 // Test push notification

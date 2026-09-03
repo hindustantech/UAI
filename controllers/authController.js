@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import User from '../models/userModel.js';
 import { generateToken } from '../config/jwt.js';
 import { sendWhatsAppOtp, verifyWhatsAppOtp, generateOTP } from '../utils/whatapp.js';
-import { QuicksendWhatsAppOtp ,Smsotpverify} from '../utils/whatapp_otp.js';
+import { QuicksendWhatsAppOtp, Smsotpverify } from '../utils/whatapp_otp.js';
 import { generateReferralCode } from '../utils/Referalcode.js';
 import fs from 'fs';
 import path from 'path';
@@ -2811,14 +2811,14 @@ export const loginUserSuperadmin = async (req, res) => {
     } = req.body;
 
     /* ---------------- VALIDATION ---------------- */
-    if(req.user.type !== "super_admin" && req.user.role !== "super_admin") {
+    if (req.user.type !== "super_admin" && req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
         message: "Access denied",
       });
     }
 
-    if (!userId ) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
         message: "userId and otp required",
@@ -2839,10 +2839,10 @@ export const loginUserSuperadmin = async (req, res) => {
         message: "User not found",
       });
     }
-    
 
 
-  
+
+
 
     /* ---------------- UPDATE USER ---------------- */
 
@@ -2914,7 +2914,7 @@ export const loginUserSuperadmin = async (req, res) => {
 // get All user with cursor-based pagination, search, and composite cursor for better stability
 export const getAllUsersSuperadmin = async (req, res) => {
   try {
-    if(req.user.type !== "super_admin" && req.user.role !== "super_admin") {
+    if (req.user.type !== "super_admin" && req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
         message: "Access denied",
@@ -2943,7 +2943,7 @@ export const getAllUsersSuperadmin = async (req, res) => {
     // Determine sort direction
     const sortDirection = order === 'asc' ? 1 : -1;
     const sortField = sort;
-    
+
     // Add cursor condition if provided
     if (cursor) {
       // For simple cursor pagination (single field)
@@ -2966,8 +2966,8 @@ export const getAllUsersSuperadmin = async (req, res) => {
     if (hasMore && results.length > 0) {
       const lastItem = results[results.length - 1];
       // Use the sort field value as cursor
-      nextCursor = lastItem[sortField] instanceof Date 
-        ? lastItem[sortField].toISOString() 
+      nextCursor = lastItem[sortField] instanceof Date
+        ? lastItem[sortField].toISOString()
         : lastItem[sortField];
     }
 
@@ -3638,30 +3638,79 @@ const getProfileImageUrl = async (req, res) => {
     return res.status(500).json({ message: 'Error fetching profile image URL' });
   }
 };
+const MAX_DEVICE_TOKENS = 20; // cap per user
 
-export const registerDeviceToken = async (req, res) => {
+export const syncDeviceToken = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const { deviceToken, deviceId } = req.body;
+    const userId = req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
 
-    if (!deviceToken || typeof deviceToken !== 'string' || deviceToken.length < 20) {
+    let { deviceToken, deviceId } = req.body;
+
+    if (typeof deviceToken !== 'string') {
+      return res.status(400).json({ success: false, message: 'Invalid device token' });
+    }
+    deviceToken = deviceToken.trim();
+    if (deviceToken.length < 20 || deviceToken.length > 500) {
       return res.status(400).json({ success: false, message: 'Invalid device token' });
     }
 
-    const user = await User.findById(userId).select('devicetoken').lean();
-    const tokens = user?.devicetoken || [];
-
-    if (!tokens.includes(deviceToken)) {
-      const updateOps = { $addToSet: { devicetoken: deviceToken } };
-      if (deviceId) updateOps.$set = { deviceId };
-      await User.findByIdAndUpdate(userId, updateOps);
-    } else if (deviceId) {
-      await User.findByIdAndUpdate(userId, { deviceId });
+    if (deviceId !== undefined) {
+      if (typeof deviceId !== 'string' || !deviceId.trim()) {
+        return res.status(400).json({ success: false, message: 'Invalid deviceId' });
+      }
+      deviceId = deviceId.trim();
+    } else {
+      deviceId = null;
     }
 
-    res.status(200).json({ success: true, message: 'Device token registered' });
+    // --- Cross-account edge case: same physical device reinstalled under a
+    // different login. Strip this exact token from every OTHER user first so
+    // pushes don't leak to the old account.
+    await User.updateMany(
+      { _id: { $ne: userId }, 'devicetoken.token': deviceToken },
+      { $pull: { devicetoken: { token: deviceToken } } }
+    );
+
+    const user = await User.findById(userId).select('devicetoken');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    let tokens = user.devicetoken || [];
+
+    // --- Core "remove old, add new" logic ---
+    if (deviceId) {
+      // Same device re-registering (token rotated/refreshed): drop whatever
+      // token this deviceId had before, keep everything else untouched.
+      tokens = tokens.filter(t => t.deviceId !== deviceId);
+    } else {
+      // No deviceId given: just dedupe by exact token so we don't double-add.
+      tokens = tokens.filter(t => t.token !== deviceToken);
+    }
+
+    tokens.push({ token: deviceToken, deviceId, updatedAt: new Date() });
+
+    // --- Cap growth: keep only the most recent N ---
+    if (tokens.length > MAX_DEVICE_TOKENS) {
+      tokens = tokens.slice(-MAX_DEVICE_TOKENS);
+    }
+
+    user.devicetoken = tokens;
+    await user.save();
+
+    return res.status(200).json({ success: true, message: 'Device token synced' });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to register device token', error: error.message });
+    if (error.name === 'CastError') {
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+    }
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to sync device token',
+      error: error.message
+    });
   }
 };
 
