@@ -13,14 +13,14 @@ export const resolveCompanyId = (req) => {
 
   // super_admin: can access everything
   if (user.type === 'super_admin') {
-    // Use the requesting user's context if available
-    // super_admin typically works per-company in this setup
     return user.companyId || user._id;
   }
 
   // partner: the user IS the company
   if (user.type === 'partner') {
+    logger.info(`User ${user._id} is a partner; using _id as companyId`);
     return user._id;
+
   }
 
   // employee: has explicit companyId
@@ -30,8 +30,8 @@ export const resolveCompanyId = (req) => {
 
   // employee fallback: use _id (legacy or special case)
   if (user.type === 'user' || user.type === 'employee') {
-    return user.companyId || user._id;
     logger.warn(`User ${user._id} of type ${user.type} has no companyId; using _id as fallback`);
+    return user.companyId || user._id;
   }
 
   // Default: try to get from user
