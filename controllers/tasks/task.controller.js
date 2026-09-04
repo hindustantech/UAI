@@ -146,7 +146,7 @@ export const getTask = async (req, res) => {
 export const createTask = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
-    const { title, description, categoryId, departmentId, priority, startDate, dueDate, estimatedDurationSeconds, assignedUsers } = req.body;
+    const { title, description,  priority, startDate, dueDate, estimatedDurationSeconds, assignedUsers } = req.body;
 
     // Validate required fields
     if (!title) {
@@ -177,8 +177,6 @@ export const createTask = async (req, res) => {
       companyId,
       title,
       description,
-      categoryId,
-      departmentId,
       priority: priority || 'MEDIUM',
       startDate: startDate || new Date(),
       dueDate,

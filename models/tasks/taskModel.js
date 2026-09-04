@@ -26,14 +26,7 @@ const taskSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
-  categoryId: {
-    type: ObjectId,
-    ref: 'Category'
-  },
-  departmentId: {
-    type: ObjectId,
-    ref: 'Department'
-  },
+
   priority: {
     type: String,
     enum: ['LOW', 'MEDIUM', 'HIGH', 'URGENT', 'CRITICAL'],
@@ -145,7 +138,6 @@ taskSchema.index({ companyId: 1, priority: 1 });
 taskSchema.index({ companyId: 1, dueDate: 1 });
 taskSchema.index({ companyId: 1, createdBy: 1 });
 taskSchema.index({ companyId: 1, ownerId: 1 });
-taskSchema.index({ companyId: 1, departmentId: 1 });
 taskSchema.index({ companyId: 1, taskNumber: 1 }, { unique: true });
 taskSchema.index({ companyId: 1, createdAt: -1 });
 taskSchema.index({ companyId: 1, status: 1, priority: 1 });
