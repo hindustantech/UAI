@@ -160,11 +160,31 @@ export const createTask = async (req, res) => {
     // Validate assigned users belong to same company
     if (assignedUsers && assignedUsers.length > 0) {
       logger.info(`Validating assigned users for companyId: ${companyId} and assignedUsers: ${JSON.stringify(assignedUsers)}`);
-      const employees = await Employee.find({
+
+      // First try: match userId (User _id) directly
+      let employees = await Employee.find({
         companyId,
         userId: { $in: assignedUsers },
         employmentStatus: 'active'
       });
+
+      // If no matches, try matching Employee _id (in case frontend sends employee IDs instead of user IDs)
+      if (employees.length === 0) {
+        const employeesByEmployeeId = await Employee.find({
+          companyId,
+          _id: { $in: assignedUsers },
+          employmentStatus: 'active'
+        });
+
+        // Map employee _id to userId
+        const userIdsFromEmployeeIds = employeesByEmployeeId.map(e => e.userId);
+        employees = await Employee.find({
+          companyId,
+          userId: { $in: userIdsFromEmployeeIds },
+          employmentStatus: 'active'
+        });
+      }
+
       logger.info(`Found ${employees.length} active employees for assigned users`);
       logger.info(`Assigned users: ${JSON.stringify(assignedUsers)}, Active employees: ${employees.map(e => e.userId)}`);
       if (employees.length !== assignedUsers.length) {
