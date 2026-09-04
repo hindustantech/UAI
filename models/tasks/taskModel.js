@@ -12,7 +12,6 @@ const taskSchema = new mongoose.Schema({
   },
   taskNumber: {
     type: String,
-    required: [true, 'Task number is required'],
   },
   title: {
     type: String,
