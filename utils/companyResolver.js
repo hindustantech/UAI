@@ -7,7 +7,7 @@
  * - employee: has companyId field referencing their partner
  * - Viewer/other types: default to user's company
  */
-
+import logger from './logger.js';
 export const resolveCompanyId = (req) => {
   const user = req.user || {};
 
