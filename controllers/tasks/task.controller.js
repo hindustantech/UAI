@@ -16,7 +16,7 @@ import logger from '../../utils/logger.js';
 export const getTasks = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
-    const { status, priority, department, assignee, owner, dueDateStart, dueDateEnd, search, page = 1, limit = 50 } = req.query;
+    const { status, priority, assignee, owner, dueDateStart, dueDateEnd, search, page = 1, limit = 50 } = req.query;
 
     let filter = { companyId };
 
@@ -30,10 +30,6 @@ export const getTasks = async (req, res) => {
       filter.priority = priority;
     }
 
-    // Filter by department
-    if (department) {
-      filter.departmentId = department;
-    }
 
     // Filter by owner
     if (owner) {
@@ -72,7 +68,6 @@ export const getTasks = async (req, res) => {
       Task.find(filter)
         .populate('createdBy', 'name email')
         .populate('ownerId', 'name email')
-        .populate('departmentId', 'name')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit))
