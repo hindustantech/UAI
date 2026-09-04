@@ -147,7 +147,7 @@ export const createTask = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
     logger.info(`Creating task for companyId: ${companyId}, userId: ${req.user._id}`);
-    const { title, description, priority, startDate, dueDate, estimatedDurationSeconds, assignedUsers } = req.body;
+    const { title,taskNumber, description, priority, startDate, dueDate, estimatedDurationSeconds, assignedUsers } = req.body;
 
     // Validate required fields
     if (!title) {
@@ -199,6 +199,7 @@ export const createTask = async (req, res) => {
     const task = await Task.create({
       companyId,
       title,
+      taskNumber,
       description,
       priority: priority || 'MEDIUM',
       startDate: startDate || new Date(),
