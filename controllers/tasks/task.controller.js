@@ -146,8 +146,8 @@ export const getTask = async (req, res) => {
 export const createTask = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
-  logger.info(`Creating task for companyId: ${companyId}, userId: ${req.user._id}`);
-    const { title, description,  priority, startDate, dueDate, estimatedDurationSeconds, assignedUsers } = req.body;
+    logger.info(`Creating task for companyId: ${companyId}, userId: ${req.user._id}`);
+    const { title, description, priority, startDate, dueDate, estimatedDurationSeconds, assignedUsers } = req.body;
 
     // Validate required fields
     if (!title) {
@@ -159,12 +159,14 @@ export const createTask = async (req, res) => {
 
     // Validate assigned users belong to same company
     if (assignedUsers && assignedUsers.length > 0) {
+      logger.info(`Validating assigned users for companyId: ${companyId} and assignedUsers: ${JSON.stringify(assignedUsers)}`);
       const employees = await Employee.find({
         companyId,
         userId: { $in: assignedUsers },
         employmentStatus: 'active'
       });
-
+      logger.info(`Found ${employees.length} active employees for assigned users`);
+      logger.info(`Assigned users: ${JSON.stringify(assignedUsers)}, Active employees: ${employees.map(e => e.userId)}`);
       if (employees.length !== assignedUsers.length) {
         return res.status(400).json({
           success: false,
@@ -230,7 +232,7 @@ export const createTask = async (req, res) => {
       after: { status: task.status, title: task.title },
       metadata: { taskNumber: task.taskNumber }
     });
-  
+
     res.status(201).json({
       success: true,
       data: task
@@ -326,7 +328,7 @@ export const softDeleteTask = async (req, res) => {
 
     const task = await Task.findOneAndUpdate(
       { _id: id, companyId },
-      { 
+      {
         deletedAt: new Date(),
         deletedBy: req.user._id,
         status: 'DEACTIVATED'
