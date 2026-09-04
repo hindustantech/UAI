@@ -3,7 +3,7 @@ import TaskAssignment from '../../models/tasks/taskAssignmentModel.js';
 import TaskStatusHistory from '../../models/tasks/taskStatusHistoryModel.js';
 import User from '../../models/userModel.js';
 import Employee from '../../models/Attandance/Employee.js';
-import AuditLog from '../../models/AuditLog.js';
+import { createTaskAuditLog } from '../../utils/taskAuditHelper.js';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
 import { TaskNotificationService } from './taskNotification.service.js';
 
@@ -93,21 +93,14 @@ export const assignTask = async (req, res) => {
     });
 
     // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-ASSIGNED-${id}-${userId}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_ASSIGNED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { status: task.status },
       after: { status: 'ASSIGNED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { assignedTo: userId }
     });
 
@@ -210,28 +203,21 @@ export const reassignTask = async (req, res) => {
     });
 
     // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-REASSIGNED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_REASSIGNED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { assignedUsers: task.assignedUsers },
       after: { assignedUsers: [...task.assignedUsers, newUserId] },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { oldUserId, newUserId }
     });
 
     // Send notification
     await TaskNotificationService.sendTaskNotification({
       companyId,
-      type: 'task_reassigned', // Not in notification types - would need to add
+      type: 'task_reassigned',
       taskId: id,
       taskNumber: task.taskNumber,
       taskTitle: task.title,
@@ -300,21 +286,14 @@ export const removeAssignee = async (req, res) => {
     });
 
     // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-REMOVED-${id}-${userId}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_REMOVED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { assignedUsers: task.assignedUsers },
       after: { assignedUsers: task.assignedUsers.filter(u => !u.equals(userId)) },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { removedUserId: userId }
     });
 
@@ -328,16 +307,5 @@ export const removeAssignee = async (req, res) => {
       success: false,
       error: { code: 'TASK_REMOVE_ERROR', message: 'Failed to remove assignee' }
     });
-  }
-};
-
-const getNextAuditSeq = async (entityId) => {
-  try {
-    const lastSeq = await AuditLog.findOne({ chainScope: `task-${entityId}` })
-      .sort({ seq: -1 })
-      .select('seq');
-    return (lastSeq && lastSeq.seq) || 0;
-  } catch (error) {
-    return 0;
   }
 };

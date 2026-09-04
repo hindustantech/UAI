@@ -2,9 +2,7 @@ import Task from '../../models/tasks/taskModel.js';
 import TaskAssignment from '../../models/tasks/taskAssignmentModel.js';
 import TaskWorkSession from '../../models/tasks/taskWorkSessionModel.js';
 import TaskStatusHistory from '../../models/tasks/taskStatusHistoryModel.js';
-import User from '../../models/userModel.js';
-import AuditLog from '../../models/AuditLog.js';
-import moment from 'moment';
+import { createTaskAuditLog } from '../../utils/taskAuditHelper.js';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
 import { TaskNotificationService } from './taskNotification.service.js';
 
@@ -13,7 +11,6 @@ export const startTask = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -22,7 +19,6 @@ export const startTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for starting
     if (!['ACCEPTED', 'ACTIVE', 'IN_PROGRESS', 'PAUSED', 'BLOCKED', 'REOPENED'].includes(task.status)) {
       return res.status(400).json({
         success: false,
@@ -30,7 +26,6 @@ export const startTask = async (req, res) => {
       });
     }
 
-    // Check if user is assigned to this task in this company
     const assignment = await TaskAssignment.findOne({
       companyId,
       taskId: id,
@@ -45,7 +40,6 @@ export const startTask = async (req, res) => {
       });
     }
 
-    // Check if user already has an active work session (one active task rule)
     const activeSession = await TaskWorkSession.findOne({
       companyId,
       userId: req.user._id,
@@ -56,14 +50,13 @@ export const startTask = async (req, res) => {
       const activeTask = await Task.findById(activeSession.taskId).select('taskNumber title');
       return res.status(409).json({
         success: false,
-        error: { 
-          code: 'ACTIVE_WORK_SESSION_EXISTS', 
-          message: `You already have an active task: ${activeTask.taskNumber} — ${activeTask.title}. Stop it before starting another task.` 
+        error: {
+          code: 'ACTIVE_WORK_SESSION_EXISTS',
+          message: `You already have an active task: ${activeTask.taskNumber} — ${activeTask.title}. Stop it before starting another task.`
         }
       });
     }
 
-    // Create work session
     const workSession = await TaskWorkSession.create({
       companyId,
       taskId: id,
@@ -73,10 +66,9 @@ export const startTask = async (req, res) => {
       startSource: req.body.startSource || 'WEB'
     });
 
-    // Update task status to ACTIVE
     const updatedTask = await Task.findByIdAndUpdate(
       id,
-      { 
+      {
         status: 'ACTIVE',
         activatedAt: task.activatedAt || new Date(),
         activatedBy: task.activatedBy || req.user._id
@@ -84,7 +76,6 @@ export const startTask = async (req, res) => {
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -94,26 +85,17 @@ export const startTask = async (req, res) => {
       reason: 'Task started'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-STARTED-${id}-${req.user._id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_STARTED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { status: task.status },
       after: { status: 'ACTIVE' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { workSessionId: workSession._id }
     });
 
-    // Send notification
     await TaskNotificationService.sendTaskNotification({
       companyId,
       type: 'task_started',
@@ -145,7 +127,6 @@ export const stopTask = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -154,7 +135,6 @@ export const stopTask = async (req, res) => {
       });
     }
 
-    // Find active work session
     const activeSession = await TaskWorkSession.findOne({
       companyId,
       taskId: id,
@@ -169,7 +149,6 @@ export const stopTask = async (req, res) => {
       });
     }
 
-    // Stop the session
     activeSession.stoppedAt = new Date();
     activeSession.status = 'STOPPED';
     activeSession.stopSource = req.body.stopSource || 'USER';
@@ -177,7 +156,6 @@ export const stopTask = async (req, res) => {
     activeSession.durationSeconds = Math.floor((new Date(activeSession.stoppedAt) - new Date(activeSession.startedAt)) / 1000);
     await activeSession.save();
 
-    // Update task status to PAUSED (if task was ACTIVE)
     if (task.status === 'ACTIVE') {
       await Task.findByIdAndUpdate(
         id,
@@ -185,7 +163,6 @@ export const stopTask = async (req, res) => {
         { new: true }
       );
 
-      // Create status history
       await TaskStatusHistory.create({
         companyId,
         taskId: id,
@@ -196,26 +173,17 @@ export const stopTask = async (req, res) => {
       });
     }
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-STOPPED-${id}-${req.user._id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_STOPPED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { status: task.status },
       after: { status: 'PAUSED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { workSessionId: activeSession._id, durationSeconds: activeSession.durationSeconds }
     });
 
-    // Send notification
     await TaskNotificationService.sendTaskNotification({
       companyId,
       type: 'task_stopped',
@@ -244,7 +212,6 @@ export const resumeTask = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -253,7 +220,6 @@ export const resumeTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for resuming
     if (!['PAUSED', 'BLOCKED'].includes(task.status)) {
       return res.status(400).json({
         success: false,
@@ -261,7 +227,6 @@ export const resumeTask = async (req, res) => {
       });
     }
 
-    // Check if user is assigned to this task
     const assignment = await TaskAssignment.findOne({
       companyId,
       taskId: id,
@@ -276,7 +241,6 @@ export const resumeTask = async (req, res) => {
       });
     }
 
-    // Check if user already has an active work session (one active task rule)
     const activeSession = await TaskWorkSession.findOne({
       companyId,
       userId: req.user._id,
@@ -287,14 +251,13 @@ export const resumeTask = async (req, res) => {
       const activeTask = await Task.findById(activeSession.taskId).select('taskNumber title');
       return res.status(409).json({
         success: false,
-        error: { 
-          code: 'ACTIVE_WORK_SESSION_EXISTS', 
-          message: `You already have an active task: ${activeTask.taskNumber} — ${activeTask.title}. Stop it before starting another task.` 
+        error: {
+          code: 'ACTIVE_WORK_SESSION_EXISTS',
+          message: `You already have an active task: ${activeTask.taskNumber} — ${activeTask.title}. Stop it before starting another task.`
         }
       });
     }
 
-    // Create new work session (don't modify previous)
     const workSession = await TaskWorkSession.create({
       companyId,
       taskId: id,
@@ -304,14 +267,12 @@ export const resumeTask = async (req, res) => {
       startSource: req.body.startSource || 'WEB'
     });
 
-    // Update task status to ACTIVE
     const updatedTask = await Task.findByIdAndUpdate(
       id,
       { status: 'ACTIVE' },
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -321,26 +282,17 @@ export const resumeTask = async (req, res) => {
       reason: 'Task resumed'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-RESUMED-${id}-${req.user._id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_RESUMED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { status: task.status },
       after: { status: 'ACTIVE' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { workSessionId: workSession._id }
     });
 
-    // Send notification
     await TaskNotificationService.sendTaskNotification({
       companyId,
       type: 'task_resumed',
@@ -373,7 +325,6 @@ export const submitTask = async (req, res) => {
     const { id } = req.params;
     const { completionComment } = req.body;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -382,7 +333,6 @@ export const submitTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for submission
     if (!['IN_PROGRESS', 'PAUSED', 'BLOCKED', 'ACTIVE'].includes(task.status)) {
       return res.status(400).json({
         success: false,
@@ -390,7 +340,6 @@ export const submitTask = async (req, res) => {
       });
     }
 
-    // Check if user is assigned to this task
     const assignment = await TaskAssignment.findOne({
       companyId,
       taskId: id,
@@ -405,7 +354,6 @@ export const submitTask = async (req, res) => {
       });
     }
 
-    // Find and stop any active work session
     const activeSession = await TaskWorkSession.findOne({
       companyId,
       taskId: id,
@@ -422,16 +370,14 @@ export const submitTask = async (req, res) => {
       await activeSession.save();
     }
 
-    // Calculate actual duration from all valid sessions
     const allSessions = await TaskWorkSession.find({
       companyId,
       taskId: id,
       status: { $in: ['STOPPED', 'AUTO_STOPPED'] }
     });
-    
+
     const totalDuration = allSessions.reduce((sum, session) => sum + session.durationSeconds, 0);
 
-    // Update task
     const updatedTask = await Task.findByIdAndUpdate(
       id,
       {
@@ -445,7 +391,6 @@ export const submitTask = async (req, res) => {
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -455,26 +400,17 @@ export const submitTask = async (req, res) => {
       reason: completionComment || 'Task submitted'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-SUBMITTED-${id}-${req.user._id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_SUBMITTED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { status: task.status },
       after: { status: 'SUBMITTED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { completionComment, actualDurationSeconds: totalDuration }
     });
 
-    // Send notification to manager/verifier
     await TaskNotificationService.notifyTaskSubmitted({
       companyId,
       taskId: id,
@@ -502,7 +438,6 @@ export const getWorkSessions = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -511,7 +446,6 @@ export const getWorkSessions = async (req, res) => {
       });
     }
 
-    // Get work sessions for this company and task
     const workSessions = await TaskWorkSession.find({ companyId, taskId: id })
       .populate('userId', 'name email')
       .sort({ startedAt: -1 });
@@ -536,7 +470,6 @@ export const getUserWorkTime = async (req, res) => {
     const { id } = req.params;
     const { startDate, endDate } = req.query;
 
-    // Build date filter
     const dateFilter = {};
     if (startDate) dateFilter.$gte = new Date(startDate);
     if (endDate) dateFilter.$lte = new Date(endDate);
@@ -551,13 +484,10 @@ export const getUserWorkTime = async (req, res) => {
       filter.startedAt = dateFilter;
     }
 
-    // Get all completed work sessions for user in this company
     const workSessions = await TaskWorkSession.find(filter).sort({ startedAt: -1 });
 
-    // Calculate total time
     const totalDuration = workSessions.reduce((sum, session) => sum + session.durationSeconds, 0);
 
-    // Group by task
     const tasksByUser = {};
     for (const session of workSessions) {
       const taskId = session.taskId.toString();
@@ -598,7 +528,6 @@ export const correctWorkSession = async (req, res) => {
     const { id } = req.params;
     const { originalStartedAt, originalStoppedAt, correctedStartedAt, correctedStoppedAt, correctionReason } = req.body;
 
-    // Find work session in this company
     const workSession = await TaskWorkSession.findOne({ _id: id, companyId });
     if (!workSession) {
       return res.status(404).json({
@@ -607,7 +536,6 @@ export const correctWorkSession = async (req, res) => {
       });
     }
 
-    // Check if user has permission to edit time (should be admin/manager)
     const user = req.user;
     if (!['super_admin', 'partner', 'admin'].includes(user.type)) {
       return res.status(403).json({
@@ -616,19 +544,16 @@ export const correctWorkSession = async (req, res) => {
       });
     }
 
-    // Store original values
     const originalData = {
       startedAt: workSession.startedAt,
       stoppedAt: workSession.stoppedAt,
       durationSeconds: workSession.durationSeconds
     };
 
-    // Apply correction
     workSession.startedAt = new Date(correctedStartedAt);
     workSession.stoppedAt = new Date(correctedStoppedAt);
     workSession.durationSeconds = Math.floor((new Date(correctedStoppedAt) - new Date(correctedStartedAt)) / 1000);
 
-    // Add correction metadata
     workSession.correction = {
       correctedBy: req.user._id,
       correctedAt: new Date(),
@@ -638,26 +563,19 @@ export const correctWorkSession = async (req, res) => {
 
     await workSession.save();
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `WORK-SESSION-CORRECTED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'WORK_SESSION_CORRECTED',
       entityType: 'WORK_SESSION',
       entityId: id,
+      actorId: req.user._id,
       companyId,
-      oldData: originalData,
-      newData: {
+      before: originalData,
+      after: {
         startedAt: workSession.startedAt,
         stoppedAt: workSession.stoppedAt,
         durationSeconds: workSession.durationSeconds
       },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `work-session-${id}`,
-      seq: 0,
+      prefix: 'work-session',
       metadata: { correctionReason }
     });
 
@@ -671,17 +589,6 @@ export const correctWorkSession = async (req, res) => {
       success: false,
       error: { code: 'TASK_CORRECTION_ERROR', message: 'Failed to correct work session' }
     });
-  }
-};
-
-const getNextAuditSeq = async (entityId) => {
-  try {
-    const lastSeq = await AuditLog.findOne({ chainScope: `task-${entityId}` })
-      .sort({ seq: -1 })
-      .select('seq');
-    return (lastSeq && lastSeq.seq) || 0;
-  } catch (error) {
-    return 0;
   }
 };
 

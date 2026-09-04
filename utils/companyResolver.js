@@ -5,7 +5,8 @@
  * - super_admin: accesses all companies (uses _id as companyId)
  * - partner: IS the company (uses _id as companyId)
  * - employee: has companyId field referencing their partner
- * - Viewer/other types: default to user's company
+ * - Viewer/other types: default to user's companyyes
+ * 
  */
 import logger from './logger.js';
 export const resolveCompanyId = (req) => {

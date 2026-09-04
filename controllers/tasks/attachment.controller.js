@@ -1,6 +1,6 @@
 import Task from '../../models/tasks/taskModel.js';
 import TaskAttachment from '../../models/tasks/taskAttachmentModel.js';
-import AuditLog from '../../models/AuditLog.js';
+import { createTaskAuditLog } from '../../utils/taskAuditHelper.js';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
 
 export const uploadAttachment = async (req, res) => {
@@ -8,7 +8,6 @@ export const uploadAttachment = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -17,7 +16,6 @@ export const uploadAttachment = async (req, res) => {
       });
     }
 
-    // Check if file exists
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -25,7 +23,6 @@ export const uploadAttachment = async (req, res) => {
       });
     }
 
-    // Validate file type
     const allowedTypes = [
       'application/pdf',
       'application/msword',
@@ -45,7 +42,6 @@ export const uploadAttachment = async (req, res) => {
       });
     }
 
-    // Validate file size (max 10MB)
     const maxSize = 10 * 1024 * 1024;
     if (req.file.size > maxSize) {
       return res.status(400).json({
@@ -54,34 +50,25 @@ export const uploadAttachment = async (req, res) => {
       });
     }
 
-    // Create attachment record
     const attachment = await TaskAttachment.create({
       companyId,
       taskId: id,
       uploader: req.user._id,
       fileName: req.file.originalname,
-      fileId: req.file.path || req.file.filename, // Cloudinary/S3 path
+      fileId: req.file.path || req.file.filename,
       mimeType: req.file.mimetype,
       size: req.file.size,
       accessType: req.body.accessType || 'team'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-ATTACHMENT-UPLOADED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_ATTACHMENT_UPLOADED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       oldData: {},
-      newData: { attachmentId: attachment._id, fileName: req.file.originalname },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
+      after: { attachmentId: attachment._id, fileName: req.file.originalname },
       metadata: { attachmentId: attachment._id }
     });
 
@@ -103,7 +90,6 @@ export const getAttachments = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -112,7 +98,6 @@ export const getAttachments = async (req, res) => {
       });
     }
 
-    // Get attachments (company-scoped)
     const attachments = await TaskAttachment.find({ companyId, taskId: id })
       .populate('uploader', 'name email')
       .sort({ createdAt: -1 });
@@ -136,7 +121,6 @@ export const deleteAttachment = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id, attachmentId } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -145,7 +129,6 @@ export const deleteAttachment = async (req, res) => {
       });
     }
 
-    // Find attachment in same company
     const attachment = await TaskAttachment.findOne({ _id: attachmentId, companyId, taskId: id });
     if (!attachment) {
       return res.status(404).json({
@@ -154,8 +137,7 @@ export const deleteAttachment = async (req, res) => {
       });
     }
 
-    // Check if user is the uploader or has admin privileges
-    if (attachment.uploader.toString() !== req.user._id.toString() && 
+    if (attachment.uploader.toString() !== req.user._id.toString() &&
         !['super_admin', 'partner', 'admin'].includes(req.user.type)) {
       return res.status(403).json({
         success: false,
@@ -163,25 +145,16 @@ export const deleteAttachment = async (req, res) => {
       });
     }
 
-    // Delete attachment record
     await TaskAttachment.findByIdAndDelete(attachmentId);
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-ATTACHMENT-DELETED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_ATTACHMENT_DELETED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       oldData: { attachmentId, fileName: attachment.fileName },
       after: {},
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { attachmentId }
     });
 
@@ -195,16 +168,5 @@ export const deleteAttachment = async (req, res) => {
       success: false,
       error: { code: 'TASK_ATTACHMENT_DELETE_ERROR', message: 'Failed to delete attachment' }
     });
-  }
-};
-
-const getNextAuditSeq = async (entityId) => {
-  try {
-    const lastSeq = await AuditLog.findOne({ chainScope: `task-${entityId}` })
-      .sort({ seq: -1 })
-      .select('seq');
-    return (lastSeq && lastSeq.seq) || 0;
-  } catch (error) {
-    return 0;
   }
 };

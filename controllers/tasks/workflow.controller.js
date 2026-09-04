@@ -1,7 +1,7 @@
 import Task from '../../models/tasks/taskModel.js';
 import TaskStatusHistory from '../../models/tasks/taskStatusHistoryModel.js';
 import TaskWorkSession from '../../models/tasks/taskWorkSessionModel.js';
-import AuditLog from '../../models/AuditLog.js';
+import { createTaskAuditLog } from '../../utils/taskAuditHelper.js';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
 import { TaskNotificationService } from './taskNotification.service.js';
 
@@ -10,7 +10,6 @@ export const verifyTask = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -19,7 +18,6 @@ export const verifyTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for verification
     if (task.status !== 'SUBMITTED') {
       return res.status(400).json({
         success: false,
@@ -27,7 +25,6 @@ export const verifyTask = async (req, res) => {
       });
     }
 
-    // Update task
     const updatedTask = await Task.findByIdAndUpdate(
       id,
       {
@@ -38,7 +35,6 @@ export const verifyTask = async (req, res) => {
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -48,26 +44,17 @@ export const verifyTask = async (req, res) => {
       reason: 'Task verified'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-VERIFIED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_VERIFIED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
-      oldData: { status: 'SUBMITTED' },
-      newData: { status: 'VERIFIED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
+      before: { status: 'SUBMITTED' },
+      after: { status: 'VERIFIED' },
       metadata: { verifiedBy: req.user._id }
     });
 
-    // Send notification
     await TaskNotificationService.notifyTaskVerified({
       companyId,
       taskId: id,
@@ -97,7 +84,6 @@ export const rejectTask = async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -106,7 +92,6 @@ export const rejectTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for rejection
     if (task.status !== 'SUBMITTED') {
       return res.status(400).json({
         success: false,
@@ -114,7 +99,6 @@ export const rejectTask = async (req, res) => {
       });
     }
 
-    // Check if reason is provided
     if (!reason || reason.trim().length === 0) {
       return res.status(400).json({
         success: false,
@@ -122,7 +106,6 @@ export const rejectTask = async (req, res) => {
       });
     }
 
-    // Update task
     const updatedTask = await Task.findByIdAndUpdate(
       id,
       {
@@ -131,7 +114,6 @@ export const rejectTask = async (req, res) => {
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -141,26 +123,17 @@ export const rejectTask = async (req, res) => {
       reason: reason
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-REJECTED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_REJECTED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
-      oldData: { status: 'SUBMITTED' },
-      newData: { status: 'REJECTED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
+      before: { status: 'SUBMITTED' },
+      after: { status: 'REJECTED' },
       metadata: { rejectionReason: reason }
     });
 
-    // Send notification
     await TaskNotificationService.notifyTaskRejected({
       companyId,
       taskId: id,
@@ -191,7 +164,6 @@ export const reopenTask = async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -200,7 +172,6 @@ export const reopenTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for reopening
     if (task.status !== 'CLOSED') {
       return res.status(400).json({
         success: false,
@@ -208,7 +179,6 @@ export const reopenTask = async (req, res) => {
       });
     }
 
-    // Check if reason is provided
     if (!reason || reason.trim().length === 0) {
       return res.status(400).json({
         success: false,
@@ -216,7 +186,6 @@ export const reopenTask = async (req, res) => {
       });
     }
 
-    // Update task
     const updatedTask = await Task.findByIdAndUpdate(
       id,
       {
@@ -227,7 +196,6 @@ export const reopenTask = async (req, res) => {
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -237,26 +205,17 @@ export const reopenTask = async (req, res) => {
       reason: reason
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-REOPENED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_REOPENED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
-      oldData: { status: 'CLOSED' },
-      newData: { status: 'REOPENED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
+      before: { status: 'CLOSED' },
+      after: { status: 'REOPENED' },
       metadata: { reopenReason: reason }
     });
 
-    // Send notification
     await TaskNotificationService.notifyTaskReopened({
       companyId,
       taskId: id,
@@ -284,7 +243,6 @@ export const closeTask = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -293,7 +251,6 @@ export const closeTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for closing
     if (task.status !== 'VERIFIED') {
       return res.status(400).json({
         success: false,
@@ -301,7 +258,6 @@ export const closeTask = async (req, res) => {
       });
     }
 
-    // Update task
     const updatedTask = await Task.findByIdAndUpdate(
       id,
       {
@@ -312,7 +268,6 @@ export const closeTask = async (req, res) => {
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -322,26 +277,17 @@ export const closeTask = async (req, res) => {
       reason: 'Task closed'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-CLOSED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_CLOSED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
-      oldData: { status: 'VERIFIED' },
-      newData: { status: 'CLOSED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
+      before: { status: 'VERIFIED' },
+      after: { status: 'CLOSED' },
       metadata: { closedBy: req.user._id }
     });
 
-    // Send notification
     await TaskNotificationService.notifyTaskClosed({
       companyId,
       taskId: id,
@@ -370,7 +316,6 @@ export const activateTask = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -379,7 +324,6 @@ export const activateTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for activation
     if (task.status !== 'DEACTIVATED') {
       return res.status(400).json({
         success: false,
@@ -387,7 +331,6 @@ export const activateTask = async (req, res) => {
       });
     }
 
-    // Update task
     const updatedTask = await Task.findByIdAndUpdate(
       id,
       {
@@ -400,7 +343,6 @@ export const activateTask = async (req, res) => {
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -410,22 +352,14 @@ export const activateTask = async (req, res) => {
       reason: 'Task activated'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-ACTIVATED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_ACTIVATED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
-      oldData: { status: 'DEACTIVATED' },
-      newData: { status: 'ACTIVE' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
+      before: { status: 'DEACTIVATED' },
+      after: { status: 'ACTIVE' },
       metadata: { activatedBy: req.user._id }
     });
 
@@ -447,7 +381,6 @@ export const deactivateTask = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -456,7 +389,6 @@ export const deactivateTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for deactivation
     if (!['ACTIVE', 'IN_PROGRESS', 'PAUSED'].includes(task.status)) {
       return res.status(400).json({
         success: false,
@@ -464,7 +396,6 @@ export const deactivateTask = async (req, res) => {
       });
     }
 
-    // Update task
     const updatedTask = await Task.findByIdAndUpdate(
       id,
       {
@@ -475,10 +406,9 @@ export const deactivateTask = async (req, res) => {
       { new: true }
     );
 
-    // Stop any active work sessions in this company
     await TaskWorkSession.updateMany(
       { companyId, taskId: id, status: 'ACTIVE' },
-      { 
+      {
         status: 'AUTO_STOPPED',
         stoppedAt: new Date(),
         stopSource: 'SYSTEM',
@@ -486,7 +416,6 @@ export const deactivateTask = async (req, res) => {
       }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -496,22 +425,14 @@ export const deactivateTask = async (req, res) => {
       reason: 'Task deactivated'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-DEACTIVATED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_DEACTIVATED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
-      oldData: { status: task.status },
-      newData: { status: 'DEACTIVATED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
+      before: { status: task.status },
+      after: { status: 'DEACTIVATED' },
       metadata: { deactivatedBy: req.user._id }
     });
 
@@ -533,7 +454,6 @@ export const cancelTask = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -542,7 +462,6 @@ export const cancelTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for cancellation
     if (['CLOSED', 'CANCELLED'].includes(task.status)) {
       return res.status(400).json({
         success: false,
@@ -550,7 +469,6 @@ export const cancelTask = async (req, res) => {
       });
     }
 
-    // Update task
     const updatedTask = await Task.findByIdAndUpdate(
       id,
       {
@@ -559,10 +477,9 @@ export const cancelTask = async (req, res) => {
       { new: true }
     );
 
-    // Stop any active work sessions in this company
     await TaskWorkSession.updateMany(
       { companyId, taskId: id, status: 'ACTIVE' },
-      { 
+      {
         status: 'AUTO_STOPPED',
         stoppedAt: new Date(),
         stopSource: 'SYSTEM',
@@ -570,7 +487,6 @@ export const cancelTask = async (req, res) => {
       }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -580,22 +496,14 @@ export const cancelTask = async (req, res) => {
       reason: 'Task cancelled'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-CANCELLED-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_CANCELLED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
-      oldData: { status: task.status },
-      newData: { status: 'CANCELLED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
+      before: { status: task.status },
+      after: { status: 'CANCELLED' },
       metadata: { cancelledBy: req.user._id }
     });
 
@@ -609,16 +517,5 @@ export const cancelTask = async (req, res) => {
       success: false,
       error: { code: 'TASK_CANCEL_ERROR', message: 'Failed to cancel task' }
     });
-  }
-};
-
-const getNextAuditSeq = async (entityId) => {
-  try {
-    const lastSeq = await AuditLog.findOne({ chainScope: `task-${entityId}` })
-      .sort({ seq: -1 })
-      .select('seq');
-    return (lastSeq && lastSeq.seq) || 0;
-  } catch (error) {
-    return 0;
   }
 };

@@ -7,11 +7,11 @@ import TaskComment from '../../models/tasks/taskCommentModel.js';
 import TaskAttachment from '../../models/tasks/taskAttachmentModel.js';
 import User from '../../models/userModel.js';
 import Employee from '../../models/Attandance/Employee.js';
-import AuditLog from '../../models/AuditLog.js';
 import moment from 'moment';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
 import { TaskNotificationService } from './taskNotification.service.js';
 import logger from '../../utils/logger.js';
+import { createTaskAuditLog } from '../../utils/taskAuditHelper.js';
 
 export const getTasks = async (req, res) => {
   try {
@@ -239,7 +239,7 @@ export const createTask = async (req, res) => {
     }
 
     // Create audit log
-    await createAuditLog({
+    await createTaskAuditLog({
       action: 'TASK_CREATED',
       entityType: 'TASK',
       entityId: task._id,
@@ -301,7 +301,7 @@ export const updateTask = async (req, res) => {
     );
 
     // Create audit log
-    await createAuditLog({
+    await createTaskAuditLog({
       action: 'TASK_UPDATED',
       entityType: 'TASK',
       entityId: updatedTask._id,
@@ -360,7 +360,7 @@ export const softDeleteTask = async (req, res) => {
     }
 
     // Create audit log
-    await createAuditLog({
+    await createTaskAuditLog({
       action: 'TASK_DELETED',
       entityType: 'TASK',
       entityId: task._id,
@@ -381,54 +381,5 @@ export const softDeleteTask = async (req, res) => {
       success: false,
       error: { code: 'TASK_DELETE_ERROR', message: 'Failed to delete task' }
     });
-  }
-};
-
-const createAuditLog = async (auditData) => {
-  try {
-    const {
-      action,
-      entityType,
-      entityId,
-      actorId,
-      companyId,
-      before,
-      after,
-      metadata
-    } = auditData;
-
-    const auditLog = new AuditLog({
-      eventId: `TASK-${entityId}-${Date.now()}`,
-      actorType: 'USER',
-      userId: actorId,
-      organizationId: companyId,
-      action,
-      resource: entityType,
-      resourceId: String(entityId),
-      oldData: before,
-      newData: after,
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${entityId}`,
-      seq: await getNextAuditSeq(entityId),
-      metadata
-    });
-
-    await auditLog.save();
-  } catch (error) {
-    console.error('Create audit log error:', error);
-    // Don't throw - audit log failure shouldn't block task operations
-  }
-};
-
-const getNextAuditSeq = async (entityId) => {
-  try {
-    const lastSeq = await AuditLog.findOne({ chainScope: `task-${entityId}` })
-      .sort({ seq: -1 })
-      .select('seq');
-    return (lastSeq && lastSeq.seq) || 0;
-  } catch (error) {
-    return 0;
   }
 };

@@ -4,7 +4,7 @@ import TaskAssignment from '../../models/tasks/taskAssignmentModel.js';
 import TaskStatusHistory from '../../models/tasks/taskStatusHistoryModel.js';
 import User from '../../models/userModel.js';
 import Employee from '../../models/Attandance/Employee.js';
-import AuditLog from '../../models/AuditLog.js';
+import { createTaskAuditLog } from '../../utils/taskAuditHelper.js';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
 import { TaskNotificationService } from './taskNotification.service.js';
 
@@ -14,7 +14,6 @@ export const inviteUser = async (req, res) => {
     const { id } = req.params;
     const { userId, message } = req.body;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -23,7 +22,6 @@ export const inviteUser = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for invitation
     if (!['DRAFT', 'INVITED'].includes(task.status)) {
       return res.status(400).json({
         success: false,
@@ -31,7 +29,6 @@ export const inviteUser = async (req, res) => {
       });
     }
 
-    // Check if user exists and is active
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -40,7 +37,6 @@ export const inviteUser = async (req, res) => {
       });
     }
 
-    // Check if employee exists and is active in same company
     const employee = await Employee.findOne({ companyId, userId: user._id, employmentStatus: 'active' });
     if (!employee) {
       return res.status(400).json({
@@ -49,7 +45,6 @@ export const inviteUser = async (req, res) => {
       });
     }
 
-    // Prevent duplicate invitation
     const existingInvitation = await TaskInvitation.findOne({
       companyId,
       taskId: id,
@@ -64,7 +59,6 @@ export const inviteUser = async (req, res) => {
       });
     }
 
-    // Create invitation
     const invitation = await TaskInvitation.create({
       companyId,
       taskId: id,
@@ -74,7 +68,6 @@ export const inviteUser = async (req, res) => {
       status: 'PENDING'
     });
 
-    // Update task status to INVITED if it's DRAFT
     if (task.status === 'DRAFT') {
       await Task.findByIdAndUpdate(
         id,
@@ -83,7 +76,6 @@ export const inviteUser = async (req, res) => {
       );
     }
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -93,26 +85,17 @@ export const inviteUser = async (req, res) => {
       reason: `Invited ${user.name || user.email}`
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-INVITED-${id}-${userId}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_INVITED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { status: task.status },
       after: { status: 'INVITED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { invitedUserId: userId }
     });
 
-    // Send notification
     await TaskNotificationService.notifyTaskInvited({
       companyId,
       taskId: id,
@@ -141,7 +124,6 @@ export const acceptInvitation = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id, invitationId } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -150,7 +132,6 @@ export const acceptInvitation = async (req, res) => {
       });
     }
 
-    // Check invitation exists, belongs to company, and belongs to current user
     const invitation = await TaskInvitation.findOne({
       _id: invitationId,
       companyId,
@@ -166,12 +147,10 @@ export const acceptInvitation = async (req, res) => {
       });
     }
 
-    // Update invitation status
     invitation.status = 'ACCEPTED';
     invitation.respondedAt = new Date();
     await invitation.save();
 
-    // Create assignment with ACCEPTED status
     const assignment = await TaskAssignment.create({
       companyId,
       taskId: id,
@@ -180,14 +159,12 @@ export const acceptInvitation = async (req, res) => {
       status: 'ACCEPTED'
     });
 
-    // Update task status to ACCEPTED if needed
     await Task.findByIdAndUpdate(
       id,
       { status: 'ACCEPTED' },
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -197,26 +174,17 @@ export const acceptInvitation = async (req, res) => {
       reason: 'Invitation accepted'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-INVITATION-ACCEPTED-${id}-${req.user._id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_INVITATION_ACCEPTED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { status: task.status },
       after: { status: 'ACCEPTED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { acceptedBy: req.user._id }
     });
 
-    // Send notification to owner/manager
     await TaskNotificationService.notifyInvitationAccepted({
       companyId,
       taskId: id,
@@ -245,7 +213,6 @@ export const rejectInvitation = async (req, res) => {
     const { id, invitationId } = req.params;
     const { reason } = req.body;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -254,7 +221,6 @@ export const rejectInvitation = async (req, res) => {
       });
     }
 
-    // Check invitation exists and belongs to current user
     const invitation = await TaskInvitation.findOne({
       _id: invitationId,
       companyId,
@@ -270,7 +236,6 @@ export const rejectInvitation = async (req, res) => {
       });
     }
 
-    // Check if reason is provided
     if (!reason || reason.trim().length === 0) {
       return res.status(400).json({
         success: false,
@@ -278,13 +243,11 @@ export const rejectInvitation = async (req, res) => {
       });
     }
 
-    // Update invitation status
     invitation.status = 'REJECTED';
     invitation.respondedAt = new Date();
     invitation.rejectionReason = reason;
     await invitation.save();
 
-    // Create assignment with REJECTED status
     const assignment = await TaskAssignment.create({
       companyId,
       taskId: id,
@@ -294,14 +257,12 @@ export const rejectInvitation = async (req, res) => {
       rejectionReason: reason
     });
 
-    // Update task status back to INVITED
     await Task.findByIdAndUpdate(
       id,
       { status: 'INVITED' },
       { new: true }
     );
 
-    // Create status history
     await TaskStatusHistory.create({
       companyId,
       taskId: id,
@@ -311,26 +272,17 @@ export const rejectInvitation = async (req, res) => {
       reason: 'Invitation rejected'
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-INVITATION-REJECTED-${id}-${req.user._id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_INVITATION_REJECTED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
       before: { status: task.status },
       after: { status: 'INVITED' },
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { rejectedBy: req.user._id, reason }
     });
 
-    // Send notification to owner/manager
     await TaskNotificationService.notifyInvitationRejected({
       companyId,
       taskId: id,
@@ -351,16 +303,5 @@ export const rejectInvitation = async (req, res) => {
       success: false,
       error: { code: 'TASK_REJECT_ERROR', message: 'Failed to reject invitation' }
     });
-  }
-};
-
-const getNextAuditSeq = async (entityId) => {
-  try {
-    const lastSeq = await AuditLog.findOne({ chainScope: `task-${entityId}` })
-      .sort({ seq: -1 })
-      .select('seq');
-    return (lastSeq && lastSeq.seq) || 0;
-  } catch (error) {
-    return 0;
   }
 };

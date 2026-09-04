@@ -1,7 +1,7 @@
 import Task from '../../models/tasks/taskModel.js';
 import TaskComment from '../../models/tasks/taskCommentModel.js';
 import User from '../../models/userModel.js';
-import AuditLog from '../../models/AuditLog.js';
+import { createTaskAuditLog } from '../../utils/taskAuditHelper.js';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
 
 export const createComment = async (req, res) => {
@@ -10,7 +10,6 @@ export const createComment = async (req, res) => {
     const { id } = req.params;
     const { message, parentCommentId, mentions } = req.body;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -19,7 +18,6 @@ export const createComment = async (req, res) => {
       });
     }
 
-    // Validate message
     if (!message || message.trim().length === 0) {
       return res.status(400).json({
         success: false,
@@ -27,7 +25,6 @@ export const createComment = async (req, res) => {
       });
     }
 
-    // Check if parent comment exists in same company (if provided)
     if (parentCommentId) {
       const parentComment = await TaskComment.findOne({ _id: parentCommentId, companyId, taskId: id });
       if (!parentComment) {
@@ -38,7 +35,6 @@ export const createComment = async (req, res) => {
       }
     }
 
-    // Create comment
     const comment = await TaskComment.create({
       companyId,
       taskId: id,
@@ -48,20 +44,12 @@ export const createComment = async (req, res) => {
       mentions: mentions || []
     });
 
-    // Create audit log
-    await AuditLog.create({
-      eventId: `TASK-COMMENT-${id}-${Date.now()}`,
-      actorType: 'USER',
-      userId: req.user._id,
+    await createTaskAuditLog({
       action: 'TASK_COMMENTED',
       entityType: 'TASK',
       entityId: id,
+      actorId: req.user._id,
       companyId,
-      category: 'BUSINESS',
-      severity: 'INFO',
-      success: true,
-      chainScope: `task-${id}`,
-      seq: await getNextAuditSeq(id),
       metadata: { commentId: comment._id }
     });
 
@@ -84,7 +72,6 @@ export const getComments = async (req, res) => {
     const { id } = req.params;
     const { page = 1, limit = 50 } = req.query;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -93,11 +80,10 @@ export const getComments = async (req, res) => {
       });
     }
 
-    // Get comments with pagination (company-scoped)
-    const comments = await TaskComment.find({ 
+    const comments = await TaskComment.find({
       companyId,
-      taskId: id, 
-      deletedAt: { $exists: false } 
+      taskId: id,
+      deletedAt: { $exists: false }
     })
       .populate('userId', 'name email')
       .populate('parentCommentId', 'message')
@@ -105,11 +91,10 @@ export const getComments = async (req, res) => {
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
 
-    // Get total count
-    const total = await TaskComment.countDocuments({ 
+    const total = await TaskComment.countDocuments({
       companyId,
-      taskId: id, 
-      deletedAt: { $exists: false } 
+      taskId: id,
+      deletedAt: { $exists: false }
     });
 
     res.json({
@@ -135,7 +120,6 @@ export const updateComment = async (req, res) => {
     const { id, commentId } = req.params;
     const { message } = req.body;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -144,7 +128,6 @@ export const updateComment = async (req, res) => {
       });
     }
 
-    // Find comment in same company
     const comment = await TaskComment.findOne({ _id: commentId, companyId, taskId: id });
     if (!comment) {
       return res.status(404).json({
@@ -153,7 +136,6 @@ export const updateComment = async (req, res) => {
       });
     }
 
-    // Check if user is the comment author
     if (comment.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
@@ -161,7 +143,6 @@ export const updateComment = async (req, res) => {
       });
     }
 
-    // Update comment
     const updatedComment = await TaskComment.findByIdAndUpdate(
       commentId,
       { message: message.trim() },
@@ -186,7 +167,6 @@ export const deleteComment = async (req, res) => {
     const companyId = resolveCompanyId(req);
     const { id, commentId } = req.params;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -195,7 +175,6 @@ export const deleteComment = async (req, res) => {
       });
     }
 
-    // Find comment in same company
     const comment = await TaskComment.findOne({ _id: commentId, companyId, taskId: id });
     if (!comment) {
       return res.status(404).json({
@@ -204,7 +183,6 @@ export const deleteComment = async (req, res) => {
       });
     }
 
-    // Soft delete comment
     await TaskComment.findByIdAndUpdate(commentId, { deletedAt: new Date() });
 
     res.json({
@@ -226,7 +204,6 @@ export const addMention = async (req, res) => {
     const { id, commentId } = req.params;
     const { userId } = req.body;
 
-    // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId });
     if (!task) {
       return res.status(404).json({
@@ -235,7 +212,6 @@ export const addMention = async (req, res) => {
       });
     }
 
-    // Find comment in same company
     const comment = await TaskComment.findOne({ _id: commentId, companyId, taskId: id });
     if (!comment) {
       return res.status(404).json({
@@ -244,7 +220,6 @@ export const addMention = async (req, res) => {
       });
     }
 
-    // Check if user exists
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -253,7 +228,6 @@ export const addMention = async (req, res) => {
       });
     }
 
-    // Add mention if not already present
     if (!comment.mentions.some(m => m.userId.toString() === userId)) {
       comment.mentions.push({ userId });
       await comment.save();
@@ -269,16 +243,5 @@ export const addMention = async (req, res) => {
       success: false,
       error: { code: 'TASK_MENTION_ERROR', message: 'Failed to add mention' }
     });
-  }
-};
-
-const getNextAuditSeq = async (entityId) => {
-  try {
-    const lastSeq = await AuditLog.findOne({ chainScope: `task-${entityId}` })
-      .sort({ seq: -1 })
-      .select('seq');
-    return (lastSeq && lastSeq.seq) || 0;
-  } catch (error) {
-    return 0;
   }
 };
