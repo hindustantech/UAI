@@ -31,6 +31,7 @@ export const resolveCompanyId = (req) => {
   // employee fallback: use _id (legacy or special case)
   if (user.type === 'user' || user.type === 'employee') {
     return user.companyId || user._id;
+    logger.warn(`User ${user._id} of type ${user.type} has no companyId; using _id as fallback`);
   }
 
   // Default: try to get from user

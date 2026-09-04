@@ -11,6 +11,7 @@ import AuditLog from '../../models/AuditLog.js';
 import moment from 'moment';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
 import { TaskNotificationService } from './taskNotification.service.js';
+import logger from '../../utils/logger.js';
 
 export const getTasks = async (req, res) => {
   try {
@@ -145,6 +146,7 @@ export const getTask = async (req, res) => {
 export const createTask = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
+  logger.info(`Creating task for companyId: ${companyId}, userId: ${req.user._id}`);
     const { title, description,  priority, startDate, dueDate, estimatedDurationSeconds, assignedUsers } = req.body;
 
     // Validate required fields
