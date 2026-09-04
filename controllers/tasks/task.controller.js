@@ -102,7 +102,6 @@ export const getTask = async (req, res) => {
     const task = await Task.findOne({ _id: req.params.id, companyId })
       .populate('createdBy', 'name email')
       .populate('ownerId', 'name email')
-      .populate('departmentId', 'name')
       .populate('assignedUsers', 'name email');
 
     if (!task) {
@@ -229,7 +228,7 @@ export const createTask = async (req, res) => {
       after: { status: task.status, title: task.title },
       metadata: { taskNumber: task.taskNumber }
     });
-
+  
     res.status(201).json({
       success: true,
       data: task
