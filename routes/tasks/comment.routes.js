@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from '../../middlewares/authMiddleware.js';
-import { checkPermission } from '../../middlewares/checkPermission.js';
+// import { checkPermission } from '../../middlewares/checkPermission.js';
 import {
   createComment,
   getComments,
@@ -17,7 +17,7 @@ const router = express.Router();
 router.post(
   '/:id/comments',
   authMiddleware,
-  checkPermission('task.comment'),
+  // checkPermission('task.comment'),
   createComment
 );
 
@@ -27,7 +27,7 @@ router.post(
 router.get(
   '/:id/comments',
   authMiddleware,
-  checkPermission('task.comment'),
+  // checkPermission('task.comment'),
   getComments
 );
 
@@ -47,7 +47,7 @@ router.patch(
 router.delete(
   '/:id/comments/:commentId',
   authMiddleware,
-  checkPermission('task.comment'),
+  // checkPermission('task.comment'),
   deleteComment
 );
 
@@ -57,7 +57,7 @@ router.delete(
 router.post(
   '/:id/comments/:commentId/mentions',
   authMiddleware,
-  checkPermission('task.comment'),
+  // checkPermission('task.comment'),
   addMention
 );
 

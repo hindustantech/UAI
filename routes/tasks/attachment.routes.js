@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from '../../middlewares/authMiddleware.js';
-import { checkPermission } from '../../middlewares/checkPermission.js';
+// import { checkPermission } from '../../middlewares/checkPermission.js';
 import {
   uploadAttachment,
   getAttachments,
@@ -25,7 +25,7 @@ router.post(
 router.get(
   '/:id/attachments',
   authMiddleware,
-  checkPermission('task.attachment'),
+  // checkPermission('task.attachment'),
   getAttachments
 );
 
@@ -35,7 +35,7 @@ router.get(
 router.delete(
   '/:id/attachments/:attachmentId',
   authMiddleware,
-  checkPermission('task.attachment'),
+  // checkPermission('task.attachment'),
   deleteAttachment
 );
 

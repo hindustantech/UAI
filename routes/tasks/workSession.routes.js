@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from '../../middlewares/authMiddleware.js';
-import { checkPermission } from '../../middlewares/checkPermission.js';
+// import { checkPermission } from '../../middlewares/checkPermission.js';
 import {
   startTask,
   stopTask,
@@ -19,7 +19,7 @@ const router = express.Router();
 router.post(
   '/:id/start',
   authMiddleware,
-  checkPermission('task.start'),
+  // checkPermission('task.start'),
   startTask
 );
 
@@ -29,7 +29,7 @@ router.post(
 router.post(
   '/:id/stop',
   authMiddleware,
-  checkPermission('task.stop'),
+  // checkPermission('task.stop'),
   stopTask
 );
 
@@ -39,7 +39,7 @@ router.post(
 router.post(
   '/:id/resume',
   authMiddleware,
-  checkPermission('task.resume'),
+  // checkPermission('task.resume'),
   resumeTask
 );
 
@@ -49,7 +49,7 @@ router.post(
 router.post(
   '/:id/submit',
   authMiddleware,
-  checkPermission('task.submit'),
+  // checkPermission('task.submit'),
   submitTask
 );
 
@@ -59,7 +59,7 @@ router.post(
 router.get(
   '/:id/work-sessions',
   authMiddleware,
-  checkPermission('task.time.view'),
+  // checkPermission('task.time.view'),
   getWorkSessions
 );
 
@@ -69,7 +69,7 @@ router.get(
 router.get(
   '/users/:id/work-time',
   authMiddleware,
-  checkPermission('task.time.view'),
+  // checkPermission('task.time.view'),
   getUserWorkTime
 );
 
@@ -79,7 +79,7 @@ router.get(
 router.patch(
   '/work-sessions/:id',
   authMiddleware,
-  checkPermission('task.time.edit'),
+  // checkPermission('task.time.edit'),
   correctWorkSession
 );
 

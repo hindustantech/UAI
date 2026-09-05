@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from '../../middlewares/authMiddleware.js';
-import { checkPermission } from '../../middlewares/checkPermission.js';
+// import {  } from '../../middlewares/.js';
 import {
   assignTask,
   reassignTask,
@@ -15,7 +15,7 @@ const router = express.Router();
 router.post(
   '/:id/assign',
   authMiddleware,
-  checkPermission('task.assign'),
+  // ('task.assign'),
   assignTask
 );
 
@@ -25,7 +25,7 @@ router.post(
 router.post(
   '/:id/reassign',
   authMiddleware,
-  checkPermission('task.reassign'),
+  // ('task.reassign'),
   reassignTask
 );
 
@@ -35,7 +35,7 @@ router.post(
 router.delete(
   '/:id/assignees/:userId',
   authMiddleware,
-  checkPermission('task.reassign'),
+  // ('task.reassign'),
   removeAssignee
 );
 

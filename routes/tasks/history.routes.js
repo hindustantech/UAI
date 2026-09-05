@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from '../../middlewares/authMiddleware.js';
-import { checkPermission } from '../../middlewares/checkPermission.js';
+// import { checkPermission } from '../../middlewares/checkPermission.js';
 import {
   getTaskActivity,
   getTaskHistory,
@@ -14,7 +14,7 @@ const router = express.Router();
 router.get(
   '/:id/activity',
   authMiddleware,
-  checkPermission('task.history.view'),
+  // checkPermission('task.history.view'),
   getTaskActivity
 );
 
@@ -24,7 +24,7 @@ router.get(
 router.get(
   '/:id/history',
   authMiddleware,
-  checkPermission('task.history.view'),
+  // checkPermission('task.history.view'),
   getTaskHistory
 );
 

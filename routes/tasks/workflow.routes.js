@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from '../../middlewares/authMiddleware.js';
-import { checkPermission } from '../../middlewares/checkPermission.js';
+// import { checkPermission } from '../../middlewares/checkPermission.js';
 import {
   verifyTask,
   rejectTask,
@@ -19,7 +19,7 @@ const router = express.Router();
 router.post(
   '/:id/verify',
   authMiddleware,
-  checkPermission('task.verify'),
+  // checkPermission('task.verify'),
   verifyTask
 );
 
@@ -29,7 +29,7 @@ router.post(
 router.post(
   '/:id/reject',
   authMiddleware,
-  checkPermission('task.reject'),
+  // checkPermission('task.reject'),
   rejectTask
 );
 
@@ -39,7 +39,7 @@ router.post(
 router.post(
   '/:id/reopen',
   authMiddleware,
-  checkPermission('task.reopen'),
+  // checkPermission('task.reopen'),
   reopenTask
 );
 
@@ -49,7 +49,7 @@ router.post(
 router.post(
   '/:id/close',
   authMiddleware,
-  checkPermission('task.close'),
+  // checkPermission('task.close'),
   closeTask
 );
 
@@ -59,7 +59,7 @@ router.post(
 router.post(
   '/:id/activate',
   authMiddleware,
-  checkPermission('task.activate'),
+  // checkPermission('task.activate'),
   activateTask
 );
 
@@ -69,7 +69,7 @@ router.post(
 router.post(
   '/:id/deactivate',
   authMiddleware,
-  checkPermission('task.deactivate'),
+  // checkPermission('task.deactivate'),
   deactivateTask
 );
 
@@ -79,7 +79,7 @@ router.post(
 router.post(
   '/:id/cancel',
   authMiddleware,
-  checkPermission('task.cancel'),
+  // checkPermission('task.cancel'),
   cancelTask
 );
 
