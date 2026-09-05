@@ -863,7 +863,7 @@ export const createEmployee = async (req, res) => {
             await session.abortTransaction();
         }
 
-        logApiError("CREATE", "Employee", error, req, { employeeType, empCode });
+        // logApiError("CREATE", "Employee", error, req, { employeeType, empCode });
 
         // Determine status code and error type
         let statusCode = 400;
