@@ -15,7 +15,7 @@ const router = express.Router();
 router.post(
   '/:id/attachments',
   authMiddleware,
-  checkPermission('task.attachment'),
+  // checkPermission('task.attachment'),
   uploadAttachment
 );
 

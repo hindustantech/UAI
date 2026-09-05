@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from '../../middlewares/authMiddleware.js';
-import { checkPermission } from '../../middlewares/checkPermission.js';
+// import { checkPermission } from '../../middlewares/checkPermission.js';
 import {
   inviteUser,
   acceptInvitation,
@@ -15,7 +15,7 @@ const router = express.Router();
 router.post(
   '/:id/invite',
   authMiddleware,
-  checkPermission('task.invite'),
+  // checkPermission('task.invite'),
   inviteUser
 );
 
