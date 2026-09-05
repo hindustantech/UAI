@@ -15,7 +15,7 @@ const router = express.Router();
 // @route   GET /api/v1/tasks
 // @desc    Get all tasks with filtering
 // @access  Private (with appropriate permissions)
-router.get('/', authMiddleware, checkPermission('task.view'), getTasks);
+router.get('/', authMiddleware, getTasks);
 
 // @route   POST /api/v1/tasks
 // @desc    Create a new task
@@ -23,7 +23,7 @@ router.get('/', authMiddleware, checkPermission('task.view'), getTasks);
 router.post(
   '/',
   authMiddleware,
-  checkPermission('task.create'),
+
   validateTask,
   createTask
 );
@@ -31,7 +31,7 @@ router.post(
 // @route   GET /api/v1/tasks/:id
 // @desc    Get single task detail
 // @access  Private (with appropriate permissions)
-router.get('/:id', authMiddleware, checkPermission('task.view'), getTask);
+router.get('/:id', authMiddleware, getTask);
 
 // @route   PATCH /api/v1/tasks/:id
 // @desc    Update task
@@ -39,7 +39,7 @@ router.get('/:id', authMiddleware, checkPermission('task.view'), getTask);
 router.patch(
   '/:id',
   authMiddleware,
-  checkPermission('task.update'),
+
   validateTask,
   updateTask
 );
@@ -47,6 +47,6 @@ router.patch(
 // @route   DELETE /api/v1/tasks/:id
 // @desc    Soft delete task
 // @access  Private (task.delete permission)
-router.delete('/:id', authMiddleware, checkPermission('task.delete'), softDeleteTask);
+router.delete('/:id', authMiddleware, softDeleteTask);
 
 export default router;
