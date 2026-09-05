@@ -37,7 +37,7 @@ router.get(
 router.patch(
   '/:id/comments/:commentId',
   authMiddleware,
-  checkPermission('task.comment'),
+  // checkPermission('task.comment'),
   updateComment
 );
 
