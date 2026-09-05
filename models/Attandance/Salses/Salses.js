@@ -165,6 +165,19 @@ const salesSessionSchema = new Schema({
             type: String,
             default: ""
         },
+        gender:{
+            type: String,
+            enum: ["Male", "Female", "Other"],
+            default: "Other"
+        },
+        dob: {
+            type: Date,
+            default: null
+        },
+        email: {
+            type: String,
+            default: ""
+        },
         contactName: {
             type: String,
             default: ""

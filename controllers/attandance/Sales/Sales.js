@@ -663,6 +663,9 @@ export const completeSalesForm = async (req, res) => {
       companyName,
       contactName,
       phoneNumber,
+      gender,
+      dob,
+      email,
       address,
       type,
       isActive
@@ -692,6 +695,27 @@ export const completeSalesForm = async (req, res) => {
     if (isActive !== undefined && typeof isActive !== "boolean") {
       errors.isActive = "isActive must be a boolean value";
     }
+
+    // Gender validation (optional - validate if provided)
+    if (gender !== undefined && gender !== null && gender.trim() !== "") {
+      const allowedGenders = ["Male", "Female", "Other"];
+      if (!allowedGenders.includes(gender)) {
+        errors.gender = `Invalid gender. Must be one of: ${allowedGenders.join(", ")}`;
+      }
+    }
+
+    // DOB validation (optional - validate if provided and must not be future date)
+    if (dob !== undefined && dob !== null && dob.trim() !== "") {
+      const dobDate = new Date(dob);
+      if (isNaN(dobDate.getTime())) {
+        errors.dob = "Invalid date format";
+      } else if (dobDate > new Date()) {
+        errors.dob = "DOB cannot be a future date";
+      }
+    }
+
+    // Email validation (optional - no format validation per request)
+    // email field accepted as-is, no validation applied
 
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({
@@ -756,6 +780,9 @@ export const completeSalesForm = async (req, res) => {
             companyName,
             contactName,
             phoneNumber,
+            gender: gender || "Other",
+            dob: dob ? new Date(dob) : null,
+            email: email || "",
             address,
             landmark: parsedCustomer?.landmark || "",
             type: type || "customer",
