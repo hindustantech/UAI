@@ -322,6 +322,14 @@ export const getTaskAssignments = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
     const { id } = req.params;
+    const {
+      page = 1,
+      limit = 50,
+      status,
+      search,
+      assignedFrom,
+      assignedTo
+    } = req.query;
 
     // Check task exists and belongs to company
     const task = await Task.findOne({ _id: id, companyId })
@@ -334,16 +342,46 @@ export const getTaskAssignments = async (req, res) => {
       });
     }
 
-    // Get all assignments for this task
-    const assignments = await TaskAssignment.find({
-      companyId,
-      taskId: id
-    })
-      .populate('userId', 'name email employeeId')
-      .populate('assignedBy', 'name email');
+    // Build filter
+    const filter = { companyId, taskId: id };
+    if (status) filter.status = status;
+    if (assignedFrom || assignedTo) {
+      filter.assignedAt = {};
+      if (assignedFrom) filter.assignedAt.$gte = new Date(assignedFrom);
+      if (assignedTo) filter.assignedAt.$lte = new Date(assignedTo);
+    }
+
+    // Pagination
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
+    const skip = (pageNum - 1) * limitNum;
+
+    // Search filter on populated userId (name/email)
+    const userMatch = search
+      ? { name: { $regex: search, $options: 'i' } }
+      : undefined;
+
+    const [assignments, total] = await Promise.all([
+      TaskAssignment.find(filter)
+        .populate({ path: 'userId', match: userMatch, select: 'name email employeeId' })
+        .populate('assignedBy', 'name email')
+        .sort({ assignedAt: -1 })
+        .skip(skip)
+        .limit(limitNum),
+      TaskAssignment.countDocuments(filter)
+    ]);
+
+    // Filter out null userId when search is active (populate match returns null for non-matches)
+    const filteredAssignments = search
+      ? assignments.filter(a => a.userId !== null)
+      : assignments;
 
     res.json({
       success: true,
+      count: filteredAssignments.length,
+      total,
+      page: pageNum,
+      pages: Math.ceil(total / limitNum),
       data: {
         task: {
           _id: task._id,
@@ -359,7 +397,7 @@ export const getTaskAssignments = async (req, res) => {
           startDate: task.startDate,
           createdAt: task.createdAt
         },
-        assignments
+        assignments: filteredAssignments
       }
     });
   } catch (error) {
