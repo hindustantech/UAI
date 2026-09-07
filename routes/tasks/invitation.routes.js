@@ -5,6 +5,7 @@ import {
   inviteUser,
   acceptInvitation,
   rejectInvitation,
+  getInvitations,
 } from '../../controllers/tasks/invitation.controller.js';
 
 const router = express.Router();

@@ -150,6 +150,10 @@ app.use('/api/face', faceRoutes); // Mount the face routes at /api/face
 app.use('/api/face-attendance', faceAttendanceRoutes); // Mount the face attendance routes at /api/face-attendance
 app.use('/api/v1/sales-any', SalesAnyRoutes); // Mount the sales any routes at /api/v1/sales-any
 app.use('/api/v1/tasks', taskRoutes); // Mount task management routes
+
+// Mount invitations listing API at /api/v1/invitations
+import invitationListRoutes from './routes/invitation.list.routes.js';
+app.use('/api/v1/invitations', invitationListRoutes);
 app.use('/api/admin/notifications', adminNotificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin-dashboard', adminDashboardRoutes);
