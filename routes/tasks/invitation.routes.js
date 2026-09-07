@@ -38,4 +38,6 @@ router.post(
   rejectInvitation
 );
 
+router.get('/:id/invitations', authMiddleware, getInvitations);
+
 export default router;
