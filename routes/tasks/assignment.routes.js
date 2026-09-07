@@ -5,9 +5,19 @@ import {
   assignTask,
   reassignTask,
   removeAssignee,
+  getTaskAssignments,
 } from '../../controllers/tasks/assignment.controller.js';
 
 const router = express.Router();
+
+// @route   GET /api/v1/tasks/:id/assignments
+// @desc    Get all assignments for a task
+// @access  Private
+router.get(
+  '/:id/assignments',
+  authMiddleware,
+  getTaskAssignments
+);
 
 // @route   POST /api/v1/tasks/:id/assign
 // @desc    Assign task to user
