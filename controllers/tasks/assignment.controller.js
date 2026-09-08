@@ -409,6 +409,61 @@ export const getTaskAssignments = async (req, res) => {
   }
 };
 
+export const getMyAssignments = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      search
+    } = req.query;
+
+    const filter = { companyId, userId: req.user._id };
+    if (status) filter.status = status;
+
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    let taskFilter = { companyId };
+    if (search) {
+      taskFilter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { taskNumber: { $regex: search, $options: 'i' } }
+      ];
+    }
+    const matchingTasks = await Task.find(taskFilter).select('_id').lean();
+    const taskIds = matchingTasks.map(t => t._id);
+    filter.taskId = { $in: taskIds };
+
+    const [assignments, total] = await Promise.all([
+      TaskAssignment.find(filter)
+        .populate('taskId', 'title taskNumber status priority dueDate startDate')
+        .populate('assignedBy', 'name email')
+        .sort({ assignedAt: -1 })
+        .skip(skip)
+        .limit(limitNum),
+      TaskAssignment.countDocuments(filter)
+    ]);
+
+    res.json({
+      success: true,
+      count: assignments.length,
+      total,
+      page: pageNum,
+      pages: Math.ceil(total / limitNum),
+      data: assignments
+    });
+  } catch (error) {
+    console.error('Get my assignments error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'TASK_FETCH_ERROR', message: 'Failed to fetch assignments' }
+    });
+  }
+};
+
 export const removeAssignee = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);

@@ -6,6 +6,7 @@ import {
   reassignTask,
   removeAssignee,
   getTaskAssignments,
+  getMyAssignments
 } from '../../controllers/tasks/assignment.controller.js';
 
 const router = express.Router();
@@ -47,6 +48,12 @@ router.delete(
   authMiddleware,
   // ('task.reassign'),
   removeAssignee
+);
+router.get(
+  '/my-assignments',
+  authMiddleware,
+  // ('task.reassign'),
+  getMyAssignments
 );
 
 export default router;
