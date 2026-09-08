@@ -119,57 +119,23 @@ export const inviteUser = async (req, res) => {
   }
 };
 
-
-
-
-export const getMyInvitations = async (req, res) => {
+export const acceptInvitation = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
-    const { status = 'PENDING', page = 1, limit = 20 } = req.query;
+    const { id, invitationId } = req.params;
 
-    const filter = { companyId, invitedUserId: req.user._id };
-    if (status) filter.status = status;
-
-    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
-    const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 20));
-    const skip = (pageNum - 1) * limitNum;
-
-    const [invitations, total] = await Promise.all([
-      TaskInvitation.find(filter)
-        .populate('taskId', 'title taskNumber status priority dueDate')
-        .populate('invitedBy', 'name email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
-      TaskInvitation.countDocuments(filter)
-    ]);
-
-    res.json({
-      success: true,
-      count: invitations.length,
-      total,
-      page: pageNum,
-      pages: Math.ceil(total / limitNum),
-      data: invitations
-    });
-  } catch (error) {
-    console.error('Get my invitations error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'TASK_INVITE_FETCH_ERROR', message: 'Failed to fetch invitations' }
-    });
-  }
-};
-
-export const acceptInvitationById = async (req, res) => {
-  try {
-    const companyId = resolveCompanyId(req);
-    const { invitationId } = req.params;
+    const task = await Task.findOne({ _id: id, companyId });
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
+      });
+    }
 
     const invitation = await TaskInvitation.findOne({
       _id: invitationId,
       companyId,
+      taskId: id,
       invitedUserId: req.user._id,
       status: 'PENDING'
     });
@@ -181,35 +147,27 @@ export const acceptInvitationById = async (req, res) => {
       });
     }
 
-    const task = await Task.findOne({ _id: invitation.taskId, companyId });
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
-      });
-    }
-
     invitation.status = 'ACCEPTED';
     invitation.respondedAt = new Date();
     await invitation.save();
 
     const assignment = await TaskAssignment.create({
       companyId,
-      taskId: invitation.taskId,
+      taskId: id,
       userId: req.user._id,
       assignedBy: invitation.invitedBy,
       status: 'ACCEPTED'
     });
 
     await Task.findByIdAndUpdate(
-      invitation.taskId,
+      id,
       { status: 'ACCEPTED' },
       { new: true }
     );
 
     await TaskStatusHistory.create({
       companyId,
-      taskId: invitation.taskId,
+      taskId: id,
       fromStatus: task.status,
       toStatus: 'ACCEPTED',
       changedBy: req.user._id,
@@ -219,7 +177,7 @@ export const acceptInvitationById = async (req, res) => {
     await createTaskAuditLog({
       action: 'TASK_INVITATION_ACCEPTED',
       entityType: 'TASK',
-      entityId: invitation.taskId,
+      entityId: id,
       actorId: req.user._id,
       companyId,
       before: { status: task.status },
@@ -229,7 +187,7 @@ export const acceptInvitationById = async (req, res) => {
 
     await TaskNotificationService.notifyInvitationAccepted({
       companyId,
-      taskId: invitation.taskId,
+      taskId: id,
       taskNumber: task.taskNumber,
       taskTitle: task.title,
       acceptedByName: req.user.name || req.user.email,
@@ -249,15 +207,24 @@ export const acceptInvitationById = async (req, res) => {
   }
 };
 
-export const rejectInvitationById = async (req, res) => {
+export const rejectInvitation = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
-    const { invitationId } = req.params;
+    const { id, invitationId } = req.params;
     const { reason } = req.body;
+
+    const task = await Task.findOne({ _id: id, companyId });
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
+      });
+    }
 
     const invitation = await TaskInvitation.findOne({
       _id: invitationId,
       companyId,
+      taskId: id,
       invitedUserId: req.user._id,
       status: 'PENDING'
     });
@@ -276,14 +243,6 @@ export const rejectInvitationById = async (req, res) => {
       });
     }
 
-    const task = await Task.findOne({ _id: invitation.taskId, companyId });
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
-      });
-    }
-
     invitation.status = 'REJECTED';
     invitation.respondedAt = new Date();
     invitation.rejectionReason = reason;
@@ -291,7 +250,7 @@ export const rejectInvitationById = async (req, res) => {
 
     const assignment = await TaskAssignment.create({
       companyId,
-      taskId: invitation.taskId,
+      taskId: id,
       userId: req.user._id,
       assignedBy: invitation.invitedBy,
       status: 'REJECTED',
@@ -299,14 +258,14 @@ export const rejectInvitationById = async (req, res) => {
     });
 
     await Task.findByIdAndUpdate(
-      invitation.taskId,
+      id,
       { status: 'INVITED' },
       { new: true }
     );
 
     await TaskStatusHistory.create({
       companyId,
-      taskId: invitation.taskId,
+      taskId: id,
       fromStatus: task.status,
       toStatus: 'INVITED',
       changedBy: req.user._id,
@@ -316,7 +275,7 @@ export const rejectInvitationById = async (req, res) => {
     await createTaskAuditLog({
       action: 'TASK_INVITATION_REJECTED',
       entityType: 'TASK',
-      entityId: invitation.taskId,
+      entityId: id,
       actorId: req.user._id,
       companyId,
       before: { status: task.status },
@@ -326,7 +285,7 @@ export const rejectInvitationById = async (req, res) => {
 
     await TaskNotificationService.notifyInvitationRejected({
       companyId,
-      taskId: invitation.taskId,
+      taskId: id,
       taskNumber: task.taskNumber,
       taskTitle: task.title,
       rejectedByName: req.user.name || req.user.email,
