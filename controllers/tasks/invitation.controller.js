@@ -309,7 +309,10 @@ export const rejectInvitation = async (req, res) => {
 export const getInvitations = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
-    const { taskId, status, search, sortBy = 'createdAt', sortOrder = 'desc', page = 1, limit = 10 } = req.query;
+    const { taskId: queryTaskId, status, search, sortBy = 'createdAt', sortOrder = 'desc', page = 1, limit = 10 } = req.query;
+    const routeTaskId = req.params.id;
+
+    const taskId = queryTaskId || routeTaskId;
 
     const filter = { companyId };
 
