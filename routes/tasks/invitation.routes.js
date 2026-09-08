@@ -1,14 +1,40 @@
 import express from 'express';
 import authMiddleware from '../../middlewares/authMiddleware.js';
-// import { checkPermission } from '../../middlewares/checkPermission.js';
 import {
   inviteUser,
-  acceptInvitation,
-  rejectInvitation,
-  getInvitations,
+  getMyInvitations,
+  acceptInvitationById,
+  rejectInvitationById,
 } from '../../controllers/tasks/invitation.controller.js';
 
 const router = express.Router();
+
+// @route   GET /api/v1/tasks/my-invitations
+// @desc    Get pending invitations for logged-in user
+// @access  Private
+router.get(
+  '/my-invitations',
+  authMiddleware,
+  getMyInvitations
+);
+
+// @route   POST /api/v1/tasks/invitations/:invitationId/accept
+// @desc    Accept task invitation by invitation ID
+// @access  Private
+router.post(
+  '/invitations/:invitationId/accept',
+  authMiddleware,
+  acceptInvitationById
+);
+
+// @route   POST /api/v1/tasks/invitations/:invitationId/reject
+// @desc    Reject task invitation by invitation ID
+// @access  Private
+router.post(
+  '/invitations/:invitationId/reject',
+  authMiddleware,
+  rejectInvitationById
+);
 
 // @route   POST /api/v1/tasks/:id/invite
 // @desc    Invite user to task
@@ -16,29 +42,7 @@ const router = express.Router();
 router.post(
   '/:id/invite',
   authMiddleware,
-  // checkPermission('task.invite'),
   inviteUser
 );
-
-// @route   POST /api/v1/tasks/:id/invitations/:invitationId/accept
-// @desc    Accept task invitation
-// @access  Private
-router.post(
-  '/:id/invitations/:invitationId/accept',
-  authMiddleware,
-  acceptInvitation
-);
-
-// @route   POST /api/v1/tasks/:id/invitations/:invitationId/reject
-// @desc    Reject task invitation
-// @access  Private
-router.post(
-  '/:id/invitations/:invitationId/reject',
-  authMiddleware,
-  rejectInvitation
-);
-
-router.get('/invitations', authMiddleware, getInvitations);
-router.get('/:id/invitations', authMiddleware, getInvitations);
 
 export default router;

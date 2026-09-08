@@ -10,10 +10,10 @@ import attachmentRoutes from './attachment.routes.js';
 
 const router = express.Router();
 
-// Mount all task-related routes
-router.use('/', taskRoutes);
+// Mount specific routes BEFORE catch-all task routes to avoid /:id conflicts
 router.use('/', assignmentRoutes);
 router.use('/', invitationRoutes);
+router.use('/', taskRoutes);
 router.use('/', workSessionRoutes);
 router.use('/', workflowRoutes);
 router.use('/', historyRoutes);

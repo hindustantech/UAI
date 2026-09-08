@@ -119,23 +119,57 @@ export const inviteUser = async (req, res) => {
   }
 };
 
-export const acceptInvitation = async (req, res) => {
+
+
+
+export const getMyInvitations = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
-    const { id, invitationId } = req.params;
+    const { status = 'PENDING', page = 1, limit = 20 } = req.query;
 
-    const task = await Task.findOne({ _id: id, companyId });
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
-      });
-    }
+    const filter = { companyId, invitedUserId: req.user._id };
+    if (status) filter.status = status;
+
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [invitations, total] = await Promise.all([
+      TaskInvitation.find(filter)
+        .populate('taskId', 'title taskNumber status priority dueDate')
+        .populate('invitedBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      TaskInvitation.countDocuments(filter)
+    ]);
+
+    res.json({
+      success: true,
+      count: invitations.length,
+      total,
+      page: pageNum,
+      pages: Math.ceil(total / limitNum),
+      data: invitations
+    });
+  } catch (error) {
+    console.error('Get my invitations error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'TASK_INVITE_FETCH_ERROR', message: 'Failed to fetch invitations' }
+    });
+  }
+};
+
+export const acceptInvitationById = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const { invitationId } = req.params;
 
     const invitation = await TaskInvitation.findOne({
       _id: invitationId,
       companyId,
-      taskId: id,
       invitedUserId: req.user._id,
       status: 'PENDING'
     });
@@ -147,27 +181,35 @@ export const acceptInvitation = async (req, res) => {
       });
     }
 
+    const task = await Task.findOne({ _id: invitation.taskId, companyId });
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
+      });
+    }
+
     invitation.status = 'ACCEPTED';
     invitation.respondedAt = new Date();
     await invitation.save();
 
     const assignment = await TaskAssignment.create({
       companyId,
-      taskId: id,
+      taskId: invitation.taskId,
       userId: req.user._id,
       assignedBy: invitation.invitedBy,
       status: 'ACCEPTED'
     });
 
     await Task.findByIdAndUpdate(
-      id,
+      invitation.taskId,
       { status: 'ACCEPTED' },
       { new: true }
     );
 
     await TaskStatusHistory.create({
       companyId,
-      taskId: id,
+      taskId: invitation.taskId,
       fromStatus: task.status,
       toStatus: 'ACCEPTED',
       changedBy: req.user._id,
@@ -177,7 +219,7 @@ export const acceptInvitation = async (req, res) => {
     await createTaskAuditLog({
       action: 'TASK_INVITATION_ACCEPTED',
       entityType: 'TASK',
-      entityId: id,
+      entityId: invitation.taskId,
       actorId: req.user._id,
       companyId,
       before: { status: task.status },
@@ -187,7 +229,7 @@ export const acceptInvitation = async (req, res) => {
 
     await TaskNotificationService.notifyInvitationAccepted({
       companyId,
-      taskId: id,
+      taskId: invitation.taskId,
       taskNumber: task.taskNumber,
       taskTitle: task.title,
       acceptedByName: req.user.name || req.user.email,
@@ -207,24 +249,15 @@ export const acceptInvitation = async (req, res) => {
   }
 };
 
-export const rejectInvitation = async (req, res) => {
+export const rejectInvitationById = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
-    const { id, invitationId } = req.params;
+    const { invitationId } = req.params;
     const { reason } = req.body;
-
-    const task = await Task.findOne({ _id: id, companyId });
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
-      });
-    }
 
     const invitation = await TaskInvitation.findOne({
       _id: invitationId,
       companyId,
-      taskId: id,
       invitedUserId: req.user._id,
       status: 'PENDING'
     });
@@ -243,6 +276,14 @@ export const rejectInvitation = async (req, res) => {
       });
     }
 
+    const task = await Task.findOne({ _id: invitation.taskId, companyId });
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
+      });
+    }
+
     invitation.status = 'REJECTED';
     invitation.respondedAt = new Date();
     invitation.rejectionReason = reason;
@@ -250,7 +291,7 @@ export const rejectInvitation = async (req, res) => {
 
     const assignment = await TaskAssignment.create({
       companyId,
-      taskId: id,
+      taskId: invitation.taskId,
       userId: req.user._id,
       assignedBy: invitation.invitedBy,
       status: 'REJECTED',
@@ -258,14 +299,14 @@ export const rejectInvitation = async (req, res) => {
     });
 
     await Task.findByIdAndUpdate(
-      id,
+      invitation.taskId,
       { status: 'INVITED' },
       { new: true }
     );
 
     await TaskStatusHistory.create({
       companyId,
-      taskId: id,
+      taskId: invitation.taskId,
       fromStatus: task.status,
       toStatus: 'INVITED',
       changedBy: req.user._id,
@@ -275,7 +316,7 @@ export const rejectInvitation = async (req, res) => {
     await createTaskAuditLog({
       action: 'TASK_INVITATION_REJECTED',
       entityType: 'TASK',
-      entityId: id,
+      entityId: invitation.taskId,
       actorId: req.user._id,
       companyId,
       before: { status: task.status },
@@ -285,7 +326,7 @@ export const rejectInvitation = async (req, res) => {
 
     await TaskNotificationService.notifyInvitationRejected({
       companyId,
-      taskId: id,
+      taskId: invitation.taskId,
       taskNumber: task.taskNumber,
       taskTitle: task.title,
       rejectedByName: req.user.name || req.user.email,
@@ -302,76 +343,6 @@ export const rejectInvitation = async (req, res) => {
     res.status(500).json({
       success: false,
       error: { code: 'TASK_REJECT_ERROR', message: 'Failed to reject invitation' }
-    });
-  }
-};
-
-export const getInvitations = async (req, res) => {
-  try {
-    const companyId = resolveCompanyId(req);
-    const { taskId: queryTaskId, status, search, sortBy = 'createdAt', sortOrder = 'desc', page = 1, limit = 10 } = req.query;
-    const routeTaskId = req.params.id;
-
-    const taskId = queryTaskId || routeTaskId;
-
-    const filter = { companyId };
-
-    if (taskId) {
-      filter.taskId = taskId;
-    }
-
-    if (status) {
-      filter.status = status;
-    }
-
-    if (search) {
-      const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      const matchingUsers = await User.find({
-        companyId,
-        $or: [
-          { name: searchRegex },
-          { email: searchRegex }
-        ]
-      }).select('_id').lean();
-
-      const userIds = matchingUsers.map(u => u._id);
-      filter.$or = [
-        { invitedUserId: { $in: userIds } },
-        { invitedBy: { $in: userIds } }
-      ];
-    }
-
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
-
-    const sort = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
-
-    const [invitations, total] = await Promise.all([
-      TaskInvitation.find(filter)
-        .sort(sort)
-        .skip(skip)
-        .limit(limitNum)
-        .populate('taskId', 'title taskNumber')
-        .populate('invitedUserId', 'name email')
-        .populate('invitedBy', 'name email')
-        .lean(),
-      TaskInvitation.countDocuments(filter)
-    ]);
-
-    res.json({
-      success: true,
-      count: invitations.length,
-      total,
-      page: pageNum,
-      pages: Math.ceil(total / limitNum),
-      data: invitations
-    });
-  } catch (error) {
-    console.error('Get invitations error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'TASK_INVITE_FETCH_ERROR', message: 'Failed to fetch invitations' }
     });
   }
 };

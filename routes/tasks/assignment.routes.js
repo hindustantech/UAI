@@ -11,6 +11,15 @@ import {
 
 const router = express.Router();
 
+// @route   GET /api/v1/tasks/my-assignments
+// @desc    Get all assignments for the logged-in user
+// @access  Private
+router.get(
+  '/my-assignments',
+  authMiddleware,
+  getMyAssignments
+);
+
 // @route   GET /api/v1/tasks/:id/assignments
 // @desc    Get all assignments for a task
 // @access  Private
@@ -49,11 +58,4 @@ router.delete(
   // ('task.reassign'),
   removeAssignee
 );
-router.get(
-  '/my-assignments',
-  authMiddleware,
-  // ('task.reassign'),
-  getMyAssignments
-);
-
 export default router;
