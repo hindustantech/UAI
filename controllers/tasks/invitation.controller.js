@@ -346,3 +346,73 @@ export const rejectInvitationById = async (req, res) => {
     });
   }
 };
+
+export const getInvitations = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const { taskId: queryTaskId, status, search, sortBy = 'createdAt', sortOrder = 'desc', page = 1, limit = 10 } = req.query;
+    const routeTaskId = req.params.id;
+
+    const taskId = queryTaskId || routeTaskId;
+
+    const filter = { companyId };
+
+    if (taskId) {
+      filter.taskId = taskId;
+    }
+
+    if (status) {
+      filter.status = status;
+    }
+
+    if (search) {
+      const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const matchingUsers = await User.find({
+        companyId,
+        $or: [
+          { name: searchRegex },
+          { email: searchRegex }
+        ]
+      }).select('_id').lean();
+
+      const userIds = matchingUsers.map(u => u._id);
+      filter.$or = [
+        { invitedUserId: { $in: userIds } },
+        { invitedBy: { $in: userIds } }
+      ];
+    }
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const sort = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
+
+    const [invitations, total] = await Promise.all([
+      TaskInvitation.find(filter)
+        .sort(sort)
+        .skip(skip)
+        .limit(limitNum)
+        .populate('taskId', 'title taskNumber')
+        .populate('invitedUserId', 'name email')
+        .populate('invitedBy', 'name email')
+        .lean(),
+      TaskInvitation.countDocuments(filter)
+    ]);
+
+    res.json({
+      success: true,
+      count: invitations.length,
+      total,
+      page: pageNum,
+      pages: Math.ceil(total / limitNum),
+      data: invitations
+    });
+  } catch (error) {
+    console.error('Get invitations error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'TASK_INVITE_FETCH_ERROR', message: 'Failed to fetch invitations' }
+    });
+  }
+};
