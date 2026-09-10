@@ -49,6 +49,7 @@ import faceRoutes from './routes/face/index.js'; // Import the face routes
 import faceAttendanceRoutes from './routes/faceAttendance.routes.js'; // Import the face attendance routes
 import SalesAnyRoutes from './routes/Attandance/Sales/sales.any.routes.js';
 import taskRoutes from './routes/tasks/index.js';
+import userListRoutes from './routes/tasks/userList.routes.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
@@ -150,6 +151,7 @@ app.use('/api/face', faceRoutes); // Mount the face routes at /api/face
 app.use('/api/face-attendance', faceAttendanceRoutes); // Mount the face attendance routes at /api/face-attendance
 app.use('/api/v1/sales-any', SalesAnyRoutes); // Mount the sales any routes at /api/v1/sales-any
 app.use('/api/v1/tasks', taskRoutes); // Mount task management routes
+app.use('/api/v1', userListRoutes); // Mount user list routes (/users/assigned, /users/invited)
 
 // Mount invitations listing API at /api/v1/invitations
 import invitationListRoutes from './routes/invitation.list.routes.js';
