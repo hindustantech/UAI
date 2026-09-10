@@ -19,10 +19,10 @@ export const startTask = async (req, res) => {
       });
     }
 
-    if (!['ACCEPTED', 'ACTIVE', 'IN_PROGRESS', 'PAUSED', 'BLOCKED', 'REOPENED'].includes(task.status)) {
+    if (!['ACCEPTED','ASSIGNED', 'ACTIVE', 'IN_PROGRESS', 'PAUSED', 'BLOCKED', 'REOPENED'].includes(task.status)) {
       return res.status(400).json({
         success: false,
-        error: { code: 'INVALID_STATUS_TRANSITION', message: 'Task is not in a valid state for starting' }
+        error: { code: 'INVALID_STATUS_TRANSITION', message: 'Task is  not in a valid state for starting' }
       });
     }
 

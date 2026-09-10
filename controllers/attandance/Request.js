@@ -700,12 +700,21 @@ export const approveAttendanceRequest = async (req, res) => {
                 throw new Error("Invalid leave dates");
             }
 
+            const employee = await Employee.findById(request.employeeId).session(session);
+            if (!employee) throw new Error("Employee not found");
+
+            const weeklyOffHalfDays = employee.weeklyOffHalfDay || [];
+
             for (
                 let d = new Date(startDate.getTime());
                 d <= endDate;
                 d = new Date(d.getTime() + 86400000)
             ) {
                 const { start, end } = getDayBounds(d);
+                const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
+                const isHalfDayOff = weeklyOffHalfDays.includes(dayName);
+
+                const status = isHalfDayOff ? "week_off_half" : "leave";
 
                 await Attendance.findOneAndUpdate(
                     {
@@ -716,7 +725,7 @@ export const approveAttendanceRequest = async (req, res) => {
                     {
                         $set: {
                             date: start,
-                            status: "leave",
+                            status: status,
                             approvalStatus: "approved",
                             totalWorkingHours: 0,
                             workSummary: {
@@ -1390,11 +1399,18 @@ export const bulkApproveRequests = async (req, res) => {
                     start.setHours(0, 0, 0, 0);
                     end.setHours(23, 59, 59, 999);
 
+                    const leaveEmployee = await Employee.findById(request.employeeId).session(session);
+                    const weeklyOffHalfDays = leaveEmployee?.weeklyOffHalfDay || [];
+
                     for (
                         let d = new Date(start);
                         d <= end;
                         d.setDate(d.getDate() + 1)
                     ) {
+                        const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
+                        const isHalfDayOff = weeklyOffHalfDays.includes(dayName);
+                        const status = isHalfDayOff ? "week_off_half" : "leave";
+
                         await Attendance.findOneAndUpdate(
                             {
                                 companyId: request.companyId,
@@ -1403,7 +1419,7 @@ export const bulkApproveRequests = async (req, res) => {
                             },
                             {
                                 $set: {
-                                    status: "leave",
+                                    status: status,
                                     approvalStatus: "approved",
                                     totalWorkingHours: 0,
                                     workSummary: {

@@ -123,6 +123,46 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
                     continue;
                 }
 
+                const weeklyOffHalfDays = emp.weeklyOffHalfDay || [];
+
+                if (
+                    weeklyOffHalfDays.length > 0 &&
+                    weeklyOffHalfDays.includes(dayName)
+                ) {
+                    await Attendance.findOneAndUpdate(
+                        {
+                            companyId: emp.companyId,
+                            employeeId: emp._id,
+                            date: {
+                                $gte: startOfDay,
+                                $lte: endOfDay
+                            }
+                        },
+                        {
+                            $setOnInsert: {
+                                companyId: emp.companyId,
+                                employeeId: emp._id,
+                                userId: emp.userId,
+                                date: startOfDay,
+                                status: "week_off_half",
+                                shiftId: shift._id,
+                                isAutoMarked: true,
+                                remarks: "Auto-marked half-day weekly off"
+                            }
+                        },
+                        {
+                            upsert: true,
+                            new: true
+                        }
+                    );
+
+                    console.log(
+                        `📅 Half-day weekly off marked for employee ${emp._id}`
+                    );
+
+                    continue;
+                }
+
                 // ─── 3. Check if shift end time has passed ──────────────────
                 const [endHour, endMin] = shift.endTime.split(":").map(Number);
 
