@@ -53,6 +53,7 @@ import userListRoutes from './routes/tasks/userList.routes.js';
 import './cron/subscription.js';
 import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
+import './cron/markSalesSessionPunchOut.cron.js'
 import './cron/compOffExpiry.cron.js'
 import { startTaskSchedulers } from './cron/taskScheduler.cron.js'
 import { connectRedis, getRedisClient } from './config/redis.js';
