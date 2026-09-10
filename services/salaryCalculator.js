@@ -130,7 +130,7 @@ function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPer
     const overtimeRate = sal.overtimeRate ?? 0;
 
     const { presentDays = 0, absentDays = 0, unpaidLeaveDays = 0, lateDays = 0, halfDays = 0,
-            leaveDays = 0, paidLeaveDays = 0, holidays = 0, weeklyOffDays = 0 } = attendance;
+            leaveDays = 0, paidLeaveDays = 0, holidays = 0, weeklyOffDays = 0, weekOffHalfDays = 0 } = attendance;
 
     let lateCutDays = 0;
     let halfDayCutDays = 0;
@@ -144,7 +144,7 @@ function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPer
     }
     const totalSalaryRuleCutDays = lateCutDays + halfDayCutDays;
 
-    const payableDays = Math.max(0, presentDays - totalSalaryRuleCutDays);
+    const payableDays = Math.max(0, presentDays + weeklyOffDays + weekOffHalfDays - totalSalaryRuleCutDays);
     const dayWages = roundTo2(perDayRate * payableDays);
 
     const attendanceOvertimeMinutes = attendance.overtimeMinutes ?? 0;
@@ -247,7 +247,7 @@ function calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule
     const perDayRate = roundTo2(totalMonthlyGross / STANDARD_MONTH_DAYS);
 
     const { presentDays = 0, absentDays = 0, unpaidLeaveDays = 0, lateDays = 0, halfDays = 0,
-            leaveDays = 0, paidLeaveDays = 0, holidays = 0, weeklyOffDays = 0 } = attendance;
+            leaveDays = 0, paidLeaveDays = 0, holidays = 0, weeklyOffDays = 0, weekOffHalfDays = 0 } = attendance;
 
     let lateCutDays = 0;
     let halfDayCutDays = 0;
@@ -261,7 +261,7 @@ function calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule
     }
     const totalSalaryRuleCutDays = lateCutDays + halfDayCutDays;
 
-    const payableDays = Math.max(0, presentDays - totalSalaryRuleCutDays);
+    const payableDays = Math.max(0, presentDays + weeklyOffDays + weekOffHalfDays - totalSalaryRuleCutDays);
     const factor = STANDARD_MONTH_DAYS > 0 ? payableDays / STANDARD_MONTH_DAYS : 0;
 
     const basicEarned = roundTo2(monthlyBasic * factor);
@@ -378,7 +378,7 @@ function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrol
     const perDayRate = roundTo2(totalMonthlyGross / STANDARD_MONTH_DAYS);
 
     const { presentDays = 0, absentDays = 0, unpaidLeaveDays = 0, lateDays = 0, halfDays = 0,
-            leaveDays = 0, paidLeaveDays = 0, holidays = 0, weeklyOffDays = 0 } = attendance;
+            leaveDays = 0, paidLeaveDays = 0, holidays = 0, weeklyOffDays = 0, weekOffHalfDays = 0 } = attendance;
 
     let lateCutDays = 0;
     let halfDayCutDays = 0;
@@ -413,7 +413,7 @@ function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrol
 
     const salaryRuleCutAmount = roundTo2(perDayRate * totalSalaryRuleCutDays);
 
-    const payableDays = Math.max(0, presentDays - totalSalaryRuleCutDays);
+    const payableDays = Math.max(0, presentDays + weeklyOffDays + weekOffHalfDays - totalSalaryRuleCutDays);
 
     let pf = 0, esi = 0, gratuity = 0;
     if (payrollRule?.deductions) {
@@ -496,7 +496,7 @@ function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrol
 function buildAttendanceBlock(attendance, extras = {}) {
     const {
         presentDays = 0, absentDays = 0, leaveDays = 0, holidays = 0,
-        weeklyOffDays = 0, halfDays = 0, lateDays = 0,
+        weeklyOffDays = 0, weekOffHalfDays = 0, halfDays = 0, lateDays = 0,
         totalPayableMinutes = 0, totalMinutes = 0, overtimeMinutes = 0,
         compOffDaysUsed = 0
     } = attendance;
@@ -505,6 +505,7 @@ function buildAttendanceBlock(attendance, extras = {}) {
     return {
         standardDays: STANDARD_MONTH_DAYS,
         weeklyOffDays,
+        weekOffHalfDays,
         holidays,
         leaveDays,
         paidLeaveDays,

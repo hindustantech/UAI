@@ -258,7 +258,7 @@ export const validateAttendanceReportRules = [
 
     query("status")
         .optional()
-        .isIn(["present", "absent", "leave", "holiday", "half_day", "week_off", "pending_approval", "rejected"])
+        .isIn(["present", "absent", "leave", "holiday", "half_day", "week_off", "week_off_half", "pending_approval", "rejected"])
         .withMessage("Invalid status value")
 ];
 
@@ -293,7 +293,7 @@ export const validateCorrectAttendanceRules = [
 
     body("status")
         .optional()
-        .isIn(["present", "absent", "leave", "holiday", "half_day", "week_off"])
+        .isIn(["present", "absent", "leave", "holiday", "half_day", "week_off", "week_off_half"])
         .withMessage("Invalid status value"),
 
     validateBreaks

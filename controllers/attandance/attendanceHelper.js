@@ -87,13 +87,23 @@ export const checkWeeklyOff = (employee, shift, attendanceDate) => {
 
     const day = attendanceDate.toLocaleDateString("en-US", { weekday: "long" });
 
+    // Check for full day weekly off
     const weeklyOff = employee?.weeklyOff?.length
         ? employee.weeklyOff
         : (shift?.weeklyOff?.length ? shift.weeklyOff : []);
 
+    // Check for half-day weekly off
+    const weeklyOffHalfDay = employee?.weeklyOffHalfDay?.length
+        ? employee.weeklyOffHalfDay
+        : (shift?.weeklyOffHalfDay?.length ? shift.weeklyOffHalfDay : []);
+
+    // Only block punch on full day weekly off, allow half-day off (will be handled in markAttendance)
     if (weeklyOff.includes(day)) {
         throw new Error("ATTENDANCE_ON_WEEKLY_OFF");
     }
+
+    // For half-day off, don't throw - attendance will be marked as week_off_half
+    return weeklyOffHalfDay.includes(day);
 };
 
 export const checkHoliday = (attendanceDate, holidays = []) => {

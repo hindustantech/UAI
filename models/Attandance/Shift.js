@@ -76,6 +76,12 @@ const ShiftSchema = new Schema({
         default: ["Sunday"]
     },
 
+    weeklyOffHalfDay: {
+        type: [String],
+        enum: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+        default: []
+    },
+
     /**
      * Breaks Default
      */

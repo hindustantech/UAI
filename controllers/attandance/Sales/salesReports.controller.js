@@ -135,7 +135,7 @@ export const exportEmployeeMonthlyReport = async (req, res) => {
             }
             const bucket = attendanceMap.get(key);
 
-            if (!["week_off", "holiday"].includes(rec.status)) bucket.workingDays += 1;
+            if (!["week_off", "week_off_half", "holiday"].includes(rec.status)) bucket.workingDays += 1;
             if (["present", "half_day"].includes(rec.status)) bucket.presentDays += 1;
             bucket.totalFieldHours += rec.totalWorkingHours || 0;
         });

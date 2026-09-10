@@ -483,6 +483,16 @@ export const markAttendance = async (req, res) => {
 
         let baseStatus = holiday ? "holiday" : "present";
 
+        // ✅ Check for half-day weekly off config
+        const weeklyOffHalfDays = employee.weeklyOffHalfDay || [];
+        const dayName = attendanceDateIST.toLocaleDateString("en-US", { weekday: "long" });
+        const isHalfDayOff = weeklyOffHalfDays.includes(dayName);
+
+        if (isHalfDayOff && !holiday) {
+            baseStatus = "week_off_half";
+            console.log(`🔸 Half-day weekly off configured for ${dayName} - baseStatus set to week_off_half`);
+        }
+
         if (holiday) {
             console.log(`✓ Holiday Detected: ${holiday.name || 'Holiday'} on ${dateString}`);
         }
@@ -950,6 +960,13 @@ export const markAttendance = async (req, res) => {
                         date: dateString,
                         status: attendance.status,
                         action: "Holiday detected - No punch-out required"
+                    };
+                } else if (attendance.status === "week_off_half") {
+                    errorMessage = "Cannot punch out on a half-day weekly off. This day is marked as half-day off.";
+                    errorDetails = {
+                        date: dateString,
+                        status: attendance.status,
+                        action: "Half-day weekly off detected - No punch-out required"
                     };
                 } else if (attendance.status === "weekly_off") {
                     errorMessage = "Cannot punch out on a weekly off. This day is already marked as weekly off.";
@@ -1446,6 +1463,16 @@ export const markFaceAttendance = async (req, res) => {
 
         let baseStatus = holiday ? "holiday" : "present";
 
+        // ✅ Check for half-day weekly off config
+        const weeklyOffHalfDays = employee.weeklyOffHalfDay || [];
+        const dayName = attendanceDateIST.toLocaleDateString("en-US", { weekday: "long" });
+        const isHalfDayOff = weeklyOffHalfDays.includes(dayName);
+
+        if (isHalfDayOff && !holiday) {
+            baseStatus = "week_off_half";
+            console.log(`🔸 Half-day weekly off configured for ${dayName} - baseStatus set to week_off_half`);
+        }
+
         if (holiday) {
             console.log(`✓ Holiday Detected: ${holiday.name || 'Holiday'} on ${dateString}`);
         }
@@ -1913,6 +1940,13 @@ export const markFaceAttendance = async (req, res) => {
                         date: dateString,
                         status: attendance.status,
                         action: "Holiday detected - No punch-out required"
+                    };
+                } else if (attendance.status === "week_off_half") {
+                    errorMessage = "Cannot punch out on a half-day weekly off. This day is marked as half-day off.";
+                    errorDetails = {
+                        date: dateString,
+                        status: attendance.status,
+                        action: "Half-day weekly off detected - No punch-out required"
                     };
                 } else if (attendance.status === "weekly_off") {
                     errorMessage = "Cannot punch out on a weekly off. This day is already marked as weekly off.";
@@ -3686,6 +3720,22 @@ const isWeekOff = (date, shift, employee) => {
     return day === "Sunday"; // fallback
 };
 
+const isWeekOffHalfDay = (date, shift, employee) => {
+    const day = getWeekDay(date);
+
+    // Check shift-level half-day off
+    if (shift?.weeklyOffHalfDay?.length) {
+        return shift.weeklyOffHalfDay.includes(day);
+    }
+
+    // Check employee-level half-day off
+    if (employee?.weeklyOffHalfDay?.length) {
+        return employee.weeklyOffHalfDay.includes(day);
+    }
+
+    return false;
+};
+
 const isValidPunch = (rec) => {
     return rec?.punchIn && rec?.punchOut;
 };
@@ -3863,12 +3913,25 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
             const rec = map.get(key);
 
-            /* ========= WEEK OFF ========= */
+            /* ========= WEEK OFF (FULL DAY) ========= */
             if (!rec && isWeekOff(date, shift, employee)) {
                 report.push({
                     Date: key,
                     Status: "week_off",
                     TimeIn: "Week Off",
+                    TimeOut: "-",
+                    BreakTime: "-",
+                    TotalHours: "-"
+                });
+                continue;
+            }
+
+            /* ========= WEEK OFF (HALF DAY) ========= */
+            if (!rec && isWeekOffHalfDay(date, shift, employee)) {
+                report.push({
+                    Date: key,
+                    Status: "week_off_half",
+                    TimeIn: "Half Day Off",
                     TimeOut: "-",
                     BreakTime: "-",
                     TotalHours: "-"

@@ -144,6 +144,9 @@ class TodayAttendanceController {
                     } else if (attendance.status === "half_day") {
                         halfDayEmployees.push(employeeData);
                         presentEmployees.push(employeeData); // half day counts as present for rate calculation
+                    } else if (attendance.status === "week_off_half") {
+                        halfDayEmployees.push(employeeData); // week_off_half counts as half-day for list
+                        // Don't add to presentEmployees - it's a day off
                     } else if (attendance.status === "absent") {
                         absentEmployees.push(employeeData);
                     } else {
@@ -402,7 +405,7 @@ class TodayAttendanceController {
                         presentCount: {
                             $sum: {
                                 $cond: [
-                                    { $in: ["$status", ["present", "half_day"]] },
+                                    { $in: ["$status", ["present", "half_day", "week_off_half"]] },
                                     1,
                                     0
                                 ]
@@ -592,7 +595,7 @@ class TodayAttendanceController {
 
                 for (const employee of dept.employees) {
                     const attendance = attendanceMap.get(employee._id.toString());
-                    if (attendance && (attendance.status === "present" || attendance.status === "half_day")) {
+                    if (attendance && (attendance.status === "present" || attendance.status === "half_day" || attendance.status === "week_off_half")) {
                         present++;
                         if (attendance.lateByMinutes > 0) {
                             late++;

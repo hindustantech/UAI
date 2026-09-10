@@ -305,8 +305,9 @@ const buildAttendanceMap = (records) => {
 };
 
 /** Returns { code, label, punchIn, punchOut, hours, breakInfo, isFlexible, isAutoPunchOut } for one day */
-const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEnd = "18:00", graceIn = 10, graceOut = 10, isFlexible = false) => {
+const resolveDayStatus = (attendance, isWeeklyOff, isWeeklyOffHalf = false, shiftStart = "09:00", shiftEnd = "18:00", graceIn = 10, graceOut = 10, isFlexible = false) => {
     if (isWeeklyOff) return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+    if (isWeeklyOffHalf && !attendance) return { code: "WOH", label: "Half Day Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
     if (!attendance) return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
 
     const pi = formatTime(attendance.punchIn);
@@ -316,6 +317,7 @@ const resolveDayStatus = (attendance, isWeeklyOff, shiftStart = "09:00", shiftEn
         case "leave": return { code: "L", label: "Leave", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "holiday": return { code: "H", label: "Holiday", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "week_off": return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+        case "week_off_half": return { code: "WOH", label: "Half Day Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "comp_off": return { code: "CO", label: "Comp Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "absent": return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         default: {
@@ -610,6 +612,9 @@ export const generateAttendanceCSV = async (req, res) => {
             const weeklyOffDays = emp.weeklyOff?.length 
                 ? emp.weeklyOff 
                 : (emp.shift?.weeklyOff?.length ? emp.shift.weeklyOff : []);
+            const weeklyOffHalfDays = emp.weeklyOffHalfDay?.length
+                ? emp.weeklyOffHalfDay
+                : (emp.shift?.weeklyOffHalfDay?.length ? emp.shift.weeklyOffHalfDay : []);
             const shiftStart = emp.shift?.startTime || "09:00";
             const shiftEnd = emp.shift?.endTime || "18:00";
             const shiftName = emp.shift?.shiftName || "Default (09:00–18:00)";
@@ -623,6 +628,7 @@ export const generateAttendanceCSV = async (req, res) => {
                 const dayOfWeek = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const attendance = attendanceMap.get(`${emp._id}_${dateKey}`);
                 const isWeeklyOff = weeklyOffDays.includes(dayOfWeek);
+                const isWeeklyOffHalfDay = weeklyOffHalfDays.includes(dayOfWeek);
 
                 let punchInTime = "—", punchOutTime = "—", totalHours = "0:00";
                 let grossHours = "0:00", breakDeducted = "0:00", breakDetails = "";
@@ -631,6 +637,8 @@ export const generateAttendanceCSV = async (req, res) => {
 
                 if (isWeeklyOff) {
                     statusLabel = "Week Off";
+                } else if (isWeeklyOffHalfDay) {
+                    statusLabel = "Half Day Off";
                 } else if (!attendance) {
                     statusLabel = "Absent";
                 } else {
@@ -1075,6 +1083,9 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             const weeklyOff = emp.weeklyOff?.length 
                 ? emp.weeklyOff 
                 : (emp.shift?.weeklyOff?.length ? emp.shift.weeklyOff : []);
+            const weeklyOffHalf = emp.weeklyOffHalfDay?.length
+                ? emp.weeklyOffHalfDay
+                : (emp.shift?.weeklyOffHalfDay?.length ? emp.shift.weeklyOffHalfDay : []);
             const shiftStart = emp.shift?.startTime || "09:00";
             const shiftEnd = emp.shift?.endTime || "18:00";
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
@@ -1107,9 +1118,10 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
                 const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const att = attMap.get(`${emp._id}_${dateKey}`);
                 const isWO = weeklyOff.includes(dayName);
+                const isWOHalf = weeklyOffHalf.includes(dayName);
 
                 const { code, label, punchIn, punchOut, hours, breakInfo, isFlexible: flexShift, isAutoPunchOut } = 
-                    resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
+                    resolveDayStatus(att, isWO, isWOHalf, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
 
                 const cell = ws.getCell(rowNum, 5 + di);
                 cell.value = `${code}\n${hours}`;
@@ -1191,6 +1203,9 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
             const weeklyOff = emp.weeklyOff?.length 
                 ? emp.weeklyOff 
                 : (emp.shift?.weeklyOff?.length ? emp.shift.weeklyOff : []);
+            const weeklyOffHalf = emp.weeklyOffHalfDay?.length
+                ? emp.weeklyOffHalfDay
+                : (emp.shift?.weeklyOffHalfDay?.length ? emp.shift.weeklyOffHalfDay : []);
             const shiftStart = emp.shift?.startTime || "09:00";
             const shiftEnd = emp.shift?.endTime || "18:00";
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
@@ -1204,8 +1219,9 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
                 const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const att = attMap.get(`${emp._id}_${dateKey}`);
                 const isWO = weeklyOff.includes(dayName);
+                const isWOHalf = weeklyOffHalf.includes(dayName);
                 const { code, label, punchIn, punchOut, hours, breakInfo, isFlexible: flexShift } = 
-                    resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
+                    resolveDayStatus(att, isWO, isWOHalf, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
 
                 let grossHrs = "0:00";
                 let breakDeducted = "0:00";
@@ -1324,6 +1340,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const weeklyOff = emp.weeklyOff?.length 
                 ? emp.weeklyOff 
                 : (emp.shift?.weeklyOff?.length ? emp.shift.weeklyOff : []);
+            const weeklyOffHalf = emp.weeklyOffHalfDay?.length
+                ? emp.weeklyOffHalfDay
+                : (emp.shift?.weeklyOffHalfDay?.length ? emp.shift.weeklyOffHalfDay : []);
             const shiftStart = emp.shift?.startTime || "09:00";
             const shiftEnd = emp.shift?.endTime || "18:00";
             const graceIn = emp.shift?.gracePeriod?.lateEntry ?? 10;
@@ -1345,8 +1364,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const dayName = date.toLocaleDateString("en-IN", { weekday: "long" });
                 const att = attMap.get(`${emp._id}_${dateKey}`);
                 const isWO = weeklyOff.includes(dayName);
+                const isWOHalf = weeklyOffHalf.includes(dayName);
                 const { code, isFlexible: flexShift, isAutoPunchOut } = 
-                    resolveDayStatus(att, isWO, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
+                    resolveDayStatus(att, isWO, isWOHalf, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
 
                 switch (code) {
                     case "WO":
@@ -1387,6 +1407,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                                 totalLateMin += att.workSummary?.lateMinutes || 0;
                             }
                         }
+                        break;
+                    case "WOH":
+                        weekOff++;
                         break;
                     default:
                         present++;

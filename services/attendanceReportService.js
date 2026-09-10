@@ -133,6 +133,7 @@ class AttendanceReportService {
             let halfDay = 0;
             let holiday = 0;
             let weekOff = 0;
+            let weekOffHalf = 0;
             let leave = 0;
             let totalWorkingMinutes = 0;
             let totalLateMinutes = 0;
@@ -144,7 +145,8 @@ class AttendanceReportService {
                 const attendance = attendanceMap.get(key);
 
                 const dayOfWeek = date.getDay();
-                const isWeekend = employee.weeklyOff?.includes(this.getDayName(dayOfWeek));
+                const isWeekend = employee.weeklyOff?.includes(this.getDayName(dayOfWeek)) ||
+                    employee.weeklyOffHalfDay?.includes(this.getDayName(dayOfWeek));
 
                 let record = {
                     date: dateStr,
@@ -192,14 +194,23 @@ class AttendanceReportService {
                         case 'week_off':
                             weekOff++;
                             break;
+                        case 'week_off_half':
+                            weekOffHalf++;
+                            break;
                         case 'leave':
                             leave++;
                             break;
                     }
                 } else {
                     if (isWeekend) {
-                        record.status = 'week_off';
-                        weekOff++;
+                        const dayName = this.getDayName(dayOfWeek);
+                        const isHalfDayOff = employee.weeklyOffHalfDay?.includes(dayName);
+                        record.status = isHalfDayOff ? 'week_off_half' : 'week_off';
+                        if (isHalfDayOff) {
+                            weekOffHalf++;
+                        } else {
+                            weekOff++;
+                        }
                     } else {
                         absent++;
                     }
@@ -225,6 +236,7 @@ class AttendanceReportService {
                     halfDay,
                     holiday,
                     weekOff,
+                    weekOffHalf,
                     leave,
                     attendancePercentage: attendancePercentage.toFixed(2),
                     totalWorkingHours: convertMinutesToHHMM(Math.round(totalWorkingMinutes)),
@@ -532,6 +544,7 @@ class AttendanceReportService {
         let totalHalfDay = 0;
         let totalHoliday = 0;
         let totalWeekOff = 0;
+        let totalWeekOffHalf = 0;
         let totalLeave = 0;
         let totalWorkingMinutes = 0;
 
@@ -542,6 +555,7 @@ class AttendanceReportService {
             totalHalfDay += emp.summary.halfDay;
             totalHoliday += emp.summary.holiday;
             totalWeekOff += emp.summary.weekOff;
+            totalWeekOffHalf += emp.summary.weekOffHalf;
             totalLeave += emp.summary.leave;
             totalWorkingMinutes += parseFloat(emp.summary.totalWorkingHoursDecimal || 0) * 60;
         });
@@ -549,7 +563,7 @@ class AttendanceReportService {
         const totalEmployees = employeeReports.length;
         const totalAttendanceDays = totalEmployees * totalDays;
         const overallAttendancePercentage = totalAttendanceDays > 0
-            ? ((totalPresent + totalHalfDay) / totalAttendanceDays) * 100
+            ? ((totalPresent + totalHalfDay + totalWeekOffHalf) / totalAttendanceDays) * 100
             : 0;
 
         return {
@@ -561,6 +575,7 @@ class AttendanceReportService {
             totalHalfDay,
             totalHoliday,
             totalWeekOff,
+            totalWeekOffHalf,
             totalLeave,
             overallAttendancePercentage: overallAttendancePercentage.toFixed(2),
             averageWorkingHours: totalEmployees > 0 ? convertMinutesToHHMM(Math.round(totalWorkingMinutes / totalEmployees)) : '00:00',
@@ -637,6 +652,7 @@ class AttendanceReportService {
                 totalHalfDay: 0,
                 totalHoliday: 0,
                 totalWeekOff: 0,
+                totalWeekOffHalf: 0,
                 totalLeave: 0,
                 overallAttendancePercentage: 0,
                 averageWorkingHours: 0,
