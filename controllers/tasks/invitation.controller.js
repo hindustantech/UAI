@@ -14,7 +14,7 @@ export const inviteUser = async (req, res) => {
     const { id } = req.params;
     const { userId, message } = req.body;
 
-    const task = await Task.findOne({ _id: id, companyId });
+    const task = await Task.findOne({ _id: id, companyId });   
     if (!task) {
       return res.status(404).json({
         success: false,
