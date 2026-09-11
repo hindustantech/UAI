@@ -10,11 +10,13 @@ export const getAssignedUsers = async (req, res) => {
       page = 1,
       limit = 50,
       status,
-      search
+      search,
+      taskId
     } = req.query;
 
     const filter = { companyId };
     if (status) filter.status = status;
+    if (taskId) filter.taskId = taskId;
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
@@ -58,7 +60,7 @@ export const getAssignedUsers = async (req, res) => {
     // Populate user details for the distinct users
     const userIds = distinctAssignments.map(a => a._id);
     const users = await User.find({ _id: { $in: userIds } })
-      .select('uid name email accountStatus')
+      .select('uid name email accountStatus type')
       .lean();
 
     const userMap = {};
@@ -93,11 +95,13 @@ export const getInvitedUsers = async (req, res) => {
       page = 1,
       limit = 50,
       status,
-      search
+      search,
+      taskId
     } = req.query;
 
     const filter = { companyId };
     if (status) filter.status = status;
+    if (taskId) filter.taskId = taskId;
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
@@ -141,7 +145,7 @@ export const getInvitedUsers = async (req, res) => {
     // Populate user details for the distinct users
     const userIds = distinctInvitations.map(a => a._id);
     const users = await User.find({ _id: { $in: userIds } })
-      .select('uid name email accountStatus')
+      .select('uid name email accountStatus type')
       .lean();
 
     const userMap = {};
