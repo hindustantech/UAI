@@ -3,6 +3,7 @@ import authMiddleware from '../../middlewares/authMiddleware.js';
 // import { checkPermission } from '../../middlewares/checkPermission.js';
 import {
   inviteUser,
+  inviteUserBulk,
   acceptInvitation,
   rejectInvitation,
   getInvitations,
@@ -18,6 +19,16 @@ router.post(
   authMiddleware,
   // checkPermission('task.invite'),
   inviteUser
+);
+
+// @route   POST /api/v1/tasks/:id/invite-bulk
+// @desc    Invite multiple users to task
+// @access  Private (task.invite permission)
+router.post(
+  '/:id/invite-bulk',
+  authMiddleware,
+  // checkPermission('task.invite'),
+  inviteUserBulk
 );
 
 // @route   POST /api/v1/tasks/:id/invitations/:invitationId/accept

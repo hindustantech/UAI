@@ -22,12 +22,12 @@ export const inviteUser = async (req, res) => {
       });
     }
 
-    if (!['DRAFT', 'INVITED'].includes(task.status)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'TASK_NOT_INVITABLE', message: 'Task is not in a valid state for invitation' }
-      });
-    }
+    // if (!['DRAFT', 'INVITED'].includes(task.status)) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     error: { code: 'TASK_NOT_INVITABLE', message: 'Task is not in a valid state for invitation' }
+    //   });
+    // }
 
     const user = await User.findById(userId);
     if (!user) {
@@ -115,6 +115,131 @@ export const inviteUser = async (req, res) => {
     res.status(500).json({
       success: false,
       error: { code: 'TASK_INVITE_ERROR', message: 'Failed to invite user' }
+    });
+  }
+};
+
+export const inviteUserBulk = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const { id } = req.params;
+    const { userIds, message } = req.body;
+
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'userIds array is required' }
+      });
+    }
+
+    // Check task exists and belongs to company
+    const task = await Task.findOne({ _id: id, companyId });
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
+      });
+    }
+
+    const invited = [];
+    const skipped = [];
+    const errors = [];
+
+    for (const userId of userIds) {
+      try {
+        // Check user exists
+        const user = await User.findById(userId);
+        if (!user) {
+          errors.push({ userId, error: 'User not found' });
+          continue;
+        }
+
+        // Check employee exists and is active in same company
+        const employee = await Employee.findOne({ companyId, userId: user._id, employmentStatus: 'active' });
+        if (!employee) {
+          errors.push({ userId, error: 'User is inactive or not an employee of this company' });
+          continue;
+        }
+
+        const existingInvitation = await TaskInvitation.findOne({
+          companyId,
+          taskId: id,
+          invitedUserId: userId,
+          status: 'PENDING'
+        });
+
+        if (existingInvitation) {
+          skipped.push({ userId, reason: 'Invitation already pending for this user' });
+          continue;
+        }
+
+        const invitation = await TaskInvitation.create({
+          companyId,
+          taskId: id,
+          invitedUserId: userId,
+          invitedBy: req.user._id,
+          message,
+          status: 'PENDING'
+        });
+
+        if (task.status === 'DRAFT') {
+          await Task.findByIdAndUpdate(
+            id,
+            { status: 'INVITED' },
+            { new: true }
+          );
+        }
+
+        await TaskStatusHistory.create({
+          companyId,
+          taskId: id,
+          fromStatus: task.status,
+          toStatus: 'INVITED',
+          changedBy: req.user._id,
+          reason: `Invited ${user.name || user.email}`
+        });
+
+        await createTaskAuditLog({
+          action: 'TASK_INVITED',
+          entityType: 'TASK',
+          entityId: id,
+          actorId: req.user._id,
+          companyId,
+          before: { status: task.status },
+          after: { status: 'INVITED' },
+          metadata: { invitedUserId: userId }
+        });
+
+        await TaskNotificationService.notifyTaskInvited({
+          companyId,
+          taskId: id,
+          taskNumber: task.taskNumber,
+          taskTitle: task.title,
+          invitedUserId: userId,
+          invitedByName: req.user.name || req.user.email,
+          message
+        });
+
+        invited.push({ userId, status: 'INVITED' });
+      } catch (innerError) {
+        console.error(`Bulk invite error for user ${userId}:`, innerError);
+        errors.push({ userId, error: innerError.message || 'Failed to invite' });
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        invited,
+        skipped,
+        errors
+      }
+    });
+  } catch (error) {
+    console.error('Bulk invite task error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'TASK_INVITE_BULK_ERROR', message: 'Failed to bulk invite users' }
     });
   }
 };

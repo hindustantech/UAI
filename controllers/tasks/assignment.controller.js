@@ -22,13 +22,13 @@ export const assignTask = async (req, res) => {
       });
     }
 
-    // Check task is in valid state for assignment
-    if (!['DRAFT', 'ASSIGNED'].includes(task.status)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'TASK_NOT_ASSIGNABLE', message: 'Task is not in a valid state for assignment' }
-      });
-    }
+    // // Check task is in valid state for assignment
+    // if (!['DRAFT'].includes(task.status)) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     error: { code: 'TASK_NOT_ASSIGNABLE', message: 'Task is not in a valid state for assignment' }
+    //   });
+    // }
 
     // Check if user exists and is active
     const user = await User.findById(userId).select('type companyId');
@@ -166,15 +166,200 @@ export const assignTask = async (req, res) => {
       assignedByName: req.user.name || req.user.email
     });
 
-    res.json({
+res.json({
       success: true,
-      data: assignment
+      data: existingAssignment
     });
   } catch (error) {
     console.error('Assign task error:', error);
     res.status(500).json({
       success: false,
       error: { code: 'TASK_ASSIGN_ERROR', message: 'Failed to assign task' }
+    });
+  }
+};
+
+export const assignTaskBulk = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const { id } = req.params;
+    const { userIds } = req.body;
+
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'userIds array is required' }
+      });
+    }
+
+    // Check task exists and belongs to company
+    const task = await Task.findOne({ _id: id, companyId });
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
+      });
+    }
+
+    const assigned = [];
+    const skipped = [];
+    const errors = [];
+
+    for (const userId of userIds) {
+      try {
+        // Check user exists
+        const user = await User.findById(userId).select('type companyId');
+        if (!user) {
+          errors.push({ userId, error: 'User not found' });
+          continue;
+        }
+
+        // Check employee exists and is active in same company
+        const employee = await Employee.findOne({ companyId, userId: user._id, employmentStatus: 'active' });
+        if (!employee) {
+          errors.push({ userId, error: 'User is inactive or not an employee of this company' });
+          continue;
+        }
+
+        // Check if assignment already exists for this user+task in this company (any status)
+        const existingAssignment = await TaskAssignment.findOne({
+          companyId,
+          taskId: id,
+          userId: user._id
+        });
+
+        // If existing assignment is REMOVED, reactivate it
+        if (existingAssignment && existingAssignment.status === 'REMOVED') {
+          existingAssignment.status = 'ASSIGNED';
+          existingAssignment.assignedAt = new Date();
+          existingAssignment.assignedBy = req.user._id;
+          await existingAssignment.save();
+
+          // Update task.assignedUsers if user is not already in the list
+          if (!task.assignedUsers.some(u => u.equals(user._id))) {
+            task.assignedUsers.push(user._id);
+          }
+          await task.save();
+
+          // Create status history
+          await TaskStatusHistory.create({
+            companyId,
+            taskId: id,
+            fromStatus: 'REMOVED',
+            toStatus: 'ASSIGNED',
+            changedBy: req.user._id,
+            reason: `Reassigned to ${user.name || user.email}`
+          });
+
+          // Create audit log
+          await createTaskAuditLog({
+            action: 'TASK_ASSIGNED',
+            entityType: 'TASK',
+            entityId: id,
+            actorId: req.user._id,
+            companyId,
+            before: { status: 'REMOVED' },
+            after: { status: 'ASSIGNED' },
+            metadata: { assignedTo: userId }
+          });
+
+          // Send notification
+          await TaskNotificationService.notifyTaskAssigned({
+            companyId,
+            taskId: id,
+            taskNumber: task.taskNumber,
+            taskTitle: task.title,
+            assigneeId: userId,
+            assignedByName: req.user.name || req.user.email
+          });
+
+          assigned.push({ userId, status: 'REACTIVATED' });
+          continue;
+        }
+
+        // If existing assignment is active (INVITED/ASSIGNED/ACCEPTED), skip as duplicate
+        if (existingAssignment && ['INVITED', 'ASSIGNED', 'ACCEPTED'].includes(existingAssignment.status)) {
+          skipped.push({ userId, reason: 'Duplicate assignment already exists' });
+          continue;
+        }
+
+        // Create assignment
+        const assignment = await TaskAssignment.create({
+          companyId,
+          taskId: id,
+          userId,
+          assignedBy: req.user._id,
+          assignedAt: new Date(),
+          status: 'ASSIGNED'
+        });
+
+        // Update task status to ASSIGNED if it's DRAFT
+        if (task.status === 'DRAFT') {
+          await Task.findByIdAndUpdate(
+            id,
+            { status: 'ASSIGNED' },
+            { new: true }
+          );
+        }
+
+        // Create status history
+        await TaskStatusHistory.create({
+          companyId,
+          taskId: id,
+          fromStatus: task.status,
+          toStatus: 'ASSIGNED',
+          changedBy: req.user._id,
+          reason: `Assigned to ${user.name || user.email} in this company`
+        });
+
+        // Create audit log
+        await createTaskAuditLog({
+          action: 'TASK_ASSIGNED',
+          entityType: 'TASK',
+          entityId: id,
+          actorId: req.user._id,
+          companyId,
+          before: { status: task.status },
+          after: { status: 'ASSIGNED' },
+          metadata: { assignedTo: userId }
+        });
+
+        // Send notification
+        await TaskNotificationService.notifyTaskAssigned({
+          companyId,
+          taskId: id,
+          taskNumber: task.taskNumber,
+          taskTitle: task.title,
+          assigneeId: userId,
+          assignedByName: req.user.name || req.user.email
+        });
+
+        // Add user to task assignedUsers array if not already present
+        if (!task.assignedUsers.some(u => u.equals(user._id))) {
+          task.assignedUsers.push(user._id);
+        }
+        await task.save();
+
+        assigned.push({ userId, status: 'ASSIGNED' });
+      } catch (innerError) {
+        console.error(`Bulk assign error for user ${userId}:`, innerError);
+        errors.push({ userId, error: innerError.message || 'Failed to assign' });
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        assigned,
+        skipped,
+        errors
+      }
+    });
+  } catch (error) {
+    console.error('Bulk assign task error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'TASK_ASSIGN_BULK_ERROR', message: 'Failed to bulk assign task' }
     });
   }
 };

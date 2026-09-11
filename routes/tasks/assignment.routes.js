@@ -3,6 +3,7 @@ import authMiddleware from '../../middlewares/authMiddleware.js';
 // import {  } from '../../middlewares/.js';
 import {
   assignTask,
+  assignTaskBulk,
   reassignTask,
   removeAssignee,
   getTaskAssignments,
@@ -37,6 +38,16 @@ router.post(
   authMiddleware,
   // ('task.assign'),
   assignTask
+);
+
+// @route   POST /api/v1/tasks/:id/assign-bulk
+// @desc    Assign task to multiple users
+// @access  Private (task.assign permission)
+router.post(
+  '/:id/assign-bulk',
+  authMiddleware,
+  // ('task.assign'),
+  assignTaskBulk
 );
 
 // @route   POST /api/v1/tasks/:id/reassign
