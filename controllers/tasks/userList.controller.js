@@ -1,20 +1,47 @@
+import mongoose from 'mongoose';
 import TaskAssignment from '../../models/tasks/taskAssignmentModel.js';
 import TaskInvitation from '../../models/tasks/taskInvitationModel.js';
 import User from '../../models/userModel.js';
+import Employee from '../../models/Attandance/Employee.js';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
+
+const resolveCompanyIdForList = async (req) => {
+  const user = req.user || {};
+
+  // partner: IS the company
+  if (user.type === 'partner') {
+    return user._id;
+  }
+
+  // super_admin or user with explicit companyId
+  const baseCompanyId = resolveCompanyId(req);
+  if (baseCompanyId && baseCompanyId.toString() !== user._id.toString()) {
+    return baseCompanyId;
+  }
+
+  // employee/user type: look up Employee table for the real companyId
+  const employee = await Employee.findOne({ userId: user._id }).select('companyId').lean();
+  if (employee && employee.companyId) {
+    return employee.companyId;
+  }
+
+  return baseCompanyId || user._id;
+};
 
 export const getAssignedUsers = async (req, res) => {
   try {
-    const companyId = resolveCompanyId(req);
+    const companyId = await resolveCompanyIdForList(req);
+    if (!companyId) {
+      return res.json({ success: true, count: 0, total: 0, page: 1, pages: 0, data: [] });
+    }
+
     const {
       page = 1,
       limit = 50,
-      search,
-      taskId
+      search
     } = req.query;
 
-    const filter = { companyId };
-    if (taskId) filter.taskId = taskId;
+    const filter = { companyId: new mongoose.Types.ObjectId(companyId) };
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
@@ -88,16 +115,18 @@ export const getAssignedUsers = async (req, res) => {
 
 export const getInvitedUsers = async (req, res) => {
   try {
-    const companyId = resolveCompanyId(req);
+    const companyId = await resolveCompanyIdForList(req);
+    if (!companyId) {
+      return res.json({ success: true, count: 0, total: 0, page: 1, pages: 0, data: [] });
+    }
+
     const {
       page = 1,
       limit = 50,
-      search,
-      taskId
+      search
     } = req.query;
 
-    const filter = { companyId };
-    if (taskId) filter.taskId = taskId;
+    const filter = { companyId: new mongoose.Types.ObjectId(companyId) };
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
