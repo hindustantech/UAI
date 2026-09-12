@@ -8,18 +8,15 @@ import { resolveCompanyId } from '../../utils/companyResolver.js';
 const resolveCompanyIdForList = async (req) => {
   const user = req.user || {};
 
-  // partner: IS the company
   if (user.type === 'partner') {
     return user._id;
   }
 
-  // super_admin or user with explicit companyId
   const baseCompanyId = resolveCompanyId(req);
   if (baseCompanyId && baseCompanyId.toString() !== user._id.toString()) {
     return baseCompanyId;
   }
 
-  // employee/user type: look up Employee table for the real companyId
   const employee = await Employee.findOne({ userId: user._id }).select('companyId').lean();
   if (employee && employee.companyId) {
     return employee.companyId;
@@ -62,28 +59,16 @@ export const getAssignedUsers = async (req, res) => {
       filter.userId = { $in: userIds };
     }
 
-    const distinctAssignments = await TaskAssignment.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: '$userId',
-          statuses: { $addToSet: '$status' },
-          latestAssignment: { $max: '$assignedAt' }
-        }
-      },
-      { $sort: { latestAssignment: -1 } },
-      { $skip: skip },
-      { $limit: limitNum }
+    const [assignments, total] = await Promise.all([
+      TaskAssignment.find(filter)
+        .sort({ assignedAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      TaskAssignment.countDocuments(filter)
     ]);
 
-    const totalAgg = await TaskAssignment.aggregate([
-      { $match: filter },
-      { $group: { _id: '$userId' } },
-      { $count: 'total' }
-    ]);
-    const total = totalAgg.length > 0 ? totalAgg[0].total : 0;
-
-    const userIds = distinctAssignments.map(a => a._id);
+    const userIds = [...new Set(assignments.map(a => a.userId.toString()))];
     const users = await User.find({ _id: { $in: userIds } })
       .select('uid name email accountStatus type')
       .lean();
@@ -91,9 +76,14 @@ export const getAssignedUsers = async (req, res) => {
     const userMap = {};
     users.forEach(u => { userMap[u._id.toString()] = u; });
 
-    const data = distinctAssignments.map(a => ({
-      user: userMap[a._id.toString()] || null,
-      status: a.statuses
+    const data = assignments.map(a => ({
+      assignmentId: a._id,
+      taskId: a.taskId,
+      userId: a.userId,
+      user: userMap[a.userId.toString()] || null,
+      status: a.status,
+      assignedBy: a.assignedBy,
+      assignedAt: a.assignedAt
     })).filter(d => d.user !== null);
 
     res.json({
@@ -147,28 +137,16 @@ export const getInvitedUsers = async (req, res) => {
       filter.invitedUserId = { $in: userIds };
     }
 
-    const distinctInvitations = await TaskInvitation.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: '$invitedUserId',
-          statuses: { $addToSet: '$status' },
-          latestInvitation: { $max: '$createdAt' }
-        }
-      },
-      { $sort: { latestInvitation: -1 } },
-      { $skip: skip },
-      { $limit: limitNum }
+    const [invitations, total] = await Promise.all([
+      TaskInvitation.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      TaskInvitation.countDocuments(filter)
     ]);
 
-    const totalAgg = await TaskInvitation.aggregate([
-      { $match: filter },
-      { $group: { _id: '$invitedUserId' } },
-      { $count: 'total' }
-    ]);
-    const total = totalAgg.length > 0 ? totalAgg[0].total : 0;
-
-    const userIds = distinctInvitations.map(a => a._id);
+    const userIds = [...new Set(invitations.map(inv => inv.invitedUserId.toString()))];
     const users = await User.find({ _id: { $in: userIds } })
       .select('uid name email accountStatus type')
       .lean();
@@ -176,9 +154,16 @@ export const getInvitedUsers = async (req, res) => {
     const userMap = {};
     users.forEach(u => { userMap[u._id.toString()] = u; });
 
-    const data = distinctInvitations.map(a => ({
-      user: userMap[a._id.toString()] || null,
-      status: a.statuses
+    const data = invitations.map(inv => ({
+      invitationId: inv._id,
+      taskId: inv.taskId,
+      invitedUserId: inv.invitedUserId,
+      user: userMap[inv.invitedUserId.toString()] || null,
+      status: inv.status,
+      invitedBy: inv.invitedBy,
+      message: inv.message,
+      createdAt: inv.createdAt,
+      respondedAt: inv.respondedAt
     })).filter(d => d.user !== null);
 
     res.json({
