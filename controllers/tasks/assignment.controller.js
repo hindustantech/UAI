@@ -168,7 +168,7 @@ export const assignTask = async (req, res) => {
 
 res.json({
       success: true,
-      data: existingAssignment
+      data: assignment
     });
   } catch (error) {
     console.error('Assign task error:', error);

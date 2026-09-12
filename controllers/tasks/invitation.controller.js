@@ -276,13 +276,28 @@ export const acceptInvitation = async (req, res) => {
     invitation.respondedAt = new Date();
     await invitation.save();
 
-    const assignment = await TaskAssignment.create({
+    // Check if assignment already exists for this user+task
+    let assignment = await TaskAssignment.findOne({
       companyId,
       taskId: id,
-      userId: req.user._id,
-      assignedBy: invitation.invitedBy,
-      status: 'ACCEPTED'
+      userId: req.user._id
     });
+
+    if (!assignment) {
+      // Create new assignment since one doesn't exist
+      assignment = await TaskAssignment.create({
+        companyId,
+        taskId: id,
+        userId: req.user._id,
+        assignedBy: invitation.invitedBy,
+        status: 'ACCEPTED'
+      });
+    } else {
+      // Update existing assignment status to ACCEPTED
+      assignment.status = 'ACCEPTED';
+      assignment.assignedBy = invitation.invitedBy;
+      await assignment.save();
+    }
 
     await Task.findByIdAndUpdate(
       id,
@@ -373,14 +388,29 @@ export const rejectInvitation = async (req, res) => {
     invitation.rejectionReason = reason;
     await invitation.save();
 
-    const assignment = await TaskAssignment.create({
+    // Check if assignment already exists for this user+task
+    let assignment = await TaskAssignment.findOne({
       companyId,
       taskId: id,
-      userId: req.user._id,
-      assignedBy: invitation.invitedBy,
-      status: 'REJECTED',
-      rejectionReason: reason
+      userId: req.user._id
     });
+
+    if (!assignment) {
+      // Create new assignment since one doesn't exist
+      assignment = await TaskAssignment.create({
+        companyId,
+        taskId: id,
+        userId: req.user._id,
+        assignedBy: invitation.invitedBy,
+        status: 'REJECTED',
+        rejectionReason: reason
+      });
+    } else {
+      // Update existing assignment status to REJECTED
+      assignment.status = 'REJECTED';
+      assignment.rejectionReason = reason;
+      await assignment.save();
+    }
 
     await Task.findByIdAndUpdate(
       id,
