@@ -35,10 +35,15 @@ export const getAssignedUsers = async (req, res) => {
     const {
       page = 1,
       limit = 50,
-      search
+      search,
+      taskId
     } = req.query;
 
     const filter = { companyId: new mongoose.Types.ObjectId(companyId) };
+
+    if (taskId) {
+      filter.taskId = taskId;
+    }
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
@@ -113,10 +118,15 @@ export const getInvitedUsers = async (req, res) => {
     const {
       page = 1,
       limit = 50,
-      search
+      search,
+      taskId
     } = req.query;
 
     const filter = { companyId: new mongoose.Types.ObjectId(companyId) };
+
+    if (taskId) {
+      filter.taskId = taskId;
+    }
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
