@@ -263,8 +263,8 @@ const salesSessionSchema = new Schema({
 
     status: {
         type: String,
-        enum: ["in_progress", "completed"],
-        default: "in_progress",
+        enum: ["not started", "in_progress", "completed"],
+        default: "not started",
         index: true
     },
 

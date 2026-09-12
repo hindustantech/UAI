@@ -1579,7 +1579,7 @@ export const getSessions = async (req, res) => {
     }
 
     // ================= SESSION STATUS FILTER =================
-    if (status && ["in_progress", "completed"].includes(status)) {
+    if (status && ["not started", "in_progress", "completed"].includes(status)) {
       query.status = status;
     }
 
@@ -2347,7 +2347,7 @@ export const getActiveSessionAgg = async (req, res) => {
           employeeId: new mongoose.Types.ObjectId(salesPersonId),
           $or: [
             { punchOutTime: null },
-            { status: "in_progress" }
+            { status: { $in: ["not started", "in_progress"] } }
           ]
         }
       },

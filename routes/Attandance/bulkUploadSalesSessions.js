@@ -6,8 +6,9 @@ import fs from "fs";
 import { 
   bulkUploadSalesSessions, 
   getBulkUploadTemplate,
-  getUploaderInfo 
+  getUploaderInfo
 } from "../../controllers/bulkUploadSalesSessions.js";
+import { createSalesSession } from "../../controllers/createSalesSession.js";
 import authMiddleware from "../../middlewares/authMiddleware.js";
 
 const router = express.Router();
@@ -137,8 +138,15 @@ router.get(
   getUploaderInfo
 );
 
-
-
+/**
+ * @route   POST /api/sales-sessions/create
+ * @desc    Create a single sales session (one at a time)
+ * @access  Private (Admin, Partner, Agency)
+ */
+router.post(   
+  '/create',
+  createSalesSession
+);
 
 
 export default router;

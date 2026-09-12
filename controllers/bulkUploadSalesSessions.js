@@ -290,7 +290,7 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
                 createdBy: uploaderUser._id,
                 assignedTo: [salesperson._id],
                 employeeId: salesperson._id,
-                status: "in_progress",
+                status: "not started",
                 SalesStatus: "open",
                 // Use uploader's location for punch-in
                 punchInLocation: userLocation,
@@ -454,12 +454,12 @@ const prepareCustomerData = (record, userLocation) => {
 
 /* ============================================================
 UTILITY FUNCTIONS
-============================================================ */
+=========================================================== */
 
 /**
  * Generate unique session ID
  */
-const generateSessionId = async () => {
+export const generateSessionId = async () => {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
     const sessionId = `SESS-${timestamp}-${random}`;

@@ -9,20 +9,17 @@ export const getAssignedUsers = async (req, res) => {
     const {
       page = 1,
       limit = 50,
-      status,
       search,
       taskId
     } = req.query;
 
     const filter = { companyId };
-    if (status) filter.status = status;
     if (taskId) filter.taskId = taskId;
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
     const skip = (pageNum - 1) * limitNum;
 
-    let userFilter = {};
     if (search) {
       const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       const matchingUsers = await User.find({
@@ -32,10 +29,12 @@ export const getAssignedUsers = async (req, res) => {
         ]
       }).select('_id').lean();
       const userIds = matchingUsers.map(u => u._id);
+      if (userIds.length === 0) {
+        return res.json({ success: true, count: 0, total: 0, page: pageNum, pages: 0, data: [] });
+      }
       filter.userId = { $in: userIds };
     }
 
-    // Get distinct userIds from assignments for this company
     const distinctAssignments = await TaskAssignment.aggregate([
       { $match: filter },
       {
@@ -57,7 +56,6 @@ export const getAssignedUsers = async (req, res) => {
     ]);
     const total = totalAgg.length > 0 ? totalAgg[0].total : 0;
 
-    // Populate user details for the distinct users
     const userIds = distinctAssignments.map(a => a._id);
     const users = await User.find({ _id: { $in: userIds } })
       .select('uid name email accountStatus type')
@@ -94,20 +92,17 @@ export const getInvitedUsers = async (req, res) => {
     const {
       page = 1,
       limit = 50,
-      status,
       search,
       taskId
     } = req.query;
 
     const filter = { companyId };
-    if (status) filter.status = status;
     if (taskId) filter.taskId = taskId;
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
     const skip = (pageNum - 1) * limitNum;
 
-    let userFilter = {};
     if (search) {
       const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       const matchingUsers = await User.find({
@@ -117,10 +112,12 @@ export const getInvitedUsers = async (req, res) => {
         ]
       }).select('_id').lean();
       const userIds = matchingUsers.map(u => u._id);
+      if (userIds.length === 0) {
+        return res.json({ success: true, count: 0, total: 0, page: pageNum, pages: 0, data: [] });
+      }
       filter.invitedUserId = { $in: userIds };
     }
 
-    // Get distinct invitedUserId from invitations for this company
     const distinctInvitations = await TaskInvitation.aggregate([
       { $match: filter },
       {
@@ -142,7 +139,6 @@ export const getInvitedUsers = async (req, res) => {
     ]);
     const total = totalAgg.length > 0 ? totalAgg[0].total : 0;
 
-    // Populate user details for the distinct users
     const userIds = distinctInvitations.map(a => a._id);
     const users = await User.find({ _id: { $in: userIds } })
       .select('uid name email accountStatus type')
