@@ -24,6 +24,20 @@ const taskSchema = new mongoose.Schema({
     trim: true
   },
 
+  taskType: {
+    type: String,
+    enum: ['daily', 'days', 'dates'],
+    default: 'daily'
+  },
+  recurringDays: [{
+    type: String,
+    enum: ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY']
+  }],
+  recurringDates: [{
+    type: Number,
+    min: 1,
+    max: 31
+  }],
   priority: {
     type: String,
     enum: ['LOW', 'MEDIUM', 'HIGH', 'URGENT', 'CRITICAL'],
@@ -141,6 +155,9 @@ taskSchema.index({ companyId: 1, status: 1, priority: 1 });
 taskSchema.index({ companyId: 1, status: 1, dueDate: 1 });
 taskSchema.index({ assignedUsers: 1, status: 1 });
 taskSchema.index({ companyId: 1, deletedAt: 1 });
+  taskSchema.index({ companyId: 1, taskType: 1, dueDate: 1 });
+  taskSchema.index({ companyId: 1, taskType: 1, recurringDays: 1 });
+  taskSchema.index({ companyId: 1, taskType: 1, recurringDates: 1 });
 
 // Virtual for task age
 taskSchema.virtual('ageInDays').get(function() {

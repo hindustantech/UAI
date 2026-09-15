@@ -16,7 +16,7 @@ import { createTaskAuditLog } from '../../utils/taskAuditHelper.js';
 export const getTasks = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
-    const { status, priority, assignee, owner, dueDateStart, dueDateEnd, search, page = 1, limit = 50 } = req.query;
+    const { status, priority, taskType, assignee, owner, dueDateStart, dueDateEnd, search, page = 1, limit = 50 } = req.query;
 
     let filter = { companyId };
 
@@ -30,6 +30,10 @@ export const getTasks = async (req, res) => {
       filter.priority = priority;
     }
 
+    // Filter by taskType
+    if (taskType) {
+      filter.taskType = taskType;
+    }
 
     // Filter by owner
     if (owner) {
@@ -142,7 +146,7 @@ export const createTask = async (req, res) => {
   try {
     const companyId = resolveCompanyId(req);
     logger.info(`Creating task for companyId: ${companyId}, userId: ${req.user._id}`);
-    const { title,taskNumber, description, priority, startDate, dueDate, estimatedDurationSeconds, assignedUsers } = req.body;
+    const { title, taskNumber, description, priority, startDate, dueDate, estimatedDurationSeconds, assignedUsers, taskType, recurringDays, recurringDates } = req.body;
 
     // Validate required fields
     if (!title) {
@@ -196,6 +200,9 @@ export const createTask = async (req, res) => {
       title,
       taskNumber,
       description,
+      taskType: taskType || 'daily',
+      recurringDays: taskType === 'days' ? (recurringDays || []) : [],
+      recurringDates: taskType === 'dates' ? (recurringDates || []) : [],
       priority: priority || 'MEDIUM',
       startDate: startDate || new Date(),
       dueDate,
@@ -380,6 +387,104 @@ export const softDeleteTask = async (req, res) => {
     res.status(500).json({
       success: false,
       error: { code: 'TASK_DELETE_ERROR', message: 'Failed to delete task' }
+    });
+  }
+};
+
+export const getTodayTasks = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const user = req.user;
+
+    const now = new Date();
+    const todayDayNumber = now.getDate();
+    const dayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+    const todayDayName = dayNames[now.getDay()];
+
+    // Build taskType filter: which tasks are "active" today
+    const taskTypeFilter = {
+      $or: [
+        // daily → always show
+        { taskType: 'daily' },
+        // days → show if today's weekday is in recurringDays
+        { taskType: 'days', recurringDays: todayDayName },
+        // dates → show if today's date number is in recurringDates
+        { taskType: 'dates', recurringDates: todayDayNumber }
+      ]
+    };
+
+    // Base filter: company + not deleted + today's taskType match
+    const baseFilter = {
+      companyId,
+      deletedAt: { $exists: false },
+      ...taskTypeFilter
+    };
+
+    let tasks;
+
+    if (user.type === 'super_admin' || user.type === 'partner') {
+      // Admin sees all today's tasks
+      tasks = await Task.find(baseFilter)
+        .populate('createdBy', 'name email')
+        .populate('ownerId', 'name email')
+        .populate('assignedUsers', 'name email')
+        .sort({ priority: 1, createdAt: -1 })
+        .lean();
+    } else {
+      // For regular users, find taskIds where user is assigned or invited
+      const [assignments, invitations] = await Promise.all([
+        TaskAssignment.find({
+          companyId,
+          userId: user._id,
+          status: { $in: ['INVITED', 'ASSIGNED', 'ACCEPTED'] }
+        }).select('taskId').lean(),
+        TaskInvitation.find({
+          companyId,
+          invitedUserId: user._id,
+          status: { $in: ['PENDING', 'ACCEPTED'] }
+        }).select('taskId').lean()
+      ]);
+
+      const relatedTaskIds = [
+        ...new Set([
+          ...assignments.map(a => a.taskId.toString()),
+          ...invitations.map(i => i.taskId.toString())
+        ])
+      ];
+
+      // $or: owner, creator, assigned directly, or has assignment/invitation
+      baseFilter.$and = [
+        taskTypeFilter,
+        {
+          $or: [
+            { ownerId: user._id },
+            { createdBy: user._id },
+            { assignedUsers: user._id },
+            ...(relatedTaskIds.length > 0 ? [{ _id: { $in: relatedTaskIds } }] : [])
+          ]
+        }
+      ];
+
+      delete baseFilter.$or;
+
+      tasks = await Task.find(baseFilter)
+        .populate('createdBy', 'name email')
+        .populate('ownerId', 'name email')
+        .populate('assignedUsers', 'name email')
+        .sort({ priority: 1, createdAt: -1 })
+        .lean();
+    }
+
+    res.json({
+      success: true,
+      count: tasks.length,
+      data: tasks
+    });
+  } catch (error) {
+    console.error('Get today tasks error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'TASK_FETCH_ERROR', message: 'Failed to fetch today tasks' }
     });
   }
 };

@@ -7,6 +7,7 @@ import {
   updateTask,
   softDeleteTask,
   getTasks,
+  getTodayTasks,
 } from '../../controllers/tasks/task.controller.js';
 import { validateTask } from '../../middlewares/taskValidation.js';
 
@@ -16,6 +17,11 @@ const router = express.Router();
 // @desc    Get all tasks with filtering
 // @access  Private (with appropriate permissions)
 router.get('/', authMiddleware, getTasks);
+
+// @route   GET /api/v1/tasks/today
+// @desc    Get today's tasks (due date is today)
+// @access  Private
+router.get('/today', authMiddleware, getTodayTasks);
 
 // @route   POST /api/v1/tasks
 // @desc    Create a new task
