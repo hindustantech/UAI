@@ -204,7 +204,7 @@ export const QuicksendWhatsAppOtp = async (number, code) => {
 
             to: formattedNumber,
 
-            templateName: "otp_auth",
+            templateName: "otp_auths",
 
             params: [String(code)],
 
