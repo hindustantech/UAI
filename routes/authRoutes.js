@@ -20,8 +20,8 @@ import {
     getUserIdsAndNamesByReferralCodesController,
     getUserProfile,
     deleteUser,
-    SMSstartAuth,
-    SMScompletOtp,
+    startAuth,
+    completOtp,
     completeProfile,
     findUserByReferralOwner,
     exportUsersByLocation,
@@ -81,8 +81,8 @@ router.get("/getUserProfile", authMiddleware, getUserProfile);
 router.delete("/deleteUser", authMiddleware, deleteUser);
 
 
-router.post('/startAuth', SMSstartAuth);
-router.post('/completOtp', SMScompletOtp);
+router.post('/startAuth', startAuth);
+router.post('/completOtp',completOtp);
 
 
 
