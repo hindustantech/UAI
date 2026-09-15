@@ -9,94 +9,94 @@ const WHATSAPP_API_URL =
 
 const WHATSAPP_API_KEY = process.env.QUICKHUB_API_KEY;
 
-const SMS_API_URL =
-    "https://smsmediaapi.patronservices.in/api/sms/send-otp-api";
+// const SMS_API_URL =
+//     "https://smsmediaapi.patronservices.in/api/sms/send-otp-api";
 
-const SMS_API_KEY = process.env.SMS_API_KEY;
+// const SMS_API_KEY = process.env.SMS_API_KEY;
 
-/**
- * Format phone number to E.164
- */
-const formatPhoneNumber = (number) => {
-    let cleaned = String(number).replace(/\D/g, "");
+// /**
+//  * Format phone number to E.164
+//  */
+// const formatPhoneNumber = (number) => {
+//     let cleaned = String(number).replace(/\D/g, "");
 
-    // If starts with 91 and length is 12
-    if (cleaned.startsWith("91") && cleaned.length === 12) {
-        return `+${cleaned}`;
-    }
+//     // If starts with 91 and length is 12
+//     if (cleaned.startsWith("91") && cleaned.length === 12) {
+//         return `+${cleaned}`;
+//     }
 
-    // If only 10 digit Indian number
-    if (cleaned.length === 10) {
-        return `+91${cleaned}`;
-    }
+//     // If only 10 digit Indian number
+//     if (cleaned.length === 10) {
+//         return `+91${cleaned}`;
+//     }
 
-    // If already has country code
-    return `+${cleaned}`;
-};
+//     // If already has country code
+//     return `+${cleaned}`;
+// };
 
-/**
- * Send SMS OTP
- * @param {string} number
- * @param {string|number} code
- */
-export const QuicksendWhatsAppOtp = async (number, code) => {
-    const cleanedNumber = String(number).replace(/\D/g, "");
-    const mobile = cleanedNumber.length === 10
-        ? cleanedNumber
-        : cleanedNumber.startsWith("91") && cleanedNumber.length === 12
-            ? cleanedNumber.slice(2)
-            : cleanedNumber;
+// /**
+//  * Send SMS OTP
+//  * @param {string} number
+//  * @param {string|number} code
+//  */
+// export const QuicksendWhatsAppOtp = async (number, code) => {
+//     const cleanedNumber = String(number).replace(/\D/g, "");
+//     const mobile = cleanedNumber.length === 10
+//         ? cleanedNumber
+//         : cleanedNumber.startsWith("91") && cleanedNumber.length === 12
+//             ? cleanedNumber.slice(2)
+//             : cleanedNumber;
 
-    logger.info("Attempting to send SMS OTP", {
-        original: number,
-        mobile: mobile
-    });
+//     logger.info("Attempting to send SMS OTP", {
+//         original: number,
+//         mobile: mobile
+//     });
 
-    try {
-        const smstext = `Dear Concern, ${code} is your OTP. Patron Services`;
+//     try {
+//         const smstext = `Dear Concern, ${code} is your OTP. Patron Services`;
 
-        const response = await axios.get(SMS_API_URL, {
-            params: {
-                apikey: SMS_API_KEY,
-                senderid: "PATSER",
-                mobile: mobile,
-                smstext: smstext,
-                serviceid: 6,
-                peid:'1201159825774033626',
-                templateid:'1207161845816576472'
-            },
-        });
+//         const response = await axios.get(SMS_API_URL, {
+//             params: {
+//                 apikey: SMS_API_KEY,
+//                 senderid: "PATSER",
+//                 mobile: mobile,
+//                 smstext: smstext,
+//                 serviceid: 6,
+//                 peid: '1201159825774033626',
+//                 templateid: '1207161845816576472'
+//             },
+//         });
 
-        logger.info("SMS OTP sent successfully", {
-            number: mobile,
-            response: response.data
-        });
+//         logger.info("SMS OTP sent successfully", {
+//             number: mobile,
+//             response: response.data
+//         });
 
-        return {
-            success: true,
-            data: response.data,
-        };
+//         return {
+//             success: true,
+//             data: response.data,
+//         };
 
-    } catch (error) {
+//     } catch (error) {
 
-        logger.error("SMS OTP Send Error:", {
-            number: mobile,
-            error: error?.response?.data || error.message
-        });
+//         logger.error("SMS OTP Send Error:", {
+//             number: mobile,
+//             error: error?.response?.data || error.message
+//         });
 
-        return {
-            success: false,
-            error: error?.response?.data || error.message,
-        };
-    }
-}
+//         return {
+//             success: false,
+//             error: error?.response?.data || error.message,
+//         };
+//     }
+// }
 
 
-/**
- * Verify SMS OTP
- * @param {string} otp
- * @param {string} uid
- */
+// /**
+//  * Verify SMS OTP
+//  * @param {string} otp
+//  * @param {string} uid
+//  */
 export const Smsotpverify = async (otp, uid) => {
     logger.info("Attempting to verify SMS OTP", { uid, otp });
 
@@ -132,160 +132,160 @@ export const Smsotpverify = async (otp, uid) => {
 
 
 
-// /**
+/**
 
-//  * Format phone number to E.164
+ * Format phone number to E.164
 
-//  */
+ */
 
-// const formatPhoneNumber = (number) => {
+const formatPhoneNumber = (number) => {
 
-//     let cleaned = String(number).replace(/\D/g, "");
+    let cleaned = String(number).replace(/\D/g, "");
 
 
 
-//     // If starts with 91 and length is 12
+    // If starts with 91 and length is 12
 
-//     if (cleaned.startsWith("91") && cleaned.length === 12) {
+    if (cleaned.startsWith("91") && cleaned.length === 12) {
 
-//         return `+${cleaned}`;
+        return `+${cleaned}`;
 
-//     }
+    }
 
 
 
-//     // If only 10 digit Indian number
+    // If only 10 digit Indian number
 
-//     if (cleaned.length === 10) {
+    if (cleaned.length === 10) {
 
-//         return `+91${cleaned}`;
+        return `+91${cleaned}`;
 
-//     }
+    }
 
 
 
-//     // If already has country code
+    // If already has country code
 
-//     return `+${cleaned}`;
+    return `+${cleaned}`;
 
-// };
+};
 
 
 
-// /**
+/**
 
-//  * Send WhatsApp OTP
+ * Send WhatsApp OTP
 
-//  * @param {string} number
+ * @param {string} number
 
-//  * @param {string|number} code
+ * @param {string|number} code
 
-//  */
+ */
 
-// export const QuicksendWhatsAppOtp = async (number, code) => {
+export const QuicksendWhatsAppOtp = async (number, code) => {
 
-//     const formattedNumber = formatPhoneNumber(number);
+    const formattedNumber = formatPhoneNumber(number);
 
 
 
-//     logger.info("Attempting to send WhatsApp OTP", {
+    logger.info("Attempting to send WhatsApp OTP", {
 
-//         original: number,
+        original: number,
 
-//         formatted: formattedNumber
+        formatted: formattedNumber
 
-//     });
+    });
 
 
 
-//     try {
+    try {
 
-//         const payload = {
+        const payload = {
 
-//             to: formattedNumber,
+            to: formattedNumber,
 
-//             templateName: "otp_auth",
+            templateName: "otp_auth",
 
-//             params: [String(code)],
+            params: [String(code)],
 
-//         };
+        };
 
 
 
-//         logger.info("Sending WhatsApp OTP", {
+        logger.info("Sending WhatsApp OTP", {
 
-//             number: formattedNumber,
+            number: formattedNumber,
 
-//             code: "[REDACTED]"
+            code: "[REDACTED]"
 
-//         });
+        });
 
 
 
-//         const response = await axios.post(
+        const response = await axios.post(
 
-//             WHATSAPP_API_URL,
+            WHATSAPP_API_URL,
 
-//             payload,
+            payload,
 
-//             {
+            {
 
-//                 headers: {
+                headers: {
 
-//                     Authorization: `Bearer ${WHATSAPP_API_KEY}`,
+                    Authorization: `Bearer ${WHATSAPP_API_KEY}`,
 
-//                     "Content-Type": "application/json",
+                    "Content-Type": "application/json",
 
-//                 },
+                },
 
-//             }
+            }
 
-//         );
+        );
 
 
 
-//         logger.info("WhatsApp OTP sent successfully", {
+        logger.info("WhatsApp OTP sent successfully", {
 
-//             number: formattedNumber,
+            number: formattedNumber,
 
-//             response: response.data
+            response: response.data
 
-//         });
+        });
 
 
 
-//         return {
+        return {
 
-//             success: true,
+            success: true,
 
-//             data: response.data,
+            data: response.data,
 
-//         };
+        };
 
 
 
-//     } catch (error) {
+    } catch (error) {
 
 
 
-//         logger.error("WhatsApp OTP Send Error:", {
+        logger.error("WhatsApp OTP Send Error:", {
 
-//             number: formattedNumber,
+            number: formattedNumber,
 
-//             error: error?.response?.data || error.message
+            error: error?.response?.data || error.message
 
-//         });
+        });
 
 
 
-//         return {
+        return {
 
-//             success: false,
+            success: false,
 
-//             error: error?.response?.data || error.message,
+            error: error?.response?.data || error.message,
 
-//         };
+        };
 
-//     }
+    }
 
-// }
+}
