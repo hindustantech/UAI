@@ -291,8 +291,8 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
                 assignedTo: [salesperson._id],
                 employeeId: salesperson._id,
                 status: "not started",
-                SalesStatus: "open",
-                // Use uploader's location for punch-in
+                SalesStatus: record.SalesStatus || record.sales_status || "open",
+                visitType: record.visit_type || "one_time",
                 punchInLocation: userLocation,
                 punchOutLocation: userLocation,
 
@@ -309,6 +309,48 @@ const processBulkRecords = async (records, companyId, uploaderUser, userLocation
                     }
                 ]
             };
+
+            // Handle recurring schedule from CSV
+            const visitType = record.visit_type || "one_time";
+            if (visitType === "recurring" && record.recurring_type) {
+                let recurringDates = [];
+                if (record.recurring_dates) {
+                    recurringDates = record.recurring_dates.split(',').map(d => parseInt(d.trim())).filter(d => !isNaN(d) && d >= 1 && d <= 31);
+                }
+
+                let recurringDays = [];
+                if (record.recurring_days) {
+                    const validDays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+                    recurringDays = record.recurring_days.split(',').map(d => d.trim().toLowerCase()).filter(d => validDays.includes(d));
+                }
+
+                sessionData.recurringSchedule = {
+                    type: record.recurring_type,
+                    days: recurringDays,
+                    dates: recurringDates,
+                    startDate: record.next_meeting_date ? new Date(record.next_meeting_date) : new Date(),
+                    isActive: true
+                };
+            }
+
+            // Handle next meeting from CSV
+            if (record.next_meeting_date) {
+                sessionData.nextMeeting = {
+                    decided: true,
+                    date: new Date(record.next_meeting_date),
+                    time: record.next_meeting_time || null,
+                    notes: record.next_meeting_notes || ""
+                };
+
+                sessionData.meetingLogs = [
+                    {
+                        userId: salesperson._id,
+                        date: new Date(record.next_meeting_date),
+                        time: record.next_meeting_time || "",
+                        notes: record.next_meeting_notes || ""
+                    }
+                ];
+            }
 
             // Save to database
             const salesSession = new SalesSession(sessionData);
@@ -448,7 +490,12 @@ const prepareCustomerData = (record, userLocation) => {
         phoneNumber: record.phone_number?.toString() || "",
         address: record.address || "",
         landmark: record.landmark || "",
-        location: location // Using uploader's location instead of CSV coordinates
+        gender: record.gender || "Other",
+        dob: record.dob ? new Date(record.dob) : null,
+        email: record.email || "",
+        type: record.customer_type || "customer",
+        isActive: true,
+        location: location
     };
 };
 
@@ -505,8 +552,9 @@ export const getBulkUploadTemplate = async (req, res) => {
                 address: "123 Main Street, Mumbai",
                 landmark: "Near Central Mall",
                 salesperson_referral_code: "REF123ABC",
-
-
+                visit_type: "one_time",
+                next_meeting_date: "",
+                next_meeting_notes: ""
             },
             {
                 company_name: "XYZ Traders",
@@ -515,6 +563,11 @@ export const getBulkUploadTemplate = async (req, res) => {
                 address: "456 Park Avenue, Delhi",
                 landmark: "Opposite Metro Station",
                 salesperson_referral_code: "",
+                visit_type: "recurring",
+                recurring_type: "days",
+                recurring_dates: "",
+                next_meeting_date: "2026-10-01",
+                next_meeting_notes: "Follow up meeting"
             }
         ];
 
@@ -618,8 +671,8 @@ export const getUploaderInfo = async (req, res) => {
 SIMPLIFIED CSV COLUMNS (No lat/long required)
 ============================================================ */
 
-/*
-CSV/Excel File Required Columns:
+/**
+ * CSV/Excel File Required Columns:
 
 1. customer_id (required) - Unique identifier for the customer
 2. company_name (required) - Customer's company or business name
@@ -631,6 +684,11 @@ CSV/Excel File Required Columns:
 8. salesperson_id (optional) - Salesperson's UID
 9. assigned_to (optional) - Salesperson's MongoDB ID
 10. notes (optional) - Any additional notes
+11. visit_type (optional) - "one_time" or "recurring", default "one_time"
+12. recurring_type (optional) - "days" or "dates"
+13. recurring_dates (optional) - Comma separated: "1,15,28"
+14. next_meeting_date (optional) - Meeting date YYYY-MM-DD
+15. next_meeting_notes (optional) - Meeting notes
 
 Note: At least ONE of these must be provided:
 - salesperson_referral_code

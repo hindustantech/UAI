@@ -2028,8 +2028,6 @@ export const SMSstartAuth = async (req, res) => {
 
 
 
-
-
 export const SMScompletOtp = async (req, res) => {
   try {
     const {
@@ -2051,9 +2049,7 @@ export const SMScompletOtp = async (req, res) => {
     /* ---------------- FIND USER ---------------- */
 
     const user = await User.findById(userId)
-      .select(
-        "_id phone type suspend isVerified"
-      )
+      .select("_id phone type suspend isVerified")
       .lean();
 
     if (!user) {
@@ -2072,102 +2068,161 @@ export const SMScompletOtp = async (req, res) => {
       });
     }
 
-    /* ---------------- FIND OTP ---------------- */
+    /* ==================================================
+       TEST OTP BYPASS
+       9999 works ONLY outside production.
 
-    const otpDoc = await Otp.findOne({
-      userId: user._id,
-      verified: false,
-    });
+       Set:
+       NODE_ENV=development
 
-    if (!otpDoc) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP expired or not found",
-      });
-    }
+       In production:
+       NODE_ENV=production
+       ================================================== */
 
-    /* ---------------- EXPIRE CHECK ---------------- */
+    const isTestOtp =
+      process.env.NODE_ENV !== "production" &&
+      String(otp) === "9999";
 
-    if (
-      new Date() > new Date(otpDoc.expiresAt)
-    ) {
-
-      await Otp.deleteMany({
-        userId: user._id,
-      });
-
-      return res.status(400).json({
-        success: false,
-        message: "OTP expired",
-      });
-    }
-
-    /* ---------------- ATTEMPTS CHECK ---------------- */
-
-    if (
-      otpDoc.attempts >=
-      otpDoc.maxAttempts
-    ) {
-
-      return res.status(429).json({
-        success: false,
-        message:
-          "Too many invalid attempts",
-      });
-    }
-
-    /* ---------------- INVALID OTP ---------------- */
-
+    let otpDoc = null;
     let isOtpValid = false;
 
-    /* CHECK VIA EXTERNAL SMS API IF sms_uid EXISTS */
-    if (otpDoc.sms_uid) {
-      const verifyResponse = await Smsotpverify(otp, otpDoc.sms_uid);
-      if (verifyResponse.success) {
-        isOtpValid = true;
-      }
-    }
+    /* ---------------- TEST OTP ---------------- */
 
-    /* FALLBACK: LOCAL DB CHECK */
-    if (!isOtpValid && (otp === "1234" || otpDoc.otp === otp)) {
+    if (isTestOtp) {
+      console.warn(
+        `TEST OTP LOGIN USED for user ${user._id}`
+      );
+
       isOtpValid = true;
     }
 
-    if (!isOtpValid) {
-      otpDoc.attempts += 1;
-      await otpDoc.save();
+    /* ---------------- NORMAL OTP FLOW ---------------- */
 
-      const attemptsLeft =
-        otpDoc.maxAttempts -
-        otpDoc.attempts;
+    if (!isTestOtp) {
+      /* ---------------- FIND OTP ---------------- */
 
-      logApiError(
-        "LOGIN_FAILED",
-        "AUTH",
-        new Error(`Invalid OTP (attempt ${otpDoc.attempts}/${otpDoc.maxAttempts})`),
-        req,
-        { userId: user._id, attemptsLeft: attemptsLeft < 0 ? 0 : attemptsLeft }
-      );
-
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP",
-        attemptsLeft:
-          attemptsLeft < 0
-            ? 0
-            : attemptsLeft,
+      otpDoc = await Otp.findOne({
+        userId: user._id,
+        verified: false,
       });
+
+      if (!otpDoc) {
+        return res.status(400).json({
+          success: false,
+          message: "OTP expired or not found",
+        });
+      }
+
+      /* ---------------- EXPIRE CHECK ---------------- */
+
+      if (
+        new Date() >
+        new Date(otpDoc.expiresAt)
+      ) {
+        await Otp.deleteMany({
+          userId: user._id,
+        });
+
+        return res.status(400).json({
+          success: false,
+          message: "OTP expired",
+        });
+      }
+
+      /* ---------------- ATTEMPTS CHECK ---------------- */
+
+      if (
+        otpDoc.attempts >=
+        otpDoc.maxAttempts
+      ) {
+        return res.status(429).json({
+          success: false,
+          message: "Too many invalid attempts",
+        });
+      }
+
+      /* ---------------- EXTERNAL SMS OTP ---------------- */
+
+      if (otpDoc.sms_uid) {
+        try {
+          const verifyResponse =
+            await Smsotpverify(
+              otp,
+              otpDoc.sms_uid
+            );
+
+          if (verifyResponse.success) {
+            isOtpValid = true;
+          }
+        } catch (smsError) {
+          console.error(
+            "SMS OTP verification error:",
+            smsError
+          );
+        }
+      }
+
+      /* ---------------- LOCAL DB OTP ---------------- */
+
+      if (
+        !isOtpValid &&
+        otpDoc.otp &&
+        String(otpDoc.otp) === String(otp)
+      ) {
+        isOtpValid = true;
+      }
+
+      /* ---------------- INVALID OTP ---------------- */
+
+      if (!isOtpValid) {
+        otpDoc.attempts += 1;
+
+        await otpDoc.save();
+
+        const attemptsLeft =
+          otpDoc.maxAttempts -
+          otpDoc.attempts;
+
+        logApiError(
+          "LOGIN_FAILED",
+          "AUTH",
+          new Error(
+            `Invalid OTP (attempt ${otpDoc.attempts}/${otpDoc.maxAttempts})`
+          ),
+          req,
+          {
+            userId: user._id,
+            attemptsLeft:
+              attemptsLeft < 0
+                ? 0
+                : attemptsLeft,
+          }
+        );
+
+        return res.status(400).json({
+          success: false,
+          message: "Invalid OTP",
+          attemptsLeft:
+            attemptsLeft < 0
+              ? 0
+              : attemptsLeft,
+        });
+      }
     }
 
-    /* ---------------- MARK VERIFIED ---------------- */
+    /* ==================================================
+       OTP VERIFIED
+       ================================================== */
 
-    otpDoc.verified = true;
+    if (otpDoc) {
+      otpDoc.verified = true;
 
-    if (deviceId) {
-      otpDoc.deviceId = deviceId;
+      if (deviceId) {
+        otpDoc.deviceId = deviceId;
+      }
+
+      await otpDoc.save();
     }
-
-    await otpDoc.save();
 
     /* ---------------- UPDATE USER ---------------- */
 
@@ -2177,8 +2232,11 @@ export const SMScompletOtp = async (req, res) => {
         lastLoginAt: new Date(),
       },
     };
+
     if (devicetoken) {
-      userUpdateOps.$addToSet = { devicetoken };
+      userUpdateOps.$addToSet = {
+        devicetoken,
+      };
     }
 
     const updatedUser =
@@ -2192,9 +2250,11 @@ export const SMScompletOtp = async (req, res) => {
 
     /* ---------------- DELETE OTP ---------------- */
 
-    await Otp.deleteMany({
-      userId: user._id,
-    });
+    if (otpDoc) {
+      await Otp.deleteMany({
+        userId: user._id,
+      });
+    }
 
     /* ---------------- GENERATE JWT ---------------- */
 
@@ -2203,13 +2263,22 @@ export const SMScompletOtp = async (req, res) => {
       updatedUser.type
     );
 
+    /* ---------------- LOGIN LOG ---------------- */
+
     logApiAction({
       action: "LOGIN",
       model: "AUTH",
       req,
       resourceId: updatedUser._id,
-      after: { userId: updatedUser._id, type: updatedUser.type, phone: updatedUser.phone },
-      extra: { isOTPVerified: true },
+      after: {
+        userId: updatedUser._id,
+        type: updatedUser.type,
+        phone: updatedUser.phone,
+      },
+      extra: {
+        isOTPVerified: true,
+        isTestOtp,
+      },
     });
 
     /* ---------------- RESPONSE ---------------- */
@@ -2224,13 +2293,11 @@ export const SMScompletOtp = async (req, res) => {
         id: updatedUser._id,
         phone: updatedUser.phone,
         type: updatedUser.type,
-        isVerified:
-          updatedUser.isVerified,
+        isVerified: updatedUser.isVerified,
       },
     });
 
   } catch (error) {
-
     console.error(
       "completOtp Error:",
       error
@@ -2243,6 +2310,220 @@ export const SMScompletOtp = async (req, res) => {
     });
   }
 };
+
+// export const SMScompletOtp = async (req, res) => {
+//   try {
+//     const {
+//       userId,
+//       otp,
+//       deviceId,
+//       devicetoken,
+//     } = req.body;
+
+//     /* ---------------- VALIDATION ---------------- */
+
+//     if (!userId || !otp) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "userId and otp required",
+//       });
+//     }
+
+//     /* ---------------- FIND USER ---------------- */
+
+//     const user = await User.findById(userId)
+//       .select(
+//         "_id phone type suspend isVerified"
+//       )
+//       .lean();
+
+//     if (!user) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "User not found",
+//       });
+//     }
+
+//     /* ---------------- SUSPEND CHECK ---------------- */
+
+//     if (user.suspend) {
+//       return res.status(403).json({
+//         success: false,
+//         message: "Account suspended",
+//       });
+//     }
+
+//     /* ---------------- FIND OTP ---------------- */
+
+//     const otpDoc = await Otp.findOne({
+//       userId: user._id,
+//       verified: false,
+//     });
+
+//     if (!otpDoc) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "OTP expired or not found",
+//       });
+//     }
+
+//     /* ---------------- EXPIRE CHECK ---------------- */
+
+//     if (
+//       new Date() > new Date(otpDoc.expiresAt)
+//     ) {
+
+//       await Otp.deleteMany({
+//         userId: user._id,
+//       });
+
+//       return res.status(400).json({
+//         success: false,
+//         message: "OTP expired",
+//       });
+//     }
+
+//     /* ---------------- ATTEMPTS CHECK ---------------- */
+
+//     if (
+//       otpDoc.attempts >=
+//       otpDoc.maxAttempts
+//     ) {
+
+//       return res.status(429).json({
+//         success: false,
+//         message:
+//           "Too many invalid attempts",
+//       });
+//     }
+
+//     /* ---------------- INVALID OTP ---------------- */
+
+//     let isOtpValid = false;
+
+//     /* CHECK VIA EXTERNAL SMS API IF sms_uid EXISTS */
+//     if (otpDoc.sms_uid) {
+//       const verifyResponse = await Smsotpverify(otp, otpDoc.sms_uid);
+//       if (verifyResponse.success) {
+//         isOtpValid = true;
+//       }
+//     }
+
+//     /* FALLBACK: LOCAL DB CHECK */
+//     if (!isOtpValid && (otp === "1234" || otpDoc.otp === otp)) {
+//       isOtpValid = true;
+//     }
+
+//     if (!isOtpValid) {
+//       otpDoc.attempts += 1;
+//       await otpDoc.save();
+
+//       const attemptsLeft =
+//         otpDoc.maxAttempts -
+//         otpDoc.attempts;
+
+//       logApiError(
+//         "LOGIN_FAILED",
+//         "AUTH",
+//         new Error(`Invalid OTP (attempt ${otpDoc.attempts}/${otpDoc.maxAttempts})`),
+//         req,
+//         { userId: user._id, attemptsLeft: attemptsLeft < 0 ? 0 : attemptsLeft }
+//       );
+
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid OTP",
+//         attemptsLeft:
+//           attemptsLeft < 0
+//             ? 0
+//             : attemptsLeft,
+//       });
+//     }
+
+//     /* ---------------- MARK VERIFIED ---------------- */
+
+//     otpDoc.verified = true;
+
+//     if (deviceId) {
+//       otpDoc.deviceId = deviceId;
+//     }
+
+//     await otpDoc.save();
+
+//     /* ---------------- UPDATE USER ---------------- */
+
+//     const userUpdateOps = {
+//       $set: {
+//         isVerified: true,
+//         lastLoginAt: new Date(),
+//       },
+//     };
+//     if (devicetoken) {
+//       userUpdateOps.$addToSet = { devicetoken };
+//     }
+
+//     const updatedUser =
+//       await User.findByIdAndUpdate(
+//         user._id,
+//         userUpdateOps,
+//         {
+//           new: true,
+//         }
+//       ).lean();
+
+//     /* ---------------- DELETE OTP ---------------- */
+
+//     await Otp.deleteMany({
+//       userId: user._id,
+//     });
+
+//     /* ---------------- GENERATE JWT ---------------- */
+
+//     const token = await generateToken(
+//       updatedUser._id,
+//       updatedUser.type
+//     );
+
+//     logApiAction({
+//       action: "LOGIN",
+//       model: "AUTH",
+//       req,
+//       resourceId: updatedUser._id,
+//       after: { userId: updatedUser._id, type: updatedUser.type, phone: updatedUser.phone },
+//       extra: { isOTPVerified: true },
+//     });
+
+//     /* ---------------- RESPONSE ---------------- */
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Login success",
+
+//       token,
+
+//       user: {
+//         id: updatedUser._id,
+//         phone: updatedUser.phone,
+//         type: updatedUser.type,
+//         isVerified:
+//           updatedUser.isVerified,
+//       },
+//     });
+
+//   } catch (error) {
+
+//     console.error(
+//       "completOtp Error:",
+//       error
+//     );
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "OTP verification failed",
+//       error: error.message,
+//     });
+//   }
+// };
 
 // export const startAuth = async (req, res) => {
 //   try {

@@ -105,7 +105,7 @@ const meetingLogSchema = new Schema({
 
 /* ============================================================
 VISIT NOTES / EVIDENCE
-============================================================ */
+========================================================== */
 const visitNoteSchema = new Schema({
     userId: { type: Schema.Types.ObjectId, ref: "User" },
 
@@ -115,6 +115,7 @@ const visitNoteSchema = new Schema({
 
     createdAt: { type: Date, default: Date.now }
 });
+
 
 /* ============================================================
 ROUTE TRACKING (IMPORTANT GEO FIELD)
@@ -240,6 +241,25 @@ const salesSessionSchema = new Schema({
     visitNotes: {
         type: [visitNoteSchema],
         default: []
+    },
+
+    /* ================= VISIT TYPE & RECURRING SCHEDULE ================= */
+
+    visitType: {
+        type: String,
+        enum: ["one_time", "recurring"],
+        default: "one_time"
+    },
+
+    recurringSchedule: {
+        type: {
+            type: String,
+            enum: ["days", "dates"]
+        },
+        days: { type: [String], default: [] },
+        dates: { type: [Number], default: [] },
+        startDate: { type: Date, default: null },
+        isActive: { type: Boolean, default: false }
     },
 
     /* ================= ROUTE ================= */

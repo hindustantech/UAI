@@ -668,7 +668,8 @@ export const completeSalesForm = async (req, res) => {
       email,
       address,
       type,
-      isActive
+      isActive,
+      visitType
     } = parsedCustomer;
 
     const errors = {};
@@ -847,6 +848,23 @@ export const completeSalesForm = async (req, res) => {
         ...(customerLocation && { location: customerLocation }),
         shopPhoto: shopPhotos
       };
+
+      // Visit Type
+      if (visitType) {
+        session.visitType = visitType;
+      }
+
+      // Recurring Schedule
+      if (parsedCustomer.recurringSchedule) {
+        const rs = parsedCustomer.recurringSchedule;
+        session.recurringSchedule = {
+          type: rs.type,
+          days: rs.days || [],
+          dates: rs.dates || [],
+          startDate: rs.startDate || null,
+          isActive: rs.isActive !== undefined ? rs.isActive : (session.recurringSchedule?.isActive ?? false)
+        };
+      }
 
       // Sales logs
       if (parsedSales) {
@@ -3600,21 +3618,45 @@ export const getTodayMeetings = async (req, res) => {
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
+    // today's weekday name for recurring days matching
+    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const todayDayName = dayNames[new Date().getDay()];
+    const todayDate = new Date().getDate(); // day of month (1-31)
+
     const baseQuery = {
       companyId: objectCompanyId,
-
-      "nextMeeting.decided": true,
-      "nextMeeting.date": {
-        $gte: startOfDay,
-        $lte: endOfDay
-      },
-
-      // match if ANY
-      $or: [
-        { assignedTo: objectUserId },
-        { employeeId: objectUserId }
-        // add below only if exists in schema
-        // { "nextMeeting.userId": objectUserId }
+      $and: [
+        {
+          $or: [
+            { assignedTo: objectUserId },
+            { employeeId: objectUserId }
+          ]
+        },
+        {
+          $or: [
+            // Next meeting today
+            {
+              "nextMeeting.decided": true,
+              "nextMeeting.date": { $gte: startOfDay, $lte: endOfDay }
+            },
+            // Recurring visit by days (e.g. every monday, wednesday)
+            {
+              visitType: "recurring",
+              "recurringSchedule.type": "days",
+              "recurringSchedule.isActive": true,
+              "recurringSchedule.days": todayDayName,
+              "recurringSchedule.startDate": { $lte: endOfDay }
+            },
+            // Recurring visit by dates (e.g. 1st, 15th of month)
+            {
+              visitType: "recurring",
+              "recurringSchedule.type": "dates",
+              "recurringSchedule.isActive": true,
+              "recurringSchedule.dates": todayDate,
+              "recurringSchedule.startDate": { $lte: endOfDay }
+            }
+          ]
+        }
       ]
     };
 
@@ -3623,7 +3665,7 @@ export const getTodayMeetings = async (req, res) => {
       SalesSession.find(baseQuery)
         .populate("assignedTo", "name email")
         .populate("employeeId", "name email")
-        .sort({ "nextMeeting.time": 1 })
+        .sort({ "nextMeeting.time": 1, createdAt: -1 })
         .skip(skip)
         .limit(limit),
 
@@ -3676,21 +3718,51 @@ export const getTodayMeetingsAdmin = async (req, res) => {
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
+    // today's weekday name for recurring days matching
+    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const todayDayName = dayNames[new Date().getDay()];
+    const todayDate = new Date().getDate(); // day of month (1-31)
+
     const baseQuery = {
       companyId: objectCompanyId,
-      "nextMeeting.decided": true,
-      "nextMeeting.date": {
-        $gte: startOfDay,
-        $lte: endOfDay
-      }
+      $or: [
+        // Next meeting today
+        {
+          "nextMeeting.decided": true,
+          "nextMeeting.date": { $gte: startOfDay, $lte: endOfDay }
+        },
+        // Recurring visit by days (e.g. every monday, wednesday)
+        {
+          visitType: "recurring",
+          "recurringSchedule.type": "days",
+          "recurringSchedule.isActive": true,
+          "recurringSchedule.days": todayDayName,
+          "recurringSchedule.startDate": { $lte: endOfDay }
+        },
+        // Recurring visit by dates (e.g. 1st, 15th of month)
+        {
+          visitType: "recurring",
+          "recurringSchedule.type": "dates",
+          "recurringSchedule.isActive": true,
+          "recurringSchedule.dates": todayDate,
+          "recurringSchedule.startDate": { $lte: endOfDay }
+        }
+      ]
     };
 
     // apply user filter only if passed
     if (objectUserId) {
-      baseQuery.$or = [
-        { assignedTo: objectUserId },
-        { employeeId: objectUserId }
+      const userFilter = {
+        $or: [
+          { assignedTo: objectUserId },
+          { employeeId: objectUserId }
+        ]
+      };
+      baseQuery.$and = [
+        { $or: baseQuery.$or },
+        userFilter
       ];
+      delete baseQuery.$or;
     }
 
     const [sessions, total] = await Promise.all([
