@@ -409,7 +409,13 @@ export const getTodayTasks = async (req, res) => {
         // days → show if today's weekday is in recurringDays
         { taskType: 'days', recurringDays: todayDayName },
         // dates → show if today's date number is in recurringDates
-        { taskType: 'dates', recurringDates: todayDayNumber }
+        { taskType: 'dates', recurringDates: todayDayNumber },
+        // one_time → show if today is between startDate and dueDate
+        {
+          taskType: 'one_time',
+          startDate: { $lte: now },
+          dueDate: { $gte: now }
+        }
       ]
     };
 
@@ -485,6 +491,81 @@ export const getTodayTasks = async (req, res) => {
     res.status(500).json({
       success: false,
       error: { code: 'TASK_FETCH_ERROR', message: 'Failed to fetch today tasks' }
+    });
+  }
+};
+
+export const duplicateTask = async (req, res) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const { id } = req.params;
+    const { resetStartDate = false, resetDueDate = false, newTitle, newDescription } = req.body;
+
+    // Find original task
+    const originalTask = await Task.findOne({ _id: id, companyId });
+    if (!originalTask) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
+      });
+    }
+
+    // Calculate dates for duplicate
+    let startDate = originalTask.startDate;
+    let dueDate = originalTask.dueDate;
+
+    if (resetStartDate) {
+      startDate = new Date();
+    }
+
+    if (resetDueDate && originalTask.startDate && originalTask.dueDate) {
+      const originalDuration = originalTask.dueDate - originalTask.startDate;
+      dueDate = new Date(startDate.getTime() + originalDuration);
+    }
+
+    // Create duplicate task
+    const duplicateData = {
+      companyId,
+      title: newTitle || originalTask.title,
+      description: newDescription || originalTask.description,
+      taskType: originalTask.taskType,
+      recurringDays: originalTask.recurringDays,
+      recurringDates: originalTask.recurringDates,
+      priority: originalTask.priority,
+      status: 'DRAFT',
+      createdBy: req.user._id,
+      ownerId: req.user._id,
+      assignedUsers: [],
+      startDate,
+      dueDate,
+      estimatedDurationSeconds: originalTask.estimatedDurationSeconds
+    };
+
+    const duplicateTask = await Task.create(duplicateData);
+
+    // Create audit log
+    await createTaskAuditLog({
+      companyId,
+      taskId: duplicateTask._id,
+      userId: req.user._id,
+      action: 'TASK_DUPLICATED',
+      details: {
+        originalTaskId: originalTask._id,
+        originalTaskNumber: originalTask.taskNumber,
+        duplicateTaskNumber: duplicateTask.taskNumber
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      data: duplicateTask,
+      message: 'Task duplicated successfully'
+    });
+  } catch (error) {
+    console.error('Duplicate task error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'TASK_DUPLICATE_ERROR', message: 'Failed to duplicate task' }
     });
   }
 };

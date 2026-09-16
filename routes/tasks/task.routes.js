@@ -8,6 +8,7 @@ import {
   softDeleteTask,
   getTasks,
   getTodayTasks,
+  duplicateTask,
 } from '../../controllers/tasks/task.controller.js';
 import { validateTask } from '../../middlewares/taskValidation.js';
 
@@ -54,5 +55,10 @@ router.patch(
 // @desc    Soft delete task
 // @access  Private (task.delete permission)
 router.delete('/:id', authMiddleware, softDeleteTask);
+
+// @route   POST /api/v1/tasks/:id/duplicate
+// @desc    Duplicate task (copy with new taskNumber)
+// @access  Private (task.duplicate permission)
+router.post('/:id/duplicate', authMiddleware, duplicateTask);
 
 export default router;

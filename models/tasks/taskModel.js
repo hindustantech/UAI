@@ -26,8 +26,8 @@ const taskSchema = new mongoose.Schema({
 
   taskType: {
     type: String,
-    enum: ['daily', 'days', 'dates'],
-    default: 'daily'
+    enum: ['daily', 'days', 'dates', 'one_time'],
+    default: 'one_time'
   },
   recurringDays: [{
     type: String,

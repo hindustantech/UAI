@@ -2,7 +2,7 @@
 export const taskConfig = {
   // Supported priorities
   priorities: ['LOW', 'MEDIUM', 'HIGH', 'URGENT', 'CRITICAL'],
-  taskTypes: ['daily', 'days', 'dates'],
+  taskTypes: ['daily', 'days', 'dates', 'one_time'],
 
   // Task statuses
   statuses: [

@@ -601,6 +601,10 @@ export const getMyAssignments = async (req, res) => {
       page = 1,
       limit = 20,
       status,
+      taskType,
+      startDateStart,
+      startDateEnd,
+      fromToday,
       search
     } = req.query;
 
@@ -612,19 +616,57 @@ export const getMyAssignments = async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     let taskFilter = { companyId };
+
+    // Search filter (title or taskNumber)
     if (search) {
       taskFilter.$or = [
         { title: { $regex: search, $options: 'i' } },
         { taskNumber: { $regex: search, $options: 'i' } }
       ];
     }
+
+    // From today filter — reuse getTodayTasks recurrence logic
+    if (fromToday === 'true') {
+      const now = new Date();
+      const todayDayNumber = now.getDate();
+      const dayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+      const todayDayName = dayNames[now.getDay()];
+
+      taskFilter.$and = taskFilter.$and || [];
+      taskFilter.$and.push({
+        $or: [
+          { taskType: 'daily' },
+          { taskType: 'days', recurringDays: todayDayName },
+          { taskType: 'dates', recurringDates: todayDayNumber },
+          // one_time → show if today is between startDate and dueDate
+          {
+            taskType: 'one_time',
+            startDate: { $lte: now },
+            dueDate: { $gte: now }
+          }
+        ]
+      });
+    }
+
+    // Task type filter
+    if (taskType) {
+      taskFilter.taskType = taskType;
+    }
+
+    // Start date range filter
+    if (startDateStart || startDateEnd) {
+      taskFilter.startDate = {};
+      if (startDateStart) taskFilter.startDate.$gte = new Date(startDateStart);
+      if (startDateEnd) taskFilter.startDate.$lte = new Date(startDateEnd);
+    }
+
     const matchingTasks = await Task.find(taskFilter).select('_id').lean();
     const taskIds = matchingTasks.map(t => t._id);
     filter.taskId = { $in: taskIds };
 
     const [assignments, total] = await Promise.all([
       TaskAssignment.find(filter)
-        .populate('taskId', 'title taskNumber status priority dueDate startDate')
+        .populate('taskId', 'title taskNumber status priority dueDate startDate taskType recurringDays recurringDates')
         .populate('assignedBy', 'name email')
         .sort({ assignedAt: -1 })
         .skip(skip)

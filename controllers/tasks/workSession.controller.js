@@ -2,6 +2,7 @@ import Task from '../../models/tasks/taskModel.js';
 import TaskAssignment from '../../models/tasks/taskAssignmentModel.js';
 import TaskWorkSession from '../../models/tasks/taskWorkSessionModel.js';
 import TaskStatusHistory from '../../models/tasks/taskStatusHistoryModel.js';
+import TaskCompletionRecord from '../../models/tasks/taskCompletionRecordModel.js';
 import { createTaskAuditLog } from '../../utils/taskAuditHelper.js';
 import { resolveCompanyId } from '../../utils/companyResolver.js';
 import { TaskNotificationService } from './taskNotification.service.js';
@@ -410,6 +411,92 @@ export const submitTask = async (req, res) => {
       after: { status: 'SUBMITTED' },
       metadata: { completionComment, actualDurationSeconds: totalDuration }
     });
+
+    // Create TaskCompletionRecord
+    const completionDate = new Date();
+    completionDate.setHours(0, 0, 0, 0);
+    await TaskCompletionRecord.findOneAndUpdate(
+      {
+        companyId,
+        taskId: id,
+        userId: req.user._id,
+        completionDate
+      },
+      {
+        status: 'SUBMITTED',
+        durationSeconds: totalDuration,
+        comment: completionComment
+      },
+      { upsert: true, new: true }
+    );
+
+    // For recurring tasks, create duplicate for next occurrence
+    if (task.taskType !== 'one_time' && task.status !== 'CLOSED' && task.status !== 'CANCELLED') {
+      const now = new Date();
+      let nextStartDate;
+
+      if (task.taskType === 'daily') {
+        nextStartDate = new Date();
+        nextStartDate.setDate(nextStartDate.getDate() + 1);
+        nextStartDate.setHours(0, 0, 0, 0);
+      } else if (task.taskType === 'days') {
+        const dayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+        for (let i = 1; i <= 7; i++) {
+          const checkDate = new Date();
+          checkDate.setDate(checkDate.getDate() + i);
+          if (task.recurringDays.includes(dayNames[checkDate.getDay()])) {
+            nextStartDate = new Date(checkDate);
+            nextStartDate.setHours(0, 0, 0, 0);
+            break;
+          }
+        }
+      } else if (task.taskType === 'dates') {
+        for (let i = 1; i <= 31; i++) {
+          const checkDate = new Date();
+          checkDate.setDate(checkDate.getDate() + i);
+          if (task.recurringDates.includes(checkDate.getDate())) {
+            nextStartDate = new Date(checkDate);
+            nextStartDate.setHours(0, 0, 0, 0);
+            break;
+          }
+        }
+      }
+
+      if (nextStartDate) {
+        let newDueDate = nextStartDate;
+        if (task.startDate && task.dueDate) {
+          const originalDuration = task.dueDate - task.startDate;
+          newDueDate = new Date(nextStartDate.getTime() + originalDuration);
+        }
+
+        const duplicateExists = await Task.findOne({
+          companyId,
+          title: task.title,
+          taskType: task.taskType,
+          startDate: nextStartDate,
+          status: { $in: ['ACTIVE', 'ASSIGNED', 'IN_PROGRESS'] }
+        });
+
+        if (!duplicateExists) {
+          await Task.create({
+            companyId,
+            title: task.title,
+            description: task.description,
+            taskType: task.taskType,
+            recurringDays: task.recurringDays,
+            recurringDates: task.recurringDates,
+            priority: task.priority,
+            status: 'ACTIVE',
+            createdBy: req.user._id,
+            ownerId: task.ownerId,
+            assignedUsers: task.assignedUsers,
+            startDate: nextStartDate,
+            dueDate: newDueDate,
+            estimatedDurationSeconds: task.estimatedDurationSeconds
+          });
+        }
+      }
+    }
 
     await TaskNotificationService.notifyTaskSubmitted({
       companyId,
