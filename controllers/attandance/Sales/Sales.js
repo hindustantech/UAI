@@ -1558,7 +1558,11 @@ export const getSessions = async (req, res) => {
       customerId,
 
       // FILTERS
-      filterType, // today | yesterday | week | month
+      filterType, // today | yesterday | week | month | recurringToday
+      nextMeetingToday, // "true" → sessions with nextMeeting.date = today
+
+      // SALES TYPE FILTER
+      salesType, // retail | wholesale | corporate | customer | agent
 
       // PAGINATION
       page = 1,
@@ -1586,6 +1590,27 @@ export const getSessions = async (req, res) => {
       });
     }
 
+    // ================= IST HELPERS =================
+    const getISTDateRange = () => {
+      const now = new Date();
+      const startOfDay = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(startOfDay);
+      endOfDay.setHours(23, 59, 59, 999);
+      return { startOfDay, endOfDay };
+    };
+
+    const getTodayDayName = () => {
+      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      return days[istDate.getDay()];
+    };
+
+    const getTodayDateNum = () => {
+      const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      return istDate.getDate();
+    };
+
     // ================= QUERY OBJECT =================
     const query = {
       companyId: new mongoose.Types.ObjectId(finalCompanyId)
@@ -1607,11 +1632,12 @@ export const getSessions = async (req, res) => {
     }
 
     // ================= CUSTOMER FILTERS =================
-    // Customer Type Filter
-    if (customerType) {
+    // Customer Type Filter (supports both customerType and salesType params)
+    const effectiveCustomerType = customerType || salesType;
+    if (effectiveCustomerType) {
       const validTypes = ["retail", "wholesale", "corporate", "customer", "agent"];
-      if (validTypes.includes(customerType)) {
-        query["customer.type"] = customerType;
+      if (validTypes.includes(effectiveCustomerType)) {
+        query["customer.type"] = effectiveCustomerType;
       }
     }
 
@@ -1636,8 +1662,45 @@ export const getSessions = async (req, res) => {
       query["customer.customerId"] = customerId;
     }
 
+    // ================= NEXT MEETING TODAY FILTER =================
+    if (nextMeetingToday === "true") {
+      const { startOfDay, endOfDay } = getISTDateRange();
+      query["nextMeeting.decided"] = true;
+      query["nextMeeting.date"] = { $gte: startOfDay, $lte: endOfDay };
+    }
+
+    // ================= RECURRING TODAY FILTER =================
+    // Combines: nextMeeting today OR recurring schedule matches today's day/date
+    if (filterType === "recurringToday") {
+      const { startOfDay, endOfDay } = getISTDateRange();
+      const todayDayName = getTodayDayName();
+      const todayDateNum = getTodayDateNum();
+
+      query.$or = [
+        // nextMeeting.decided && date is today
+        {
+          "nextMeeting.decided": true,
+          "nextMeeting.date": { $gte: startOfDay, $lte: endOfDay }
+        },
+        // recurring schedule matches today's day name
+        {
+          visitType: "recurring",
+          "recurringSchedule.isActive": true,
+          "recurringSchedule.type": "days",
+          "recurringSchedule.days": todayDayName
+        },
+        // recurring schedule matches today's date number
+        {
+          visitType: "recurring",
+          "recurringSchedule.isActive": true,
+          "recurringSchedule.type": "dates",
+          "recurringSchedule.dates": todayDateNum
+        }
+      ];
+    }
+
     // ================= DATE FIELD VALIDATION =================
-    const validDateFields = ["punchInTime", "createdAt", "updatedAt"];
+    const validDateFields = ["punchInTime", "createdAt", "updatedAt", "nextMeetingDate"];
     const selectedDateField = validDateFields.includes(dateField) ? dateField : "punchInTime";
 
     // ================= DATE FILTER LOGIC =================
@@ -1737,14 +1800,16 @@ export const getSessions = async (req, res) => {
 
     // ================= APPLY DATE FILTER =================
     if (start || end) {
-      query[selectedDateField] = {};
+      // Map nextMeetingDate → nextMeeting.date
+      const dateFieldKey = selectedDateField === "nextMeetingDate" ? "nextMeeting.date" : selectedDateField;
+      query[dateFieldKey] = {};
 
       if (start) {
-        query[selectedDateField].$gte = start;
+        query[dateFieldKey].$gte = start;
       }
 
       if (end) {
-        query[selectedDateField].$lte = end;
+        query[dateFieldKey].$lte = end;
       }
     }
 
@@ -1762,10 +1827,13 @@ export const getSessions = async (req, res) => {
       "duration",
       "status",
       "customer.companyName",
-      "customer.phoneNumber"
+      "customer.phoneNumber",
+      "nextMeetingDate"
     ];
 
-    const finalSortField = validSortFields.includes(sortBy) ? sortBy : "punchInTime";
+    const rawSortField = validSortFields.includes(sortBy) ? sortBy : "punchInTime";
+    // Map nextMeetingDate → nextMeeting.date for MongoDB sorting
+    const finalSortField = rawSortField === "nextMeetingDate" ? "nextMeeting.date" : rawSortField;
     const finalSortOrder = sortOrder === "1" ? 1 : -1;
 
     const sortObj = { [finalSortField]: finalSortOrder };
@@ -1893,6 +1961,18 @@ export const getSessions = async (req, res) => {
           notes: session.nextMeeting.notes
         } : null,
 
+        // VISIT TYPE & RECURRING SCHEDULE
+        visitType: session.visitType,
+        recurringSchedule: session.recurringSchedule
+          ? {
+              type: session.recurringSchedule.type,
+              days: session.recurringSchedule.days,
+              dates: session.recurringSchedule.dates,
+              startDate: session.recurringSchedule.startDate,
+              isActive: session.recurringSchedule.isActive
+            }
+          : null,
+
         // EVIDENCE
         evidence: {
           visitNotes: session.evidence?.visitNotes || "",
@@ -1988,6 +2068,9 @@ export const getSessions = async (req, res) => {
         SalesStatus: SalesStatus || null,
         filterType: filterType || null,
         singleDate: singleDate || null,
+        nextMeetingToday: nextMeetingToday || null,
+        salesType: salesType || null,
+        dateField: selectedDateField || null,
         dateRange: {
           field: selectedDateField,
           start: start || null,
