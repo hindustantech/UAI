@@ -673,13 +673,15 @@ export const markAttendance = async (req, res) => {
                         source: geoLocation.source || "gps"
                     },
                     deviceInfo,
-                    workSummary: {
-                        totalMinutes: Math.max(0, totalMinutes),
-                        payableMinutes: Math.max(0, finalPayableMinutes),
-                        overtimeMinutes: Math.max(0, overtimeMinutes),
-                        lateMinutes: 0,
-                        earlyLeaveMinutes: 0
-                    },
+workSummary: {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: Math.max(0, finalPayableMinutes),
+                    overtimeMinutes: Math.max(0, overtimeMinutes),
+                    lateMinutes: 0,
+                    earlyLeaveMinutes: 0,
+                    totalBreakMinutes: 0,
+                    totalBreakExceededMinutes: 0
+                },
                     lateByMinutes: 0,
                     totalWorkingHours: Math.max(0, totalMinutes / 60),
                     remarks: remarks || "Flexible shift - Punch-in recorded",
@@ -853,13 +855,15 @@ export const markAttendance = async (req, res) => {
                         source: geoLocation.source || "gps"
                     },
                     deviceInfo,
-                    workSummary: {
-                        totalMinutes: Math.max(0, totalMinutes),
-                        payableMinutes: Math.max(0, calculatePayableMinutes(totalMinutes, breaks || [])),
-                        overtimeMinutes: Math.max(0, overtimeMinutes),
-                        lateMinutes: lateMinutes,
-                        earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
-                    },
+workSummary: {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: Math.max(0, calculatePayableMinutes(totalMinutes, breaks || [])),
+                    overtimeMinutes: Math.max(0, overtimeMinutes),
+                    lateMinutes: lateMinutes,
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes),
+                    totalBreakMinutes: 0,
+                    totalBreakExceededMinutes: 0
+                },
                     lateByMinutes: lateMinutes,
                     totalWorkingHours: Math.max(0, totalMinutes / 60) || 0,
                     remarks: finalRemarks,
@@ -1063,22 +1067,29 @@ export const markAttendance = async (req, res) => {
                     console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
                 }
 
+                const totalBreakExceededMinutes = (attendance.breaks || []).reduce(
+                    (total, item) => total + (item.exceededMinutes || 0), 0
+                );
                 const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
+                const adjustedPayableMinutes = Math.max(0, payableMinutes - totalBreakExceededMinutes);
                 const finalStatus = totalMinutes > 0 ? "present" : "absent";
 
                 console.log(`  Total minutes: ${totalMinutes}`);
                 console.log(`  Final status: ${finalStatus}`);
+                console.log(`  Total break exceeded: ${totalBreakExceededMinutes} mins`);
 
                 attendance.status = finalStatus;
                 attendance.workSummary = {
                     totalMinutes: Math.max(0, totalMinutes),
-                    payableMinutes: Math.max(0, payableMinutes),
+                    payableMinutes: adjustedPayableMinutes,
                     overtimeMinutes: Math.max(0, overtimeMinutes),
                     lateMinutes: 0,
-                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes),
+                    totalBreakMinutes: (attendance.breaks || []).reduce((t, b) => t + (b.durationMinutes || 0), 0),
+                    totalBreakExceededMinutes
                 };
                 attendance.lateByMinutes = 0;
-                attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+                attendance.totalWorkingHours = Math.max(0, (totalMinutes - totalBreakExceededMinutes) / 60);
                 attendance.remarks = `Punch-out completed. Total work: ${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
             }
             else {
@@ -1155,15 +1166,23 @@ export const markAttendance = async (req, res) => {
                 console.log(`  Remarks: ${statusRemark}`);
 
                 attendance.status = finalStatus;
+
+                // Calculate total exceeded break minutes
+                const totalBreakExceededMinutes = (attendance.breaks || []).reduce(
+                    (total, item) => total + (item.exceededMinutes || 0), 0
+                );
+
                 attendance.workSummary = {
                     totalMinutes: Math.max(0, totalMinutes),
-                    payableMinutes: Math.max(0, payableMinutes),
+                    payableMinutes: Math.max(0, payableMinutes - totalBreakExceededMinutes),
                     overtimeMinutes: Math.max(0, overtimeMinutes),
                     lateMinutes: Math.max(0, lateMinutes),
-                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes),
+                    totalBreakMinutes: (attendance.breaks || []).reduce((t, b) => t + (b.durationMinutes || 0), 0),
+                    totalBreakExceededMinutes
                 };
                 attendance.lateByMinutes = Math.max(0, lateMinutes);
-                attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+                attendance.totalWorkingHours = Math.max(0, (totalMinutes - totalBreakExceededMinutes) / 60);
 
                 /* Device fraud detection */
                 if (
@@ -1653,13 +1672,15 @@ export const markFaceAttendance = async (req, res) => {
                         source: geoLocation.source || "gps"
                     },
                     deviceInfo,
-                    workSummary: {
-                        totalMinutes: Math.max(0, totalMinutes),
-                        payableMinutes: Math.max(0, finalPayableMinutes),
-                        overtimeMinutes: Math.max(0, overtimeMinutes),
-                        lateMinutes: 0,
-                        earlyLeaveMinutes: 0
-                    },
+workSummary: {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: Math.max(0, finalPayableMinutes),
+                    overtimeMinutes: Math.max(0, overtimeMinutes),
+                    lateMinutes: 0,
+                    earlyLeaveMinutes: 0,
+                    totalBreakMinutes: 0,
+                    totalBreakExceededMinutes: 0
+                },
                     lateByMinutes: 0,
                     totalWorkingHours: Math.max(0, totalMinutes / 60),
                     remarks: remarks || "Flexible shift - Punch-in recorded",
@@ -1833,13 +1854,15 @@ export const markFaceAttendance = async (req, res) => {
                         source: geoLocation.source || "gps"
                     },
                     deviceInfo,
-                    workSummary: {
-                        totalMinutes: Math.max(0, totalMinutes),
-                        payableMinutes: Math.max(0, calculatePayableMinutes(totalMinutes, breaks || [])),
-                        overtimeMinutes: Math.max(0, overtimeMinutes),
-                        lateMinutes: lateMinutes,
-                        earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
-                    },
+workSummary: {
+                    totalMinutes: Math.max(0, totalMinutes),
+                    payableMinutes: Math.max(0, calculatePayableMinutes(totalMinutes, breaks || [])),
+                    overtimeMinutes: Math.max(0, overtimeMinutes),
+                    lateMinutes: lateMinutes,
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes),
+                    totalBreakMinutes: 0,
+                    totalBreakExceededMinutes: 0
+                },
                     lateByMinutes: lateMinutes,
                     totalWorkingHours: Math.max(0, totalMinutes / 60) || 0,
                     remarks: finalRemarks,
@@ -2043,22 +2066,29 @@ export const markFaceAttendance = async (req, res) => {
                     console.log(`  Early Leave: ${earlyLeaveMinutes} mins`);
                 }
 
+                const totalBreakExceededMinutes = (attendance.breaks || []).reduce(
+                    (total, item) => total + (item.exceededMinutes || 0), 0
+                );
                 const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
+                const adjustedPayableMinutes = Math.max(0, payableMinutes - totalBreakExceededMinutes);
                 const finalStatus = totalMinutes > 0 ? "present" : "absent";
 
                 console.log(`  Total minutes: ${totalMinutes}`);
                 console.log(`  Final status: ${finalStatus}`);
+                console.log(`  Total break exceeded: ${totalBreakExceededMinutes} mins`);
 
                 attendance.status = finalStatus;
                 attendance.workSummary = {
                     totalMinutes: Math.max(0, totalMinutes),
-                    payableMinutes: Math.max(0, payableMinutes),
+                    payableMinutes: adjustedPayableMinutes,
                     overtimeMinutes: Math.max(0, overtimeMinutes),
                     lateMinutes: 0,
-                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes),
+                    totalBreakMinutes: (attendance.breaks || []).reduce((t, b) => t + (b.durationMinutes || 0), 0),
+                    totalBreakExceededMinutes
                 };
                 attendance.lateByMinutes = 0;
-                attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+                attendance.totalWorkingHours = Math.max(0, (totalMinutes - totalBreakExceededMinutes) / 60);
                 attendance.remarks = `Punch-out completed. Total work: ${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
             }
             else {
@@ -2135,15 +2165,23 @@ export const markFaceAttendance = async (req, res) => {
                 console.log(`  Remarks: ${statusRemark}`);
 
                 attendance.status = finalStatus;
+
+                // Calculate total exceeded break minutes
+                const totalBreakExceededMinutes = (attendance.breaks || []).reduce(
+                    (total, item) => total + (item.exceededMinutes || 0), 0
+                );
+
                 attendance.workSummary = {
                     totalMinutes: Math.max(0, totalMinutes),
-                    payableMinutes: Math.max(0, payableMinutes),
+                    payableMinutes: Math.max(0, payableMinutes - totalBreakExceededMinutes),
                     overtimeMinutes: Math.max(0, overtimeMinutes),
                     lateMinutes: Math.max(0, lateMinutes),
-                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+                    earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes),
+                    totalBreakMinutes: (attendance.breaks || []).reduce((t, b) => t + (b.durationMinutes || 0), 0),
+                    totalBreakExceededMinutes
                 };
                 attendance.lateByMinutes = Math.max(0, lateMinutes);
-                attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+                attendance.totalWorkingHours = Math.max(0, (totalMinutes - totalBreakExceededMinutes) / 60);
 
                 /* Device fraud detection */
                 if (

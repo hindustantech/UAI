@@ -132,23 +132,31 @@ const calculateWorkingHours = (punchIn, punchOut, existingAttendance, overrides 
         (punchOut.getTime() - effectivePunchInMs) / 60000
     ));
 
-    const totalWorkingHours = parseFloat((totalMinutes / 60).toFixed(2));
-
     const breakMinutes = calculateTotalBreakMinutes(existingAttendance?.breaks || []);
 
+    // Calculate total exceeded break minutes
+    const totalBreakExceededMinutes = (existingAttendance?.breaks || []).reduce(
+        (total, item) => total + (item.exceededMinutes || 0), 0
+    );
+
     const payableMinutes = Math.max(0, totalMinutes - breakMinutes);
-    const overtimeMinutes = Math.max(0, payableMinutes - shiftMinutes);
+    const adjustedPayableMinutes = Math.max(0, payableMinutes - totalBreakExceededMinutes);
+    const overtimeMinutes = Math.max(0, adjustedPayableMinutes - shiftMinutes);
     const lateMinutes = calculateLateMinutes(punchIn, shiftStartTime);
     const earlyLeaveMinutes = calculateEarlyLeaveMinutes(punchOut, shiftEndTime);
+
+    const totalWorkingHours = parseFloat(((totalMinutes - totalBreakExceededMinutes) / 60).toFixed(2));
 
     return {
         totalWorkingHours,
         workSummary: {
             totalMinutes,
-            payableMinutes,
+            payableMinutes: adjustedPayableMinutes,
             overtimeMinutes,
             lateMinutes,
-            earlyLeaveMinutes
+            earlyLeaveMinutes,
+            totalBreakMinutes: breakMinutes,
+            totalBreakExceededMinutes
         },
         lateByMinutes: lateMinutes
     };
@@ -1422,12 +1430,14 @@ export const bulkApproveRequests = async (req, res) => {
                                     status: status,
                                     approvalStatus: "approved",
                                     totalWorkingHours: 0,
-                                    workSummary: {
-                                        totalMinutes: 0,
-                                        payableMinutes: 0,
-                                        overtimeMinutes: 0,
-                                        lateMinutes: 0,
-                                        earlyLeaveMinutes: 0
+workSummary: {
+                                totalMinutes: 0,
+                                payableMinutes: 0,
+                                overtimeMinutes: 0,
+                                lateMinutes: 0,
+                                earlyLeaveMinutes: 0,
+                                totalBreakMinutes: 0,
+                                totalBreakExceededMinutes: 0
                                     },
                                     remarks: `Leave approved via bulk action`
                                 }

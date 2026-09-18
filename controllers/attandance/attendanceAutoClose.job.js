@@ -42,6 +42,8 @@ export const autoCloseAttendance = async () => {
                             "workSummary.totalMinutes": 0,
                             "workSummary.payableMinutes": 0,
                             "workSummary.overtimeMinutes": 0,
+                            "workSummary.totalBreakMinutes": 0,
+                            "workSummary.totalBreakExceededMinutes": 0,
                             remarks: "System Auto Punch-Out at 00:02 AM — Working hours counted as 0 per auto-punch-out policy"
                         },
                         $push: {

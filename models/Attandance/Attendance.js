@@ -234,6 +234,16 @@ const attendanceSchema = new mongoose.Schema({
         earlyLeaveMinutes: {
             type: Number,
             default: 0
+        },
+
+        totalBreakMinutes: {
+            type: Number,
+            default: 0
+        },
+
+        totalBreakExceededMinutes: {
+            type: Number,
+            default: 0
         }
     },
 

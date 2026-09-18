@@ -698,7 +698,9 @@ async function processAttendanceForEmployee({
         payableMinutes: Math.max(0, calculatePayableMinutes(totalMinutes, breaks || [])),
         overtimeMinutes: Math.max(0, overtimeMinutes),
         lateMinutes,
-        earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+        earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes),
+        totalBreakMinutes: 0,
+        totalBreakExceededMinutes: 0
       },
       lateByMinutes: lateMinutes,
       totalWorkingHours: Math.max(0, totalMinutes / 60) || 0,
@@ -825,18 +827,24 @@ async function processAttendanceForEmployee({
     if (punchOutTimeIST < shiftEndTimeIST) earlyLeaveMinutes = diffMinutes(punchOutTimeIST, shiftEndTimeIST);
 
     const payableMinutes = calculatePayableMinutes(totalMinutes, attendance.breaks);
+    const totalBreakExceededMinutes = (attendance.breaks || []).reduce(
+      (total, item) => total + (item.exceededMinutes || 0), 0
+    );
+    const adjustedPayableMinutes = Math.max(0, payableMinutes - totalBreakExceededMinutes);
     const finalStatus = totalMinutes > 0 ? 'present' : 'absent';
 
     attendance.status = finalStatus;
     attendance.workSummary = {
       totalMinutes: Math.max(0, totalMinutes),
-      payableMinutes: Math.max(0, payableMinutes),
+      payableMinutes: adjustedPayableMinutes,
       overtimeMinutes: Math.max(0, overtimeMinutes),
       lateMinutes: 0,
-      earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+      earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes),
+      totalBreakMinutes: (attendance.breaks || []).reduce((t, b) => t + (b.durationMinutes || 0), 0),
+      totalBreakExceededMinutes
     };
     attendance.lateByMinutes = 0;
-    attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+    attendance.totalWorkingHours = Math.max(0, (totalMinutes - totalBreakExceededMinutes) / 60);
     attendance.remarks = `Punch-out completed. Total work: ${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
   } else {
     const minutesAfterShiftStart = diffMinutes(shiftStartTimeIST, inTimeIST);
@@ -880,15 +888,23 @@ async function processAttendanceForEmployee({
 
     attendance.remarks = statusRemark;
     attendance.status = finalStatus;
+
+    // Calculate total exceeded break minutes
+    const totalBreakExceededMinutes = (attendance.breaks || []).reduce(
+      (total, item) => total + (item.exceededMinutes || 0), 0
+    );
+
     attendance.workSummary = {
       totalMinutes: Math.max(0, totalMinutes),
-      payableMinutes: Math.max(0, payableMinutes),
+      payableMinutes: Math.max(0, payableMinutes - totalBreakExceededMinutes),
       overtimeMinutes: Math.max(0, overtimeMinutes),
       lateMinutes: Math.max(0, lateMinutes),
-      earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes)
+      earlyLeaveMinutes: Math.max(0, earlyLeaveMinutes),
+      totalBreakMinutes: (attendance.breaks || []).reduce((t, b) => t + (b.durationMinutes || 0), 0),
+      totalBreakExceededMinutes
     };
     attendance.lateByMinutes = Math.max(0, lateMinutes);
-    attendance.totalWorkingHours = Math.max(0, totalMinutes / 60);
+    attendance.totalWorkingHours = Math.max(0, (totalMinutes - totalBreakExceededMinutes) / 60);
 
     if (
       attendance.deviceInfo?.deviceId &&

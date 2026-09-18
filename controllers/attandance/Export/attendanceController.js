@@ -185,14 +185,29 @@ const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], s
     const totalGrossMinutes = Math.round((punchOutTime - effectivePunchInTime) / (1000 * 60));
     
     const { breakDetails, totalDeductMinutes, totalExcessMinutes } = getBreakDetails(actualBreaks, shiftBreakConfig);
-    
-    const payableMinutes = Math.max(0, totalGrossMinutes - totalDeductMinutes);
+
+    // Calculate total exceeded break minutes (breaks beyond allowed limit reduce working hours)
+    let totalConsumed = 0;
+    if (actualBreaks && actualBreaks.length > 0) {
+        actualBreaks.forEach(b => {
+            let dur = b.durationMinutes || 0;
+            if (!dur && b.startTime && b.endTime) {
+                dur = Math.round((new Date(b.endTime) - new Date(b.startTime)) / 60000);
+            }
+            totalConsumed += dur;
+        });
+    }
+    const totalAllowed = (shiftBreakConfig || []).reduce((sum, b) => sum + (b.duration || 0), 0);
+    const totalBreakExceededMinutes = Math.max(0, totalConsumed - totalAllowed);
+
+    const payableMinutes = Math.max(0, totalGrossMinutes - totalDeductMinutes - totalBreakExceededMinutes);
     
     return {
         totalMinutes: totalGrossMinutes,
         payableMinutes: payableMinutes,
         breakDeductedMinutes: totalDeductMinutes,
         excessBreakMinutes: totalExcessMinutes,
+        totalBreakExceededMinutes: totalBreakExceededMinutes,
         breakDetails: breakDetails
     };
 };
@@ -728,6 +743,7 @@ export const generateAttendanceCSV = async (req, res) => {
                     "Late (min)": lateMinutes,
                     "Early Leave (min)": earlyLeaveMinutes,
                     "Break (min)": breakMinutes,
+                    "Break Exceeded (min)": (workCalc.totalBreakExceededMinutes || 0),
                     "Status": statusLabel,
                     "Location Verified": locationVerified,
                     "Remarks": remarks,
@@ -750,7 +766,7 @@ export const generateAttendanceCSV = async (req, res) => {
             "Emp Code", "Emp Name", "Department", "Shift",
             "Date", "Day", "Punch In", "Punch Out",
             "Gross Hours", "Total Hours", "Break Deducted", "Break Details",
-            "Overtime (min)", "Late (min)", "Early Leave (min)", "Break (min)",
+            "Break Exceeded (min)", "Overtime (min)", "Late (min)", "Early Leave (min)", "Break (min)",
             "Status", "Location Verified", "Remarks", "Auto Marked", "Suspicious",
         ];
 

@@ -300,6 +300,8 @@ class PunchAutomationCron {
                     overtimeMinutes: 0,
                     lateMinutes: attendance.workSummary?.lateMinutes || 0,
                     earlyLeaveMinutes: 0,
+                    totalBreakMinutes: 0,
+                    totalBreakExceededMinutes: 0,
                 },
                 $push: {
                     punchHistory: {

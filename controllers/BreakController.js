@@ -303,23 +303,13 @@ export const startBreakController = async (req, res) => {
         }
 
         /**
-         * TOTAL BREAK LIMIT CHECK
+         * TOTAL BREAK LIMIT - always allow break, track exceeded minutes
          */
         const consumedMinutes = getConsumedBreakMinutes(attendance);
         const totalAllowed = getTotalAllowedBreakMinutes(shift);
         const thisBreakDuration = breakConfig.duration || 30;
 
-        if (consumedMinutes + thisBreakDuration > totalAllowed) {
-            return abortAndRespond(
-                session, res, 400, 'BREAK_LIMIT_EXCEEDED',
-                `Your shift allows ${totalAllowed} min total break time. Already used ${consumedMinutes} min. Cannot take another ${thisBreakDuration} min break.`,
-                { consumedMinutes, requestedDuration: thisBreakDuration, totalAllowed }
-            );
-        }
-
-        /**
-         * GEO VALIDATION
-         */
+        // Always allow the break; exceeded minutes calculated at break end
         if (
             employee.officeLocation?.coordinates &&
             employee.officeLocation.coordinates.length === 2
@@ -621,7 +611,7 @@ export const endBreakController = async (req, res) => {
         activeBreak.status = "completed";
 
         /**
-         * TOTAL BREAK MINUTES
+         * TOTAL BREAK MINUTES + EXCEEDED TRACKING
          */
         attendance.workSummary.totalBreakMinutes =
             attendance.breaks.reduce(
@@ -633,6 +623,15 @@ export const endBreakController = async (req, res) => {
                 },
                 0
             );
+
+        // Calculate total exceeded break minutes across ALL breaks
+        const totalBreakExceeded = attendance.breaks.reduce(
+            (total, item) => {
+                return total + (item.exceededMinutes || 0);
+            },
+            0
+        );
+        attendance.workSummary.totalBreakExceededMinutes = totalBreakExceeded;
 
         await attendance.save({ session });
 
@@ -768,18 +767,10 @@ export const startFaceBreakController = async (req, res) => {
             );
         }
 
-        /* ---- 8. Total break limit check ---- */
+        /* ---- 8. Total break limit - always allow, track exceeded minutes ---- */
         const consumedMinutes = getConsumedBreakMinutes(attendance);
         const totalAllowed = getTotalAllowedBreakMinutes(shift);
         const thisBreakDuration = breakConfig.duration || 30;
-
-        if (consumedMinutes + thisBreakDuration > totalAllowed) {
-            return abortAndRespond(
-                session, res, 400, 'BREAK_LIMIT_EXCEEDED',
-                `Your shift allows ${totalAllowed} min total break time. Already used ${consumedMinutes} min. Cannot take another ${thisBreakDuration} min break.`,
-                { consumedMinutes, requestedDuration: thisBreakDuration, totalAllowed }
-            );
-        }
 
         /* ---- 9. FACE DETECTION ---- */
         let detection;
@@ -1088,6 +1079,11 @@ export const endFaceBreakController = async (req, res) => {
             (total, item) => total + (item.durationMinutes || 0), 0
         );
 
+        // Calculate total exceeded break minutes across ALL breaks
+        attendance.workSummary.totalBreakExceededMinutes = attendance.breaks.reduce(
+            (total, item) => total + (item.exceededMinutes || 0), 0
+        );
+
         await attendance.save({ session });
         await session.commitTransaction();
         session.endSession();
@@ -1276,18 +1272,10 @@ export const startFaceBreakIdentifyController = async (req, res) => {
             );
         }
 
-        /* ---- Total break limit check ---- */
+        /* ---- Total break limit - always allow, track exceeded minutes ---- */
         const consumedMinutes = getConsumedBreakMinutes(attendance);
         const totalAllowed = getTotalAllowedBreakMinutes(shift);
         const thisBreakDuration = breakConfig.duration || 30;
-
-        if (consumedMinutes + thisBreakDuration > totalAllowed) {
-            return abortAndRespond(
-                session, res, 400, 'BREAK_LIMIT_EXCEEDED',
-                `Your shift allows ${totalAllowed} min total break time. Already used ${consumedMinutes} min. Cannot take another ${thisBreakDuration} min break.`,
-                { consumedMinutes, requestedDuration: thisBreakDuration, totalAllowed }
-            );
-        }
 
         let geoVerified = false;
         if (employee.officeLocation?.coordinates && employee.officeLocation.coordinates.length === 2) {
@@ -1532,6 +1520,11 @@ export const endFaceBreakIdentifyController = async (req, res) => {
 
         attendance.workSummary.totalBreakMinutes = attendance.breaks.reduce(
             (total, item) => total + (item.durationMinutes || 0), 0
+        );
+
+        // Calculate total exceeded break minutes across ALL breaks
+        attendance.workSummary.totalBreakExceededMinutes = attendance.breaks.reduce(
+            (total, item) => total + (item.exceededMinutes || 0), 0
         );
 
         await attendance.save({ session });
