@@ -648,6 +648,7 @@ export const generateAttendanceCSV = async (req, res) => {
                 let punchInTime = "—", punchOutTime = "—", totalHours = "0:00";
                 let grossHours = "0:00", breakDeducted = "0:00", breakDetails = "";
                 let overtimeMinutes = 0, lateMinutes = 0, earlyLeaveMinutes = 0, breakMinutes = 0;
+                let workCalc = { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, totalBreakExceededMinutes: 0, excessBreakMinutes: 0, breakDetails: [] };
                 let statusLabel = "", locationVerified = "No", remarks = "", autoMarked = "No", suspicious = "No";
 
                 if (isWeeklyOff) {
@@ -660,8 +661,8 @@ export const generateAttendanceCSV = async (req, res) => {
                     punchInTime = attendance.punchIn ? formatTime(attendance.punchIn) : "—";
                     punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
                     
-                    const workCalc = attendance.isAutoMarked
-                        ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0, breakDetails: [] }
+                    workCalc = attendance.isAutoMarked
+                        ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0, totalBreakExceededMinutes: 0, breakDetails: [] }
                         : calculateWorkingHoursWithBreaks(
                             attendance.punchIn,
                             attendance.punchOut,
