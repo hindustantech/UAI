@@ -54,13 +54,11 @@ const getShiftStartRealUTCms = (punchInDate, shiftStartTimeStr) => {
  */
 const getBreakDetails = (actualBreaks = [], shiftBreakConfig = []) => {
     const breakDetails = [];
-    let totalDeductMinutes = 0;
-    let totalExcessMinutes = 0;
     let totalBreakMinutes = 0;
+    let totalAllowedMinutes = 0;
 
     if (actualBreaks && actualBreaks.length > 0) {
-        actualBreaks.forEach(breakEntry => {
-            // Calculate actual break duration
+        actualBreaks.forEach((breakEntry, index) => {
             let breakDuration = 0;
             let startTime = "—";
             let endTime = "—";
@@ -83,75 +81,39 @@ const getBreakDetails = (actualBreaks = [], shiftBreakConfig = []) => {
             totalBreakMinutes += breakDuration;
 
             let allowedMinutes = 0;
-            let isPaid = false;
-            let deductedMinutes = 0;
-            let excessMinutes = 0;
-            let breakName = breakEntry.breakName || breakEntry.type || "Break";
-
-            if (breakDuration > 0 && shiftBreakConfig && shiftBreakConfig.length > 0) {
-                // Find matching shift break configuration
+            if (shiftBreakConfig && shiftBreakConfig.length > 0) {
                 const shiftBreak = shiftBreakConfig.find(sb => {
                     const configName = (sb.name || "").toLowerCase();
-                    const entryName = breakName.toLowerCase();
-                    return configName === entryName || 
-                           configName.includes(entryName) || 
-                           entryName.includes(configName);
+                    const entryName = (breakEntry.breakName || breakEntry.type || "").toLowerCase();
+                    return configName === entryName || configName.includes(entryName) || entryName.includes(configName);
                 });
-
                 if (shiftBreak) {
-                    allowedMinutes = shiftBreak.duration || shiftBreak.allowedMinutes || 30;
-                    isPaid = shiftBreak.isPaid === true;
-
-                    if (!isPaid) {
-                        // UNPAID BREAK: Deduct ALL break time
-                        deductedMinutes = breakDuration;
-                        totalDeductMinutes += breakDuration;
-                    } else {
-                        // PAID BREAK: Only deduct excess time
-                        if (breakDuration > allowedMinutes) {
-                            excessMinutes = breakDuration - allowedMinutes;
-                            deductedMinutes = excessMinutes;
-                            totalDeductMinutes += excessMinutes;
-                            totalExcessMinutes += excessMinutes;
-                        }
-                    }
-                } else {
-                    // No matching config found, treat as unpaid (safe default)
-                    allowedMinutes = 0;
-                    isPaid = false;
-                    deductedMinutes = breakDuration;
-                    totalDeductMinutes += breakDuration;
+                    allowedMinutes = shiftBreak.duration || 30;
                 }
-            } else if (breakDuration > 0) {
-                // No shift config available, deduct all break time (safe default)
-                deductedMinutes = breakDuration;
-                totalDeductMinutes += breakDuration;
             }
+            totalAllowedMinutes += allowedMinutes;
 
             breakDetails.push({
-                name: breakName,
-                startTime: startTime,
-                endTime: endTime,
+                name: breakEntry.breakName || breakEntry.type || `Break ${index + 1}`,
+                startTime,
+                endTime,
                 duration: breakDuration,
                 durationFormatted: formatMinutes(breakDuration),
-                allowedMinutes: allowedMinutes,
+                allowedMinutes,
                 allowedFormatted: formatMinutes(allowedMinutes),
-                isPaid: isPaid,
-                deductedMinutes: deductedMinutes,
-                deductedFormatted: formatMinutes(deductedMinutes),
-                excessMinutes: excessMinutes,
-                excessFormatted: formatMinutes(excessMinutes),
             });
         });
     }
 
+    const totalExcessMinutes = Math.max(0, totalBreakMinutes - totalAllowedMinutes);
+
     return {
         breakDetails,
         totalBreakMinutes,
-        totalDeductMinutes,
+        totalAllowedMinutes,
         totalExcessMinutes,
-        summary: breakDetails.map(b => 
-            `${b.name}: ${b.durationFormatted} (${b.isPaid ? 'Paid' : 'Unpaid'}, Allowed: ${b.allowedFormatted}, Deducted: ${b.deductedFormatted})`
+        summary: breakDetails.map(b =>
+            `${b.name}: ${b.startTime} - ${b.endTime} (${b.durationFormatted}, Allowed: ${b.allowedFormatted})`
         ).join(" | ")
     };
 };
@@ -164,8 +126,10 @@ const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], s
     if (!punchIn || !punchOut) return { 
         totalMinutes: 0, 
         payableMinutes: 0, 
-        breakDeductedMinutes: 0,
-        excessBreakMinutes: 0,
+        totalBreakExceededMinutes: 0,
+        totalBreakMinutes: 0,
+        totalAllowedMinutes: 0,
+        totalExcessMinutes: 0,
         breakDetails: []
     };
 
@@ -181,34 +145,21 @@ const calculateWorkingHoursWithBreaks = (punchIn, punchOut, actualBreaks = [], s
             : punchInTime;
     }
     
-    // Total gross working minutes (punch to punch)
     const totalGrossMinutes = Math.round((punchOutTime - effectivePunchInTime) / (1000 * 60));
     
-    const { breakDetails, totalDeductMinutes, totalExcessMinutes } = getBreakDetails(actualBreaks, shiftBreakConfig);
-
-    // Calculate total exceeded break minutes (breaks beyond allowed limit reduce working hours)
-    let totalConsumed = 0;
-    if (actualBreaks && actualBreaks.length > 0) {
-        actualBreaks.forEach(b => {
-            let dur = b.durationMinutes || 0;
-            if (!dur && b.startTime && b.endTime) {
-                dur = Math.round((new Date(b.endTime) - new Date(b.startTime)) / 60000);
-            }
-            totalConsumed += dur;
-        });
-    }
-    const totalAllowed = (shiftBreakConfig || []).reduce((sum, b) => sum + (b.duration || 0), 0);
-    const totalBreakExceededMinutes = Math.max(0, totalConsumed - totalAllowed);
-
-    const payableMinutes = Math.max(0, totalGrossMinutes - totalDeductMinutes - totalBreakExceededMinutes);
+    const breakInfo = getBreakDetails(actualBreaks, shiftBreakConfig);
+    
+    // Simple formula: totalBreakDuration - totalAllowed = deducted from working hours
+    const payableMinutes = Math.max(0, totalGrossMinutes - breakInfo.totalExcessMinutes);
     
     return {
         totalMinutes: totalGrossMinutes,
         payableMinutes: payableMinutes,
-        breakDeductedMinutes: totalDeductMinutes,
-        excessBreakMinutes: totalExcessMinutes,
-        totalBreakExceededMinutes: totalBreakExceededMinutes,
-        breakDetails: breakDetails
+        totalBreakExceededMinutes: breakInfo.totalExcessMinutes,
+        totalBreakMinutes: breakInfo.totalBreakMinutes,
+        totalAllowedMinutes: breakInfo.totalAllowedMinutes,
+        totalExcessMinutes: breakInfo.totalExcessMinutes,
+        breakDetails: breakInfo.breakDetails
     };
 };
 
@@ -648,7 +599,7 @@ export const generateAttendanceCSV = async (req, res) => {
                 let punchInTime = "—", punchOutTime = "—", totalHours = "0:00";
                 let grossHours = "0:00", breakDeducted = "0:00", breakDetails = "";
                 let overtimeMinutes = 0, lateMinutes = 0, earlyLeaveMinutes = 0, breakMinutes = 0;
-                let workCalc = { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, totalBreakExceededMinutes: 0, excessBreakMinutes: 0, breakDetails: [] };
+                let workCalc = { totalMinutes: 0, payableMinutes: 0, totalBreakExceededMinutes: 0, totalBreakMinutes: 0, totalAllowedMinutes: 0, totalExcessMinutes: 0, breakDetails: [] };
                 let statusLabel = "", locationVerified = "No", remarks = "", autoMarked = "No", suspicious = "No";
 
                 if (isWeeklyOff) {
@@ -662,7 +613,7 @@ export const generateAttendanceCSV = async (req, res) => {
                     punchOutTime = attendance.punchOut ? formatTime(attendance.punchOut) : "—";
                     
                     workCalc = attendance.isAutoMarked
-                        ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0, totalBreakExceededMinutes: 0, breakDetails: [] }
+                        ? { totalMinutes: 0, payableMinutes: 0, totalBreakExceededMinutes: 0, totalBreakMinutes: 0, totalAllowedMinutes: 0, totalExcessMinutes: 0, breakDetails: [] }
                         : calculateWorkingHoursWithBreaks(
                             attendance.punchIn,
                             attendance.punchOut,
@@ -674,8 +625,8 @@ export const generateAttendanceCSV = async (req, res) => {
                     
                     totalHours = formatWorkingHours(workCalc.payableMinutes);
                     grossHours = formatWorkingHours(workCalc.totalMinutes);
-                    breakDeducted = formatWorkingHours(workCalc.breakDeductedMinutes);
-                    breakMinutes = workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
+                    breakDeducted = formatWorkingHours(workCalc.totalExcessMinutes);
+                    breakMinutes = workCalc.totalBreakMinutes;
                     
                     // Build detailed break information
                     const { summary } = getBreakDetails(attendance.breaks, shiftBreaks);
@@ -877,17 +828,17 @@ export const generateAttendanceCSV = async (req, res) => {
             // Add Break Details sheet for premium users
             if (!exceedsFreeLimit) {
                 const wsBreaks = workbook.addWorksheet("Break Details");
-                wsBreaks.views = [{ state: "frozen", ySplit: 1 }];
+                wsBreaks.views = [{ state: "frozen", ySplit: 2 }];
 
                 wsBreaks.mergeCells(1, 1, 1, 10);
                 const bTitleCell = wsBreaks.getCell(1, 1);
-                bTitleCell.value = `BREAK DETAILS REPORT  |  ${startDate} to ${endDate}`;
-                bTitleCell.font = { name: "Arial", bold: true, size: 13, color: { argb: "FFFFFFFF" } };
+                bTitleCell.value = `BREAK DETAILS REPORT  |  ${startDate} to ${endDate}  |  Formula: Total Break Duration - Allowed Break = Deducted from Working Hours`;
+                bTitleCell.font = { name: "Arial", bold: true, size: 11, color: { argb: "FFFFFFFF" } };
                 bTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_BG } };
                 bTitleCell.alignment = { horizontal: "center", vertical: "middle" };
                 wsBreaks.getRow(1).height = 24;
 
-                const bHeaders = ["Emp Code", "Emp Name", "Date", "Break Name", "Start", "End", "Duration", "Allowed", "Paid/Unpaid", "Deducted"];
+                const bHeaders = ["Emp Code", "Emp Name", "Date", "Break Name", "Start", "End", "Duration (min)", "Allowed (min)", "Exceeded (min)", "Total Exceeded"];
                 const bHeaderRow = wsBreaks.getRow(2);
                 bHeaders.forEach((h, i) => {
                     const cell = bHeaderRow.getCell(i + 1);
@@ -899,9 +850,9 @@ export const generateAttendanceCSV = async (req, res) => {
                 bHeaderRow.height = 18;
 
                 wsBreaks.columns = [
-                    { width: 12 }, { width: 22 }, { width: 13 }, { width: 15 },
-                    { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
-                    { width: 12 }, { width: 12 },
+                    { width: 12 }, { width: 22 }, { width: 13 }, { width: 18 },
+                    { width: 12 }, { width: 12 }, { width: 14 }, { width: 14 },
+                    { width: 14 }, { width: 14 },
                 ];
 
                 let breakRowNum = 3;
@@ -912,11 +863,11 @@ export const generateAttendanceCSV = async (req, res) => {
                         const attendance = attendanceMap.get(`${emp._id}_${dateKey}`);
                         
                         if (attendance && attendance.breaks && attendance.breaks.length > 0) {
-                            const { breakDetails } = getBreakDetails(attendance.breaks, shiftBreaks);
+                            const breakInfo = getBreakDetails(attendance.breaks, shiftBreaks);
                             
-                            breakDetails.forEach((bd) => {
+                            breakInfo.breakDetails.forEach((bd, idx) => {
                                 const row = wsBreaks.getRow(breakRowNum++);
-                                row.height = 15;
+                                row.height = 16;
                                 const bg = (breakRowNum % 2 === 0) ? ALT_ROW_BG : "FFFFFFFF";
                                 
                                 const vals = [
@@ -928,8 +879,8 @@ export const generateAttendanceCSV = async (req, res) => {
                                     bd.endTime,
                                     bd.durationFormatted,
                                     bd.allowedFormatted,
-                                    bd.isPaid ? "Paid" : "Unpaid",
-                                    bd.deductedFormatted,
+                                    bd.duration > bd.allowedMinutes ? formatMinutes(bd.duration - bd.allowedMinutes) : "0 min",
+                                    idx === 0 ? formatMinutes(breakInfo.totalExcessMinutes) : "",
                                 ];
                                 
                                 vals.forEach((v, i) => {
@@ -940,13 +891,44 @@ export const generateAttendanceCSV = async (req, res) => {
                                     cell.alignment = { horizontal: "center", vertical: "middle" };
                                 });
                                 
-                                // Highlight deductions
-                                if (bd.deductedMinutes > 0) {
-                                    const deductCell = row.getCell(10);
-                                    deductCell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
-                                    deductCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+                                // Highlight exceeded minutes in red
+                                if (bd.duration > bd.allowedMinutes) {
+                                    const exCell = row.getCell(9);
+                                    exCell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
+                                    exCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
                                 }
                             });
+                            
+                            // Add summary row for this employee+day
+                            const summaryRow = wsBreaks.getRow(breakRowNum++);
+                            summaryRow.height = 16;
+                            const summaryBg = "FFF2F2F2";
+                            const summaryVals = [
+                                "", "", "",
+                                `TOTAL: ${breakInfo.breakDetails.length} breaks`,
+                                "", "",
+                                formatMinutes(breakInfo.totalBreakMinutes),
+                                formatMinutes(breakInfo.totalAllowedMinutes),
+                                formatMinutes(breakInfo.totalExcessMinutes),
+                                `Deducted: ${formatMinutes(breakInfo.totalExcessMinutes)}`,
+                            ];
+                            summaryVals.forEach((v, i) => {
+                                const cell = summaryRow.getCell(i + 1);
+                                cell.value = v;
+                                cell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF1F3864" } };
+                                cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: summaryBg } };
+                                cell.alignment = { horizontal: "center", vertical: "middle" };
+                            });
+                            
+                            // Highlight total exceeded if > 0
+                            if (breakInfo.totalExcessMinutes > 0) {
+                                const totalExCell = summaryRow.getCell(9);
+                                totalExCell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
+                                totalExCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+                                const deductCell = summaryRow.getCell(10);
+                                deductCell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
+                                deductCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+                            }
                         }
                     }
                 }
@@ -1246,14 +1228,14 @@ export const generateAttendanceMatrixCSV = async (req, res) => {
                 
 if (att && att.punchIn && att.punchOut) {
                     const workCalc = att.isAutoMarked
-                        ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0 }
+                        ? { totalMinutes: 0, payableMinutes: 0, totalExcessMinutes: 0 }
                         : calculateWorkingHoursWithBreaks(
                             att.punchIn, att.punchOut, att.breaks, shiftBreaks,
                             getShiftStartRealUTCms(att.punchIn, shiftStart),
                             isFlexible
                         );
                     grossHrs = formatWorkingHours(workCalc.totalMinutes);
-                    breakDeducted = formatWorkingHours(workCalc.breakDeductedMinutes);
+                    breakDeducted = formatWorkingHours(workCalc.totalExcessMinutes);
                     overtimeDisplay = att.workSummary?.overtimeMinutes 
                         ? `${att.workSummary.overtimeMinutes} min` 
                         : "—";
@@ -1401,7 +1383,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                         halfDay++; present++;
                         if (att) {
                             const workCalc = att.isAutoMarked
-                                ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0 }
+                                ? { totalMinutes: 0, payableMinutes: 0, totalExcessMinutes: 0, totalBreakMinutes: 0, totalBreakExceededMinutes: 0 }
                                 : calculateWorkingHoursWithBreaks(
                                     att.punchIn, att.punchOut, att.breaks, shiftBreaks,
                                     getShiftStartRealUTCms(att.punchIn, shiftStart),
@@ -1409,8 +1391,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                                 );
                             totalWorkMin += workCalc.payableMinutes;
                             totalGrossMin += workCalc.totalMinutes;
-                            totalBreakMin += workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
-                            totalBreakDeductedMin += workCalc.breakDeductedMinutes;
+                            totalBreakMin += workCalc.totalExcessMinutes;
+                            totalBreakDeductedMin += workCalc.totalExcessMinutes;
                             totalOTMin += att.workSummary?.overtimeMinutes || 0;
                             
                             // Only count in average if not auto punch-out for flexible shifts
@@ -1436,7 +1418,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                         }
                         if (att) {
                             const workCalc = att.isAutoMarked
-                                ? { totalMinutes: 0, payableMinutes: 0, breakDeductedMinutes: 0, excessBreakMinutes: 0 }
+                                ? { totalMinutes: 0, payableMinutes: 0, totalExcessMinutes: 0, totalBreakMinutes: 0, totalBreakExceededMinutes: 0 }
                                 : calculateWorkingHoursWithBreaks(
                                     att.punchIn, att.punchOut, att.breaks, shiftBreaks,
                                     getShiftStartRealUTCms(att.punchIn, shiftStart),
@@ -1444,8 +1426,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                                 );
                             totalWorkMin += workCalc.payableMinutes;
                             totalGrossMin += workCalc.totalMinutes;
-                            totalBreakMin += workCalc.breakDeductedMinutes + workCalc.excessBreakMinutes;
-                            totalBreakDeductedMin += workCalc.breakDeductedMinutes;
+                            totalBreakMin += workCalc.totalExcessMinutes;
+                            totalBreakDeductedMin += workCalc.totalExcessMinutes;
                             totalOTMin += att.workSummary?.overtimeMinutes || 0;
                             
                             // Only count in average if not auto punch-out for flexible shifts
