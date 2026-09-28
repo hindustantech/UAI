@@ -15,6 +15,7 @@ import { monthlyReportEmail } from './email/monthlyReport.js';
 import { loginAlertEmail } from './email/loginAlert.js';
 import { employeeCheckInEmail } from './email/employeeCheckIn.js';
 import { absentEmail } from './email/absent.js';
+import { requestCreatedEmail } from './email/requestCreated.js';
 
 import { subscriptionActivatedWhatsApp } from './whatsapp/subscriptionActivated.js';
 import { subscriptionExpiredWhatsApp } from './whatsapp/subscriptionExpired.js';
@@ -49,6 +50,7 @@ const EMAIL_TEMPLATES = {
   [NOTIFICATION_TYPES.EMPLOYEE_ADDED]: welcomeEmail,
   [NOTIFICATION_TYPES.LATE_ATTENDANCE]: absentEmail,
   [NOTIFICATION_TYPES.ABSENT]: absentEmail,
+  [NOTIFICATION_TYPES.REQUEST_CREATED]: requestCreatedEmail,
 };
 
 const WHATSAPP_TEMPLATES = {

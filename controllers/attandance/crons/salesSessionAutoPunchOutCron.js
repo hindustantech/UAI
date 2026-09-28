@@ -258,7 +258,7 @@ class SalesSessionAutoPunchOutCron {
                         punchOut: autoPunchOutTime,
                         lastPunchAt: autoPunchOutTime,
                         status: "present",
-                        totalWorkingHours: totalMinutes / 60,
+                        totalWorkingHours: Math.max(0, (totalMinutes - (attendance.workSummary?.totalBreakExceededMinutes || 0)) / 60),
                         isAutoMarked: true,
                     },
                     $push: {

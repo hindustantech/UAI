@@ -99,6 +99,7 @@ export function getTierScoreForType(notificationType) {
     meeting_reminder: TIER_SCORES.LOW,
     followup_reminder: TIER_SCORES.BULK,
     visit_reminder: TIER_SCORES.BULK,
+    request_created: TIER_SCORES.NORMAL,
 
     // Task notifications
     task_created: TIER_SCORES.NORMAL,

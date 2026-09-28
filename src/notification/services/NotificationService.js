@@ -7,6 +7,7 @@ import { notificationLogger } from '../index.js';
 import { makeIdempotencyKey } from '../utils/idempotency.js';
 import Notification from '../models/Notification.js';
 import mongoose from 'mongoose';
+import User from '../../../models/userModel.js';
 
 const CHANNEL_MAP = {
   [NOTIFICATION_TYPES.SUBSCRIPTION_ACTIVATED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
@@ -26,6 +27,7 @@ const CHANNEL_MAP = {
   [NOTIFICATION_TYPES.MONTHLY_REPORT]: [CHANNELS.EMAIL],
   [NOTIFICATION_TYPES.LEAVE_APPROVED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
   [NOTIFICATION_TYPES.LEAVE_REJECTED]: [CHANNELS.EMAIL, CHANNELS.WHATSAPP, CHANNELS.PUSH],
+  [NOTIFICATION_TYPES.REQUEST_CREATED]: [CHANNELS.EMAIL, CHANNELS.PUSH],
   [NOTIFICATION_TYPES.MEETING_REMINDER]: [CHANNELS.WHATSAPP, CHANNELS.PUSH],
   [NOTIFICATION_TYPES.FOLLOWUP_REMINDER]: [CHANNELS.WHATSAPP],
   [NOTIFICATION_TYPES.VISIT_REMINDER]: [CHANNELS.WHATSAPP],
@@ -330,6 +332,37 @@ export class NotificationService {
       phone,
       data: { employeeName, leaveType, startDate, endDate, reason, approver },
     });
+  }
+
+  static async sendRequestCreated({ companyId, employeeName, requestType, reason, requestId }) {
+    // Partner's _id IS the companyId — find the partner/company owner
+    const partner = await User.findById(companyId).lean();
+
+    if (!partner) {
+      notificationLogger.warn('No partner found for company', { companyId });
+      return { results: [], skipped: true, reason: 'no_partner_found' };
+    }
+
+    const partnerEmail = partner.email;
+    const partnerDeviceTokens = partner.devicetoken || [];
+
+    const partnerResult = await NotificationService.send({
+      type: NOTIFICATION_TYPES.REQUEST_CREATED,
+      companyId,
+      userId: partner._id,
+      email: partnerEmail,
+      deviceToken: partnerDeviceTokens.length > 0 ? partnerDeviceTokens : undefined,
+      data: {
+        employeeName,
+        requestType,
+        reason: reason || '',
+        requestId,
+        title: `New ${requestType} Request`,
+        body: `${employeeName} has submitted a ${requestType} request`,
+      },
+    });
+
+    return { results: [{ partnerId: partner._id, partnerName: partner.name, ...partnerResult }] };
   }
 
   static async sendPasswordReset({ userId, email, name, resetLink }) {

@@ -30,6 +30,8 @@ export const NOTIFICATION_TYPES = {
   LEAVE_APPROVED: 'leave_approved',
   LEAVE_REJECTED: 'leave_rejected',
 
+  REQUEST_CREATED: 'request_created',
+
   MEETING_REMINDER: 'meeting_reminder',
   FOLLOWUP_REMINDER: 'followup_reminder',
   VISIT_REMINDER: 'visit_reminder',

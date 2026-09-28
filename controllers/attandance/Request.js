@@ -480,6 +480,19 @@ export const createAttendanceRequest = async (req, res) => {
         */
         const request = await AttendanceRequest.create(payload);
 
+        // Fire-and-forget notification to company admins about new request
+        try {
+            await NotificationService.sendRequestCreated({
+                companyId: employee.companyId,
+                employeeName: employee.userId?.name || 'Employee',
+                requestType,
+                reason: reason || '',
+                requestId: request._id,
+            });
+        } catch (notifyErr) {
+            logApiError('NOTIFY', 'AttendanceRequest', notifyErr, req, { step: 'requestCreatedNotification' });
+        }
+
         logApiAction({ action: "CREATE_SUCCESS", model: "AttendanceRequest", req, resourceId: request?._id, after: request });
 
         /*
