@@ -9,6 +9,7 @@ import {
     deductCompOffFIFO
 } from "./utils/compOff.utils.js";
 import { logApiAction, logApiError } from "../../utils/apiLogger.js";
+import NotificationService from "../../src/notification/services/NotificationService.js";
 
 /*
 ====================================
