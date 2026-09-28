@@ -1,4 +1,4 @@
-export function requestCreatedEmail({ employeeName, requestType, reason, requestId }) {
+export function requestCreatedEmail({ employeeName, requestType, reason, requestId, empCode }) {
   const typeLabel = requestType
     ? requestType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
     : 'Request';
@@ -17,6 +17,7 @@ export function requestCreatedEmail({ employeeName, requestType, reason, request
   <p>Hello,</p>
   <p>A new <strong>${typeLabel}</strong> request has been submitted by <strong>${employeeName || 'an employee'}</strong>.</p>
   <div class="info-row"><span class="label">Employee:</span> ${employeeName || 'N/A'}</div>
+  ${empCode ? `<div class="info-row"><span class="label">Employee Code:</span> ${empCode}</div>` : ''}
   <div class="info-row"><span class="label">Request Type:</span> ${typeLabel}</div>
   ${reason ? `<div class="info-row"><span class="label">Reason:</span> ${reason}</div>` : ''}
   ${requestId ? `<div class="info-row"><span class="label">Request ID:</span> ${requestId}</div>` : ''}

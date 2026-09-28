@@ -334,7 +334,7 @@ export class NotificationService {
     });
   }
 
-  static async sendRequestCreated({ companyId, employeeName, requestType, reason, requestId }) {
+  static async sendRequestCreated({ companyId, employeeName, empCode, requestType, reason, requestId }) {
     // Partner's _id IS the companyId — find the partner/company owner
     const partner = await User.findById(companyId).lean();
 
@@ -352,6 +352,7 @@ export class NotificationService {
       email: partnerEmail,
       data: {
         employeeName,
+        empCode: empCode || '',
         requestType,
         reason: reason || '',
         requestId,

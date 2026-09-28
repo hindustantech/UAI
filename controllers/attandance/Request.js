@@ -213,7 +213,7 @@ export const createAttendanceRequest = async (req, res) => {
         */
         logApiAction({ action: "CREATE_START", model: "AttendanceRequest", req, extra: { userId, requestType: req.body?.requestType } });
 
-        const employee = await Employee.findOne({ userId });
+        const employee = await Employee.findOne({ userId }).populate('userId', 'name email');
         logApiAction({ action: "FETCH_EMPLOYEE", model: "Employee", req, resourceId: employee?._id, after: { employeeId: employee?._id, userId: employee?.userId, companyId: employee?.companyId } });
 
         if (!employee) {
@@ -485,7 +485,8 @@ export const createAttendanceRequest = async (req, res) => {
         try {
             await NotificationService.sendRequestCreated({
                 companyId: employee.companyId,
-                employeeName: employee.userId?.name || 'Employee',
+                employeeName: employee.userId?.name || employee.name || 'Employee',
+                empCode: employee.empCode || '',
                 requestType,
                 reason: reason || '',
                 requestId: request._id,
