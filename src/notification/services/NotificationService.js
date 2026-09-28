@@ -344,14 +344,12 @@ export class NotificationService {
     }
 
     const partnerEmail = partner.email;
-    const partnerDeviceTokens = partner.devicetoken || [];
 
     const partnerResult = await NotificationService.send({
       type: NOTIFICATION_TYPES.REQUEST_CREATED,
       companyId,
       userId: partner._id,
       email: partnerEmail,
-      deviceToken: partnerDeviceTokens.length > 0 ? partnerDeviceTokens : undefined,
       data: {
         employeeName,
         requestType,
