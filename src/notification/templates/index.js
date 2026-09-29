@@ -16,6 +16,18 @@ import { loginAlertEmail } from './email/loginAlert.js';
 import { employeeCheckInEmail } from './email/employeeCheckIn.js';
 import { absentEmail } from './email/absent.js';
 import { requestCreatedEmail } from './email/requestCreated.js';
+import { taskCreatedEmail } from './email/taskCreated.js';
+import { taskAssignedEmail } from './email/taskAssigned.js';
+import { taskInvitedEmail } from './email/taskInvited.js';
+import { taskInvitationAcceptedEmail } from './email/taskInvitationAccepted.js';
+import { taskInvitationRejectedEmail } from './email/taskInvitationRejected.js';
+import { taskSubmittedEmail } from './email/taskSubmitted.js';
+import { taskVerifiedEmail } from './email/taskVerified.js';
+import { taskRejectedEmail } from './email/taskRejected.js';
+import { taskReopenedEmail } from './email/taskReopened.js';
+import { taskClosedEmail } from './email/taskClosed.js';
+import { taskDueSoonEmail } from './email/taskDueSoon.js';
+import { taskOverdueEmail } from './email/taskOverdue.js';
 
 import { subscriptionActivatedWhatsApp } from './whatsapp/subscriptionActivated.js';
 import { subscriptionExpiredWhatsApp } from './whatsapp/subscriptionExpired.js';
@@ -51,6 +63,19 @@ const EMAIL_TEMPLATES = {
   [NOTIFICATION_TYPES.LATE_ATTENDANCE]: absentEmail,
   [NOTIFICATION_TYPES.ABSENT]: absentEmail,
   [NOTIFICATION_TYPES.REQUEST_CREATED]: requestCreatedEmail,
+
+  task_created: taskCreatedEmail,
+  task_assigned: taskAssignedEmail,
+  task_invited: taskInvitedEmail,
+  task_invitation_accepted: taskInvitationAcceptedEmail,
+  task_invitation_rejected: taskInvitationRejectedEmail,
+  task_submitted: taskSubmittedEmail,
+  task_verified: taskVerifiedEmail,
+  task_rejected: taskRejectedEmail,
+  task_reopened: taskReopenedEmail,
+  task_closed: taskClosedEmail,
+  task_due_soon: taskDueSoonEmail,
+  task_overdue: taskOverdueEmail,
 };
 
 const WHATSAPP_TEMPLATES = {
