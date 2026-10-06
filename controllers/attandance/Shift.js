@@ -120,6 +120,13 @@ export const updateShift = async (req, res) => {
         // Prevent critical overwrite
         delete updateData.companyId;
 
+        // ALWAYS force breaks to only "Lunch Break"
+        updateData.breaks = [{
+            name: "Lunch Break",
+            duration: 30,
+            isPaid: false
+        }];
+
         if (updateData.shiftCode) {
             updateData.shiftCode = updateData.shiftCode.toUpperCase();
 

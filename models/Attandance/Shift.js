@@ -168,14 +168,12 @@ ShiftSchema.methods.isFlexible = function () {
  */
 ShiftSchema.pre("save", function (next) {
 
-    // Ensure breaks always exist
-    if (!this.breaks || this.breaks.length === 0) {
-        this.breaks = [{
-            name: "Lunch Break",
-            duration: 30,
-            isPaid: false
-        }];
-    }
+    // ALWAYS force breaks to only "Lunch Break"
+    this.breaks = [{
+        name: "Lunch Break",
+        duration: 30,
+        isPaid: false
+    }];
 
     // Ensure weeklyOff exists
     if (!this.weeklyOff || this.weeklyOff.length === 0) {
