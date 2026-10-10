@@ -3036,10 +3036,10 @@ export const getCompanyTodayAttendance = async (req, res) => {
             });
         }
 
-
         const page = Number(req.query.page) || 1;
         const limit = Number(req.query.limit) || 50;
         const skip = (page - 1) * limit;
+        const department = req.query.department;
 
         /* ===========================
            Date
@@ -3051,10 +3051,16 @@ export const getCompanyTodayAttendance = async (req, res) => {
            Active Employees
         ============================ */
 
-        const employees = await Employee.find({
+        const employeeFilter = {
             companyId,
             employmentStatus: "active"
-        })
+        };
+
+        if (department) {
+            employeeFilter["jobInfo.department"] = department;
+        }
+
+        const employees = await Employee.find(employeeFilter)
             .select("_id empCode user_name ")
             .lean();
 
