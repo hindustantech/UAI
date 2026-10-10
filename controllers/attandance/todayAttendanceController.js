@@ -241,13 +241,23 @@ class TodayAttendanceController {
     async getEmployeeTodayAttendance(req, res) {
         try {
             const { employeeId } = req.params;
-            const { companyId, date } = req.query;
+            const { companyId, date, department } = req.query;
 
             if (!companyId) {
                 return res.status(400).json({
                     success: false,
                     error: "companyId is required"
                 });
+            }
+
+            // Build employee filter
+            const employeeFilter = {
+                companyId: new mongoose.Types.ObjectId(companyId),
+                employmentStatus: "active"
+            };
+
+            if (department) {
+                employeeFilter["jobInfo.department"] = department;
             }
 
             // Set date
@@ -640,6 +650,46 @@ class TodayAttendanceController {
 
         } catch (error) {
             console.error("Error fetching attendance by department:", error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get list of departments for filter dropdown
+     * GET /api/attendance/today/departments
+     */
+    async getDepartmentList(req, res) {
+        try {
+            const { companyId } = req.query;
+
+            if (!companyId) {
+                return res.status(400).json({
+                    success: false,
+                    error: "companyId is required"
+                });
+            }
+
+            // Get distinct departments for the company
+            const departments = await Employee.distinct("jobInfo.department", {
+                companyId: new mongoose.Types.ObjectId(companyId),
+                employmentStatus: "active"
+            });
+
+            // Format for dropdown - filter out empty/undefined and sort
+            const formattedDepartments = departments
+                .filter(dept => dept && dept.trim())
+                .sort();
+
+            res.status(200).json({
+                success: true,
+                data: formattedDepartments
+            });
+
+        } catch (error) {
+            console.error("Error fetching department list:", error);
             res.status(500).json({
                 success: false,
                 error: error.message

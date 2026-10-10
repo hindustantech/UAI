@@ -1,5 +1,27 @@
-const STANDARD_MONTH_DAYS = 30;
 const STANDARD_MONTHLY_HOURS = 240;
+
+const MONTHS_31_DAYS = [1, 3, 5, 7, 8, 10, 12]; // Jan, Mar, May, Jul, Aug, Oct, Dec
+
+function getCurrentMonthStandardDays() {
+    const now = dayjs();
+    const month = now.month() + 1; // 1-12
+    if (MONTHS_31_DAYS.includes(month)) return 31;
+    if (month === 2) return 28; // simplified: don't handle leap year here
+    return 30;
+}
+
+function getCurrentMonthDays(month, year) {
+    // Allow override for specific month calculation
+    const m = month || (dayjs().month() + 1);
+    const y = year || dayjs().year();
+    const month31 = [1, 3, 5, 7, 8, 10, 12];
+    if (month31.includes(m)) return 31;
+    if (m === 2) {
+        const isLeap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+        return isLeap ? 29 : 28;
+    }
+    return 30;
+}
 
 export function calculateSalary({
     employee,
@@ -8,7 +30,8 @@ export function calculateSalary({
     payrollRule,
     payPeriod,
     payDate,
-    generatedBy
+    generatedBy,
+    standardDays
 }) {
     if (!employee?.salaryStructure?.basic && !employee?.salaryStructure?.perHour && !employee?.salaryStructure?.perDay) {
         throw new Error("Employee salary structure (basic, perHour or perDay) is required.");
@@ -19,15 +42,18 @@ export function calculateSalary({
             : "monthly";
     const salaryApproach = employee.salaryStructure?.salaryApproach || "full_minus_lop";
 
+    // Use provided standardDays or detect from current month
+    const stdDays = standardDays || getCurrentMonthStandardDays();
+
     let result;
     if (payType === "hourly") {
-        result = calculateHourly({ employee, attendance, payrollRule, payPeriod, payDate, generatedBy });
+        result = calculateHourly({ employee, attendance, payrollRule, payPeriod, payDate, generatedBy, stdDays });
     } else if (payType === "perday") {
-        result = calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy });
+        result = calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy, stdDays });
     } else if (salaryApproach === "pro_rata") {
-        result = calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy });
+        result = calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy, stdDays });
     } else {
-        result = calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy });
+        result = calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy, stdDays });
     }
 
     result.payType = payType;
@@ -35,7 +61,7 @@ export function calculateSalary({
     return result;
 }
 
-function calculateHourly({ employee, attendance, payrollRule, payPeriod, payDate, generatedBy }) {
+function calculateHourly({ employee, attendance, payrollRule, payPeriod, payDate, generatedBy, stdDays }) {
     const sal = employee.salaryStructure;
     const perHourRate = sal.perHour ?? 0;
     const overtimeRate = sal.overtimeRate ?? 0;
@@ -124,7 +150,7 @@ function calculateHourly({ employee, attendance, payrollRule, payPeriod, payDate
     };
 }
 
-function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy }) {
+function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy, extraWorkDays = 0 }) {
     const sal = employee.salaryStructure;
     const perDayRate = sal.perDay ?? 0;
     const overtimeRate = sal.overtimeRate ?? 0;
@@ -144,7 +170,7 @@ function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPer
     }
     const totalSalaryRuleCutDays = lateCutDays + halfDayCutDays;
 
-    const payableDays = Math.max(0, presentDays + weeklyOffDays + weekOffHalfDays - totalSalaryRuleCutDays);
+    const payableDays = Math.max(0, presentDays + weeklyOffDays + weekOffHalfDays - totalSalaryRuleCutDays + extraWorkDays);
     const dayWages = roundTo2(perDayRate * payableDays);
 
     const attendanceOvertimeMinutes = attendance.overtimeMinutes ?? 0;
@@ -230,7 +256,7 @@ function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPer
     };
 }
 
-function calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy }) {
+function calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy, stdDays, extraWorkDays = 0 }) {
     const sal = employee.salaryStructure;
 
     const monthlyBasic = sal.basic ?? 0;
@@ -244,7 +270,7 @@ function calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule
     }));
     const monthlyOtherAllowTotal = monthlyOtherAllowances.reduce((s, a) => s + a.amount, 0);
     const totalMonthlyGross = monthlyBasic + monthlyHra + monthlyDa + monthlyBonus + monthlyOtherAllowTotal;
-    const perDayRate = roundTo2(totalMonthlyGross / STANDARD_MONTH_DAYS);
+    const perDayRate = roundTo2(totalMonthlyGross / (stdDays || STANDARD_MONTH_DAYS));
 
     const { presentDays = 0, absentDays = 0, unpaidLeaveDays = 0, lateDays = 0, halfDays = 0,
             leaveDays = 0, paidLeaveDays = 0, holidays = 0, weeklyOffDays = 0, weekOffHalfDays = 0 } = attendance;
@@ -261,7 +287,7 @@ function calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule
     }
     const totalSalaryRuleCutDays = lateCutDays + halfDayCutDays;
 
-    const payableDays = Math.max(0, presentDays + weeklyOffDays + weekOffHalfDays - totalSalaryRuleCutDays);
+    const payableDays = Math.max(0, presentDays + weeklyOffDays + weekOffHalfDays - totalSalaryRuleCutDays + (extraWorkDays || 0));
     const factor = STANDARD_MONTH_DAYS > 0 ? payableDays / STANDARD_MONTH_DAYS : 0;
 
     const basicEarned = roundTo2(monthlyBasic * factor);
@@ -361,7 +387,7 @@ function calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule
     };
 }
 
-function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy }) {
+function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy, stdDays, extraWorkDays = 0 }) {
     const sal = employee.salaryStructure;
 
     const monthlyBasic = sal.basic ?? 0;
@@ -375,7 +401,7 @@ function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrol
     }));
     const monthlyOtherAllowTotal = monthlyOtherAllowances.reduce((s, a) => s + a.amount, 0);
     const totalMonthlyGross = monthlyBasic + monthlyHra + monthlyDa + monthlyBonus + monthlyOtherAllowTotal;
-    const perDayRate = roundTo2(totalMonthlyGross / STANDARD_MONTH_DAYS);
+    const perDayRate = roundTo2(totalMonthlyGross / (stdDays || STANDARD_MONTH_DAYS));
 
     const { presentDays = 0, absentDays = 0, unpaidLeaveDays = 0, lateDays = 0, halfDays = 0,
             leaveDays = 0, paidLeaveDays = 0, holidays = 0, weeklyOffDays = 0, weekOffHalfDays = 0 } = attendance;
@@ -413,7 +439,7 @@ function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrol
 
     const salaryRuleCutAmount = roundTo2(perDayRate * totalSalaryRuleCutDays);
 
-    const payableDays = Math.max(0, presentDays + weeklyOffDays + weekOffHalfDays - totalSalaryRuleCutDays);
+    const payableDays = Math.max(0, presentDays + weeklyOffDays + weekOffHalfDays - totalSalaryRuleCutDays + extraWorkDays);
 
     let pf = 0, esi = 0, gratuity = 0;
     if (payrollRule?.deductions) {

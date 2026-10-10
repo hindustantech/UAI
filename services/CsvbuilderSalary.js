@@ -23,10 +23,22 @@ export class SalaryExcelGenerator {
     this.periodYear = null;
   }
 
-  setPeriodInfo(month, year) {
+setPeriodInfo(month, year) {
     this.periodMonth = month;
     this.periodYear = year;
-  }
+}
+
+/**
+ * Helper: Detect if current period month has 30 days
+ */
+    _isThirtyDayMonth() {
+        if (!this.periodMonth) return false;
+        const month31 = [1, 3, 5, 7, 8, 10, 12];
+        const m = this.periodMonth;
+        if (month31.includes(m)) return false;
+        if (m === 2) return true; // February - simplified: assume 28/29 days, treat as "30-day equivalent" for formatting
+        return true; // April, June, September, November = 30 days
+    }
 
   /**
    * Generate complete Excel workbook
@@ -106,7 +118,7 @@ export class SalaryExcelGenerator {
   /**
    * Helper: Write data rows and return next row index
    */
-  _writeDataRows(ws, rows, startRow, moneyCols = []) {
+  _writeDataRows(ws, rows, startRow, moneyCols = [], showRupeeSymbol = true) {
     let row = startRow;
 
     rows.forEach((data, idx) => {
@@ -121,7 +133,9 @@ export class SalaryExcelGenerator {
           bg: isEven ? COLORS.ALT_ROW : COLORS.WHITE,
           alignment: { horizontal: i < 4 ? 'left' : 'center', vertical: 'middle' }
         });
-        if (moneyCols.includes(i + 1)) c.numFmt = '₹#,##0.00';
+        if (moneyCols.includes(i + 1)) {
+          c.numFmt = showRupeeSymbol ? '₹#,##0.00' : 'General';
+        }
       });
 
       row++;
@@ -176,6 +190,7 @@ export class SalaryExcelGenerator {
       { header: "Days Worked", key: "daysWorked", width: 14 },
       { header: "Late Days", key: "lateDays", width: 12 },
       { header: "Half Days", key: "halfDays", width: 12 },
+      { header: "LOP Days", key: "lopDays", width: 12 },
       { header: "Eff. Days", key: "effectiveDays", width: 12 },
       { header: "Basic", key: "basic", width: 14 },
       { header: "HRA", key: "hra", width: 14 },
@@ -194,7 +209,7 @@ export class SalaryExcelGenerator {
 
     columns.forEach((col, i) => { ws.getColumn(i + 1).width = col.width; });
 
-    let row = this._writeHeaderBlock(ws, columns, "MONTHLY SALARY REGISTER", `${this._periodLabel()} | Default Working Days: 30`);
+    let row = this._writeHeaderBlock(ws, columns, "MONTHLY SALARY REGISTER", `${this._periodLabel()} | Default Working Days: ${this._isThirtyDayMonth() ? 30 : 31}`);
 
     if (!monthly.length) {
       ws.mergeCells(row, 1, row, columns.length);
@@ -210,6 +225,7 @@ export class SalaryExcelGenerator {
       r.attendance.daysWorked,
       r.attendance.lateDays,
       r.attendance.halfDays,
+      r.lossOfPay?.lopDays ?? 0,
       r.attendance.effectiveDays,
       r.earnings.basic,
       r.earnings.hra,
@@ -226,8 +242,10 @@ export class SalaryExcelGenerator {
       r.netSalary
     ]);
 
+    const showRupeeSymbol = !this._isThirtyDayMonth();
+
     const dataStart = row;
-    row = this._writeDataRows(ws, rows, row, [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    row = this._writeDataRows(ws, rows, row, [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21], showRupeeSymbol);
 
     this._writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
 

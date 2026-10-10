@@ -37,4 +37,11 @@ router.get(
     TodayAttendanceController.getAttendanceByDepartment
 );
 
+// Get department list for filter dropdown
+router.get(
+    "/today/departments",
+
+    TodayAttendanceController.getDepartmentList
+);
+
 export default router;
