@@ -94,14 +94,12 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
         totalMinutes += ws.totalMinutes || 0;
 
         // Weekend / holiday / week-off OT is compensated as comp-off, NOT cash
-        // EXCEPTION: "present" on weekly off day still counts as overtime
         const dateObj = new Date(year, month - 1, day);
         const isOffDay =
           weeklyOffSet.has(DOW[dateObj.getDay()]) ||
           rec.status === "holiday" ||
           rec.status === "week_off";
-        const isPresentOnWeekOff = rec.status === "present" && weeklyOffSet.has(DOW[dateObj.getDay()]);
-        if (!isOffDay || isPresentOnWeekOff) overtimeMinutes += ws.overtimeMinutes || 0;
+        if (!isOffDay) overtimeMinutes += ws.overtimeMinutes || 0;
 
         switch (rec.status) {
           case "present":

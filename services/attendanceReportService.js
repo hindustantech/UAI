@@ -178,10 +178,6 @@ class AttendanceReportService {
 
                     switch (attendance.status) {
                         case 'present':
-                            if (isWeeklyOff) {
-                                totalOvertimeMinutes += attendance.workSummary?.overtimeMinutes || 0;
-                                break;
-                            }
                             present++;
                             if ((attendance.lateByMinutes || 0) > 0) late++;
                             totalWorkingMinutes += (attendance.totalWorkingHours || 0) * 60;

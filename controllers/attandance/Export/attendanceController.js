@@ -604,7 +604,7 @@ export const generateAttendanceCSV = async (req, res) => {
 
                 if (isWeeklyOff) {
                     if (attendance && attendance.status === "present") {
-                        statusLabel = "OT";
+                        statusLabel = "Present";
                     } else {
                         statusLabel = "Week Off";
                     }
@@ -1370,6 +1370,37 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const isWOHalf = weeklyOffHalf.includes(dayName);
                 const { code, isFlexible: flexShift, isAutoPunchOut } = 
                     resolveDayStatus(att, isWO, isWOHalf, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
+
+                // If attendance status is "present" and it's a weekly off day, treat as Present
+                if (att && att.status === "present" && isWO) {
+                    present++;
+                    // Count work hours and OT like normal present day
+                    if (att) {
+                        const workCalc = att.isAutoMarked
+                            ? { totalMinutes: 0, payableMinutes: 0, totalExcessMinutes: 0, totalBreakMinutes: 0, totalBreakExceededMinutes: 0 }
+                            : calculateWorkingHoursWithBreaks(
+                                att.punchIn, att.punchOut, att.breaks, shiftBreaks,
+                                getShiftStartRealUTCms(att.punchIn, shiftStart),
+                                isFlexible
+                            );
+                        totalWorkMin += workCalc.payableMinutes;
+                        totalGrossMin += workCalc.totalMinutes;
+                        totalBreakMin += workCalc.totalExcessMinutes;
+                        totalBreakDeductedMin += workCalc.totalExcessMinutes;
+                        totalOTMin += att.workSummary?.overtimeMinutes || 0;
+                        
+                        if (!isFlexible || !isAutoPunchOut) {
+                            totalWorkMinForAvg += workCalc.payableMinutes;
+                            presentDaysForAvg++;
+                        }
+                        
+                        if (!isFlexible) {
+                            totalLateMin += att.workSummary?.lateMinutes || 0;
+                        }
+                    }
+                    // Skip the WO handling below
+                    continue;
+                }
 
                 switch (code) {
                     case "WO":
