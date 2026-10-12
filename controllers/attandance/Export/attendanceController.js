@@ -272,7 +272,9 @@ const buildAttendanceMap = (records) => {
 
 /** Returns { code, label, punchIn, punchOut, hours, breakInfo, isFlexible, isAutoPunchOut } for one day */
 const resolveDayStatus = (attendance, isWeeklyOff, isWeeklyOffHalf = false, shiftStart = "09:00", shiftEnd = "18:00", graceIn = 10, graceOut = 10, isFlexible = false) => {
-    if (isWeeklyOff) return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+    if (isWeeklyOff && attendance && attendance.punchIn) return { code: "OT", label: "Over Time", punchIn: formatTime(attendance.punchIn), punchOut: formatTime(attendance.punchOut), hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: attendance.isAutoPunchOut || false };
+    if (isWeeklyOff && !attendance) return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+    if (isWeeklyOff && attendance && !attendance.punchIn) return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
     if (isWeeklyOffHalf && !attendance) return { code: "WOH", label: "Half Day Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
     if (!attendance) return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
 
@@ -371,10 +373,12 @@ const STATUS_FILL = {
     L: "FFD9D2E9",
     WO: "FFD0E4F7",
     H: "FFB7E1CD",
+    OT: "FFD9EAD3",  // Over Time - same green as Present for consistency
 };
 const STATUS_FONT = {
     A: "FF9C0006", L: "FF6A0DAD", WO: "FF1155CC", H: "FF137333", CO: "FF7D3C98",
     PL: "FF7D6608", PE: "FF7D4604", PLE: "FF7D4604",
+    OT: "FF006400",  // Dark green font for Over Time
 };
 
 const HEADER_BG = "FF1F3864";
