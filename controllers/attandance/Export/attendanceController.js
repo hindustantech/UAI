@@ -603,7 +603,7 @@ export const generateAttendanceCSV = async (req, res) => {
                 let statusLabel = "", locationVerified = "No", remarks = "", autoMarked = "No", suspicious = "No";
 
                 if (isWeeklyOff) {
-                    if (attendance && attendance.status === "present") {
+                    if (attendance && attendance.punchIn) {
                         statusLabel = "OT";
                     } else if (attendance && attendance.status === "absent") {
                         statusLabel = "Week Off Absent";
@@ -1373,8 +1373,8 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const { code, isFlexible: flexShift, isAutoPunchOut } = 
                     resolveDayStatus(att, isWO, isWOHalf, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
 
-                // If attendance status is "present" and it's a weekly off day, treat as OT day
-                if (att && att.status === "present" && isWO) {
+                // If attendance has punchIn and it's a weekly off day, treat as OT day
+                if (att && att.punchIn && isWO) {
                     otDays++;
                     // Count work hours and OT like normal present day
                     if (att) {
