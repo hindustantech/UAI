@@ -605,6 +605,8 @@ export const generateAttendanceCSV = async (req, res) => {
                 if (isWeeklyOff) {
                     if (attendance && attendance.status === "present") {
                         statusLabel = "OT";
+                    } else if (attendance && attendance.status === "absent") {
+                        statusLabel = "Week Off Absent";
                     } else {
                         statusLabel = "Week Off";
                     }
