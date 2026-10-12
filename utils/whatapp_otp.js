@@ -5,10 +5,10 @@ import logger from "./logger.js";
 dotenv.config();
 
 const WHATSAPP_API_URL =
-    "https://whatsapp.quickhub.ai/public/whatsapp/send-template";
+    "https://www.automate.parivartanx.com/api/project/v1/messages/send-template";
 
-const WHATSAPP_API_KEY = process.env.QUICKHUB_API_KEY;
-
+const WHATSAPP_API_KEY = process.env.WHATSAPP_API_KEYS||"wapi_1791796873857_a24b22f3-57bb-4049-b5ea-0171590fe7f6";
+const sessionId = process.env.sessionId || "wb_1291639670708604_1791540531831";
 // const SMS_API_URL =
 //     "https://smsmediaapi.patronservices.in/api/sms/send-otp-api";
 
@@ -201,12 +201,12 @@ export const QuicksendWhatsAppOtp = async (number, code) => {
     try {
 
         const payload = {
-
+            sessionId: sessionId,
             to: formattedNumber,
 
             templateName: "otp_auths",
 
-            params: [String(code)],
+            templateParams: [String(code)],
 
         };
 
