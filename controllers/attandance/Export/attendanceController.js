@@ -603,7 +603,11 @@ export const generateAttendanceCSV = async (req, res) => {
                 let statusLabel = "", locationVerified = "No", remarks = "", autoMarked = "No", suspicious = "No";
 
                 if (isWeeklyOff) {
-                    statusLabel = "Week Off";
+                    if (attendance && attendance.status === "present") {
+                        statusLabel = "OT";
+                    } else {
+                        statusLabel = "Week Off";
+                    }
                 } else if (isWeeklyOffHalfDay) {
                     statusLabel = "Half Day Off";
                 } else if (!attendance) {
