@@ -178,11 +178,17 @@ class AttendanceReportService {
 
                     switch (attendance.status) {
                         case 'present':
-                            present++;
-                            if ((attendance.lateByMinutes || 0) > 0) late++;
-                            totalWorkingMinutes += (attendance.totalWorkingHours || 0) * 60;
-                            totalLateMinutes += attendance.lateByMinutes || 0;
-                            totalOvertimeMinutes += attendance.workSummary?.overtimeMinutes || 0;
+                            const isWeeklyOff = employee.weeklyOff?.includes(this.getDayName(date.getDay())) ||
+                                employee.weeklyOffHalfDay?.includes(this.getDayName(date.getDay()));
+                            if (isWeeklyOff) {
+                                totalOvertimeMinutes += attendance.workSummary?.overtimeMinutes || 0;
+                            } else {
+                                present++;
+                                if ((attendance.lateByMinutes || 0) > 0) late++;
+                                totalWorkingMinutes += (attendance.totalWorkingHours || 0) * 60;
+                                totalLateMinutes += attendance.lateByMinutes || 0;
+                                totalOvertimeMinutes += attendance.workSummary?.overtimeMinutes || 0;
+                            }
                             break;
                         case 'absent':
                             absent++;

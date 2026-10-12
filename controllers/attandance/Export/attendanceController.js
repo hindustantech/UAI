@@ -604,7 +604,7 @@ export const generateAttendanceCSV = async (req, res) => {
 
                 if (isWeeklyOff) {
                     if (attendance && attendance.status === "present") {
-                        statusLabel = "Present";
+                        statusLabel = "OT";
                     } else {
                         statusLabel = "Week Off";
                     }
@@ -1371,9 +1371,9 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 const { code, isFlexible: flexShift, isAutoPunchOut } = 
                     resolveDayStatus(att, isWO, isWOHalf, shiftStart, shiftEnd, graceIn, graceOut, isFlexible);
 
-                // If attendance status is "present" and it's a weekly off day, treat as Present
+                // If attendance status is "present" and it's a weekly off day, treat as OT day
                 if (att && att.status === "present" && isWO) {
-                    present++;
+                    otDays++;
                     // Count work hours and OT like normal present day
                     if (att) {
                         const workCalc = att.isAutoMarked
