@@ -277,6 +277,24 @@ class PunchAutomationCron {
     ) {
         const employee = attendance.employeeId;
 
+        // END ANY ACTIVE BREAK BEFORE PUNCH OUT — preserve correct break duration
+        const activeBreak = attendance.breaks.find(
+            item => item.status === "active"
+        );
+        if (activeBreak) {
+            activeBreak.endTime = punchOutTime;
+            const durationMinutes = Math.floor(
+                (activeBreak.endTime - activeBreak.startTime) / (1000 * 60)
+            );
+            activeBreak.durationMinutes = durationMinutes;
+            activeBreak.durationHHMM = "00:00";
+            activeBreak.exceededMinutes = Math.max(
+                0,
+                durationMinutes - (activeBreak.allowedMinutes || 0)
+            );
+            activeBreak.status = "completed";
+        }
+
         // RULE: Auto punch-out results in zero working hours
         const punchInTime = new Date(attendance.punchIn);
         const workDuration = Math.round(
@@ -284,6 +302,15 @@ class PunchAutomationCron {
         );
         const workHours = Math.floor(workDuration / 60);
         const workMins = workDuration % 60;
+
+        // Calculate total break minutes from all completed breaks
+        const totalBreakMinutes = attendance.breaks
+            .filter((b) => b.status === "completed")
+            .reduce((sum, b) => sum + (b.durationMinutes || 0), 0);
+        const totalBreakExceededMinutes = attendance.breaks.reduce(
+            (total, item) => total + (item.exceededMinutes || 0),
+            0
+        );
 
         // ---- Persist to DB — working hours zeroed, status stays present ----
         await Attendance.findByIdAndUpdate(
@@ -300,8 +327,8 @@ class PunchAutomationCron {
                     overtimeMinutes: 0,
                     lateMinutes: attendance.workSummary?.lateMinutes || 0,
                     earlyLeaveMinutes: 0,
-                    totalBreakMinutes: 0,
-                    totalBreakExceededMinutes: 0,
+                    totalBreakMinutes,
+                    totalBreakExceededMinutes,
                 },
                 $push: {
                     punchHistory: {
