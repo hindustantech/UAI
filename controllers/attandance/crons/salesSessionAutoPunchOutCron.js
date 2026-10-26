@@ -245,20 +245,23 @@ class SalesSessionAutoPunchOutCron {
                 return;
             }
 
-            const punchInTime = new Date(attendance.punchIn);
-            const totalMinutes = Math.max(
-                0,
-                Math.floor((autoPunchOutTime - punchInTime) / 60000)
-            );
-
             await Attendance.updateOne(
                 { _id: attendance._id },
                 {
                     $set: {
                         punchOut: autoPunchOutTime,
                         lastPunchAt: autoPunchOutTime,
-                        status: "present",
-                        totalWorkingHours: Math.max(0, (totalMinutes - (attendance.workSummary?.totalBreakExceededMinutes || 0)) / 60),
+                        status: "present autocheckout",
+                        totalWorkingHours: 0,
+                        workSummary: {
+                            totalMinutes: 0,
+                            payableMinutes: 0,
+                            overtimeMinutes: 0,
+                            lateMinutes: attendance.workSummary?.lateMinutes || 0,
+                            earlyLeaveMinutes: 0,
+                            totalBreakMinutes: attendance.workSummary?.totalBreakMinutes || 0,
+                            totalBreakExceededMinutes: attendance.workSummary?.totalBreakExceededMinutes || 0,
+                        },
                         isAutoMarked: true,
                     },
                     $push: {

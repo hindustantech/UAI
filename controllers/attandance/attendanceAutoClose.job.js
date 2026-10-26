@@ -37,6 +37,7 @@ export const autoCloseAttendance = async () => {
                         $set: {
                             punchOut: autoPunchOutTime,
                             lastPunchAt: autoPunchOutTime,
+                            status: "present autocheckout",
                             isAutoMarked: true,
                             totalWorkingHours: 0,
                             "workSummary.totalMinutes": 0,

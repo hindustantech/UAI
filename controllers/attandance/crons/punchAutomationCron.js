@@ -312,13 +312,13 @@ class PunchAutomationCron {
             0
         );
 
-        // ---- Persist to DB — working hours zeroed, status stays present ----
+        // ---- Persist to DB — working hours zeroed, status marked as present autocheckout ----
         await Attendance.findByIdAndUpdate(
             attendance._id,
             {
                 punchOut: punchOutTime,
                 lastPunchAt: punchOutTime,
-                status: "present",
+                status: "present autocheckout",
                 isAutoMarked: true,
                 totalWorkingHours: 0,
                 workSummary: {

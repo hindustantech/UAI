@@ -11,6 +11,7 @@ import logger from '../utils/logger.js';
 
 
 import * as faceApi from '../services/faceApi.service.js';
+import { buildEmployeeBreakState, sortBreakList } from '../services/breakList.service.js';
 
 
 // Minimum similarity to accept a face match at the attendance layer.
@@ -1551,6 +1552,142 @@ export const endFaceBreakIdentifyController = async (req, res) => {
             errorCode: 'INTERNAL_SERVER_ERROR',
             message: 'Failed to end face-identified break',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/* =========================================================
+   COMPANY-WIDE LIVE BREAK LIST
+========================================================= */
+
+const BREAK_LIST_VIEW_ROLES = ['admin', 'hr', 'manager', 'super_admin'];
+
+function escapeRegex(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function canViewCompanyBreakList(req, companyId) {
+    const userType = req.user?.type;
+
+    if (['super_admin', 'partner', 'admin'].includes(userType)) {
+        return true;
+    }
+
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) return false;
+
+    const employee = await Employee.findOne({ userId, companyId })
+        .select('role')
+        .lean();
+
+    return Boolean(employee && BREAK_LIST_VIEW_ROLES.includes(employee.role));
+}
+
+export const getCompanyBreakListController = async (req, res) => {
+    try {
+        const requesterId = req.user?._id || req.user?.id;
+        const isGlobalViewer = ['super_admin', 'partner', 'admin'].includes(req.user?.type);
+
+        const companyId = isGlobalViewer
+            ? (req.query.companyId || req.user?.companyId || requesterId)
+            : (req.user?.companyId || requesterId);
+
+        if (!companyId || !mongoose.Types.ObjectId.isValid(companyId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid companyId is required'
+            });
+        }
+
+        const allowed = await canViewCompanyBreakList(req, companyId);
+
+        if (!allowed) {
+            return res.status(403).json({
+                success: false,
+                message: 'Forbidden: break list access is restricted to admin, HR, and managers'
+            });
+        }
+
+        const { department, employeeType, search } = req.query;
+
+        const employeeFilter = {
+            companyId,
+            employmentStatus: 'active'
+        };
+
+        if (department) employeeFilter['jobInfo.department'] = department;
+        if (employeeType) employeeFilter.employeeType = employeeType;
+
+        if (search) {
+            const pattern = new RegExp(escapeRegex(search.trim()), 'i');
+            employeeFilter.$or = [
+                { user_name: pattern },
+                { empCode: pattern }
+            ];
+        }
+
+        const employees = await Employee.find(employeeFilter)
+            .select('userId user_name empCode jobInfo.department jobInfo.designation employeeType shift employmentStatus')
+            .populate('userId', 'name email profileImage')
+            .populate('shift', 'shiftName')
+            .lean();
+
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+
+        const endOfDay = new Date();
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const attendanceRecords = employees.length
+            ? await Attendance.find({
+                companyId,
+                employeeId: { $in: employees.map(employee => employee._id) },
+                date: { $gte: startOfDay, $lte: endOfDay }
+            }).lean()
+            : [];
+
+        const attendanceMap = new Map();
+        attendanceRecords.forEach(record => {
+            attendanceMap.set(String(record.employeeId), record);
+        });
+
+        const now = new Date();
+
+        const list = sortBreakList(
+            employees.map(employee =>
+                buildEmployeeBreakState(
+                    employee,
+                    attendanceMap.get(String(employee._id)) || null,
+                    now
+                )
+            )
+        );
+
+        const summary = {
+            totalEmployees: list.length,
+            onBreak: list.filter(employee => employee.breakStatus === 'on_break').length,
+            breakTaken: list.filter(employee => employee.breakStatus === 'break_taken').length,
+            noBreak: list.filter(employee => employee.breakStatus === 'no_break').length,
+            notCheckedIn: list.filter(employee => employee.breakStatus === 'not_checked_in').length
+        };
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                date: startOfDay,
+                generatedAt: now,
+                summary,
+                employees: list
+            }
+        });
+
+    } catch (error) {
+        console.error('GET COMPANY BREAK LIST ERROR:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to load company break list',
+            error: error.message
         });
     }
 };

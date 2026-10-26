@@ -288,6 +288,7 @@ const resolveDayStatus = (attendance, isWeeklyOff, isWeeklyOffHalf = false, shif
         case "week_off_half": return { code: "WOH", label: "Half Day Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "comp_off": return { code: "CO", label: "Comp Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "absent": return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+        case "present autocheckout": return { code: "P", label: "Present (Auto Checkout)", punchIn: pi || "—", punchOut: po || "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: true };
         default: {
             let hrs = "0:00";
             let breakInfo = "";
@@ -677,6 +678,7 @@ export const generateAttendanceCSV = async (req, res) => {
                         case "week_off": statusLabel = "Week Off"; break;
                         case "comp_off": statusLabel = "Comp Off"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;
                         case "absent": statusLabel = "Absent"; break;
+                        case "present autocheckout": statusLabel = "Present (Auto Checkout)"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;
                         default: {
                             if (isFlexible) {
                                 statusLabel = "Present";

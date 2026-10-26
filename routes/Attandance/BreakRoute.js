@@ -6,7 +6,8 @@ import {
   startFaceBreakController,
   endFaceBreakController,
   startFaceBreakIdentifyController,
-  endFaceBreakIdentifyController
+  endFaceBreakIdentifyController,
+  getCompanyBreakListController
 } from '../../controllers/BreakController.js';
 import authMiddleware from '../../middlewares/authMiddleware.js';
 
@@ -16,6 +17,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }
 });
+
+router.get('/list', authMiddleware, getCompanyBreakListController);
 
 router.post('/start', authMiddleware, startBreakController);
 router.post('/end', authMiddleware, endBreakController);

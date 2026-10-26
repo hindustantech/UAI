@@ -256,6 +256,7 @@ const attendanceSchema = new mongoose.Schema({
         type: String,
         enum: [
             "present",
+            "present autocheckout",
             "absent",
             "leave",
             "holiday",

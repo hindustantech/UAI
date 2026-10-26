@@ -90,8 +90,12 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
       const rec = recordByDay.get(day);
       if (rec) {
         const ws = rec.workSummary || {};
-        totalPayableMinutes += ws.payableMinutes || 0;
-        totalMinutes += ws.totalMinutes || 0;
+        const isAutoCheckout = rec.status === "present autocheckout";
+
+        if (!isAutoCheckout) {
+          totalPayableMinutes += ws.payableMinutes || 0;
+          totalMinutes += ws.totalMinutes || 0;
+        }
 
         // Weekend / holiday / week-off OT is compensated as comp-off, NOT cash
         // EXCEPTION: "present" on weekly off day still counts as overtime
@@ -101,13 +105,16 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
           rec.status === "holiday" ||
           rec.status === "week_off";
         const isPresentOnWeekOff = rec.status === "present" && weeklyOffSet.has(DOW[dateObj.getDay()]);
-        if (!isOffDay || isPresentOnWeekOff) overtimeMinutes += ws.overtimeMinutes || 0;
+        if ((!isOffDay || isPresentOnWeekOff) && !isAutoCheckout) overtimeMinutes += ws.overtimeMinutes || 0;
 
         switch (rec.status) {
           case "present":
             presentDays++;
             daysWorked++;
             if (ws.lateMinutes > 0) lateDays++;
+            break;
+          case "present autocheckout":
+            // Auto punch-out days are excluded from salary calculation
             break;
           case "half_day":
             halfDays++;

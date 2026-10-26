@@ -110,8 +110,12 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
         const rec = recordByDay.get(day);
 
         if (rec) {
-            totalPayableMinutes += rec.workSummary?.payableMinutes ?? 0;
-            totalMinutes += rec.workSummary?.totalMinutes ?? 0;
+            const isAutoCheckout = rec.status === "present autocheckout";
+
+            if (!isAutoCheckout) {
+                totalPayableMinutes += rec.workSummary?.payableMinutes ?? 0;
+                totalMinutes += rec.workSummary?.totalMinutes ?? 0;
+            }
 
             // Weekend / holiday / week-off OT is compensated as comp-off, NOT cash
             const dowName = DOW[new Date(rec.date).getDay()];
@@ -119,12 +123,15 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
                 weeklyOffSet.has(dowName) ||
                 rec.status === "holiday" ||
                 rec.status === "week_off";
-            if (!isOffDay) overtimeMinutes += rec.workSummary?.overtimeMinutes ?? 0;
+            if (!isOffDay && !isAutoCheckout) overtimeMinutes += rec.workSummary?.overtimeMinutes ?? 0;
 
             switch (rec.status) {
                 case "present":
                     presentDays++;
                     if (rec.workSummary?.lateMinutes > 0) lateDays++;
+                    break;
+                case "present autocheckout":
+                    // Auto punch-out days are excluded from salary calculation
                     break;
                 case "half_day":
                     halfDays++;
