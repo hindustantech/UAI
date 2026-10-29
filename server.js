@@ -25,6 +25,7 @@ import shift from './routes/Attandance/Shift.js'
 import './models/Attandance/Holiydaycron.js'
 import ExportRoutes from './routes/Attandance/Export/attendanceRoutes.js'
 import permissionRoutes from './routes/permissionRoutes.js';
+import Permission from './models/Permission.js';
 import subscriptionsdata from './routes/Attandance/subscription.routes.js';
 import SalesRoute from './routes/Attandance/Sales/Sales.routes.js';
 import SalesReoprts from './routes/Attandance/Sales/Sales.Reports.js';
@@ -65,6 +66,24 @@ import dashboardRoutes from './routes/Dasboard/dashboard.js';
 import adminDashboardRoutes from './routes/AdminDashboard/adminDashboard.routes.js';
 dotenv.config();
 await connectDB();
+
+// Ensure the leave/attendance approval permission exists
+try {
+  const approvalPermission = await Permission.findOne({ key: 'request.update' });
+  if (!approvalPermission) {
+    await Permission.create({
+      resource: 'request',
+      action: 'update',
+      name: 'Request update',
+      description: 'Approve or reject attendance and leave requests',
+      system: true
+    });
+    console.log('✅ Seeded request.update permission');
+  }
+} catch (error) {
+  console.warn('⚠️ Could not seed request.update permission:', error.message);
+}
+
 await connectRedis();
 
 let notificationWorkers;

@@ -9,6 +9,7 @@ import {
     deductCompOffFIFO
 } from "./utils/compOff.utils.js";
 import { logApiAction, logApiError } from "../../utils/apiLogger.js";
+import { getApproverScope, getApprovalScopeEmployeeIds, canApproveRequest, normalizeDepartment } from "../../utils/approvalScope.js";
 import NotificationService from "../../src/notification/services/NotificationService.js";
 
 /*
@@ -539,23 +540,45 @@ export const getAttendanceRequests = async (req, res) => {
             requestType,
             startDate,
             endDate,
+            department,
             page = 1,
             limit = 10,
             companyId,
         } = req.query;
 
         const userId = req.user?._id||req.query.userId ||req.user?.id ;
-        const userRole = req.user?.role || req.user?.type || req.query?.type;
+        const resolvedCompanyId = companyId || req.user?.companyId;
 
-        // Build query based on user role
-        let query = { companyId };
+        if (!resolvedCompanyId) {
+            return res.status(400).json({
+                success: false,
+                message: "CompanyId required"
+            });
+        }
 
-        if (userRole === "partner" || userRole === "manager") {
-            // Admins can see all requests for their company
-            // No need to filter by employee
-        } else {
+        if (!mongoose.Types.ObjectId.isValid(resolvedCompanyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid companyId"
+            });
+        }
+
+        if (userId && !mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid userId"
+            });
+        }
+
+        const approverScope = await getApproverScope(req, resolvedCompanyId);
+        const isGlobalViewer = ["super_admin", "partner"].includes(req.user?.type);
+
+        // Build query based on whether the viewer is an eligible approver
+        let query = { companyId: resolvedCompanyId };
+
+        if (!approverScope.eligible && !isGlobalViewer) {
             // Regular users - get their employee record first
-            const employee = await Employee.findOne({ companyId, userId });
+            const employee = await Employee.findOne({ companyId: resolvedCompanyId, userId });
             if (!employee) {
                 return res.status(404).json({
                     success: false,
@@ -563,6 +586,15 @@ export const getAttendanceRequests = async (req, res) => {
                 });
             }
             query.employeeId = employee._id;
+        } else if (!isGlobalViewer) {
+            // Approvers only see requests inside their configured scope
+            const scopeEmployeeIds = await getApprovalScopeEmployeeIds(
+                approverScope,
+                resolvedCompanyId
+            );
+            if (scopeEmployeeIds !== null) {
+                query.employeeId = { $in: scopeEmployeeIds };
+            }
         }
 
         // Apply filters
@@ -572,6 +604,42 @@ export const getAttendanceRequests = async (req, res) => {
 
         if (requestType) {
             query.requestType = requestType;
+        }
+
+        // Department-wise filter (approvers can narrow the list to a department)
+        const targetDepartment = normalizeDepartment(department);
+        if (targetDepartment) {
+            const companyDepartments = await Employee.distinct("jobInfo.department", {
+                companyId: resolvedCompanyId
+            });
+            const matchedDepartments = companyDepartments.filter(
+                (value) => normalizeDepartment(value) === targetDepartment
+            );
+            const departmentEmployeeIds = matchedDepartments.length
+                ? await Employee.distinct("_id", {
+                    companyId: resolvedCompanyId,
+                    "jobInfo.department": { $in: matchedDepartments }
+                })
+                : [];
+
+            if (query.employeeId && typeof query.employeeId === "object" && Array.isArray(query.employeeId.$in)) {
+                const allowedIds = new Set(
+                    query.employeeId.$in.map((id) => String(id))
+                );
+                query.employeeId = {
+                    $in: departmentEmployeeIds.filter(
+                        (id) => allowedIds.has(String(id))
+                    )
+                };
+            } else if (query.employeeId) {
+                const ownId = String(query.employeeId);
+                const includesOwn = departmentEmployeeIds.some(
+                    (id) => String(id) === ownId
+                );
+                query.employeeId = includesOwn ? query.employeeId : { $in: [] };
+            } else {
+                query.employeeId = { $in: departmentEmployeeIds };
+            }
         }
 
         if (startDate || endDate) {
@@ -602,9 +670,29 @@ export const getAttendanceRequests = async (req, res) => {
 
         const total = await AttendanceRequest.countDocuments(query);
 
+        // Attach approval capability so the UI can disable action buttons
+        const data = await Promise.all(
+            requests.map(async (request) => {
+                const requester = request.populated("employeeId")
+                    ? request.employeeId
+                    : null;
+                const approvalCheck = await canApproveRequest(
+                    approverScope,
+                    request,
+                    { requester }
+                );
+                const plain = request.toObject();
+                plain.canApprove = approvalCheck.allowed;
+                plain.canApproveReason = approvalCheck.allowed
+                    ? null
+                    : approvalCheck.reason;
+                return plain;
+            })
+        );
+
         return res.json({
             success: true,
-            data: requests,
+            data,
             pagination: {
                 total,
                 page: parseInt(page),
@@ -629,9 +717,6 @@ export const getAttendanceRequests = async (req, res) => {
 export const getAttendanceRequestById = async (req, res) => {
     try {
         const { requestId } = req.params;
-        const userId = req.user?._id|| req.query.userId || req.user?.id;
-        const userRole = req.user?.role || req.query?.type;
-        const companyId = req.user?.companyId || req.query.companyId;
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             return res.status(400).json({
@@ -657,21 +742,31 @@ export const getAttendanceRequestById = async (req, res) => {
             });
         }
 
-        // Check authorization
-        if (userRole !== "admin") {
-            // Get employee record for current user
-            const employee = await Employee.findOne({ companyId, userId });
-            if (!employee || request.employeeId._id.toString() !== employee._id.toString()) {
-                return res.status(403).json({
-                    success: false,
-                    message: "You are not authorized to view this request"
-                });
-            }
+        // Check authorization: owner, global viewer, or eligible approver
+        const approverScope = await getApproverScope(req, request.companyId);
+        const isGlobalViewer = ["super_admin", "partner"].includes(req.user?.type);
+        const requesterId = request.employeeId?._id || request.employeeId;
+        const isOwner = approverScope.employee?._id
+            && String(requesterId) === String(approverScope.employee._id);
+
+        if (!isOwner && !isGlobalViewer && !approverScope.eligible) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not authorized to view this request"
+            });
         }
+
+        const approvalCheck = await canApproveRequest(approverScope, request, {
+            requester: request.populated("employeeId") ? request.employeeId : null
+        });
+
+        const data = request.toObject();
+        data.canApprove = approvalCheck.allowed;
+        data.canApproveReason = approvalCheck.allowed ? null : approvalCheck.reason;
 
         return res.json({
             success: true,
-            data: request
+            data
         });
 
     } catch (error) {
@@ -694,11 +789,7 @@ export const approveAttendanceRequest = async (req, res) => {
 
     try {
         const { requestId } = req.params;
-        let adminId = req.user._id || req.user.id;
-        const role = req.user?.role || req.user?.type;
-        if (role === 'user') {
-            adminId = req.user?.companyId || req.user?.companyId;
-        }
+        const adminId = req.user?._id || req.user?.id;
 
         // ───────────────────────── VALIDATION ─────────────────────────
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
@@ -710,6 +801,19 @@ export const approveAttendanceRequest = async (req, res) => {
         if (!request) throw new Error("Request not found");
         if (request.status !== "pending") {
             throw new Error(`Request already ${request.status}`);
+        }
+
+        // ============================================================
+        // 🔹 DEPARTMENT / SELF APPROVAL CHECK
+        // ============================================================
+        const approvalScope = await getApproverScope(req, request.companyId);
+        const approvalCheck = await canApproveRequest(approvalScope, request, { session });
+        if (!approvalCheck.allowed) {
+            await session.abortTransaction();
+            return res.status(403).json({
+                success: false,
+                message: approvalCheck.reason
+            });
         }
 
         // ============================================================
@@ -1092,11 +1196,7 @@ export const rejectAttendanceRequest = async (req, res) => {
     try {
         const { requestId } = req.params;
         const { reason } = req.body;
-        let adminId = req.user._id || req.user.id;
-        const role = req.user?.role || req.user?.type;
-        if (role === 'user') {
-            adminId = req.user?.companyId || req.user?.companyId;
-        }
+        const adminId = req.user?._id || req.user?.id;
 
         if (!mongoose.Types.ObjectId.isValid(requestId)) {
             return res.status(400).json({
@@ -1125,6 +1225,19 @@ export const rejectAttendanceRequest = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: `Request already ${request.status}`
+            });
+        }
+
+        // ============================================================
+        // 🔹 DEPARTMENT / SELF APPROVAL CHECK
+        // ============================================================
+        const rejectionScope = await getApproverScope(req, request.companyId);
+        const rejectionCheck = await canApproveRequest(rejectionScope, request, { session });
+        if (!rejectionCheck.allowed) {
+            await session.abortTransaction();
+            return res.status(403).json({
+                success: false,
+                message: rejectionCheck.reason
             });
         }
 
@@ -1378,7 +1491,7 @@ export const bulkApproveRequests = async (req, res) => {
 
     try {
         const { requestIds } = req.body;
-        const adminId = req.user._id;
+        const adminId = req.user?._id || req.user?.id;
 
         if (!Array.isArray(requestIds) || requestIds.length === 0) {
             return res.status(400).json({
@@ -1391,6 +1504,8 @@ export const bulkApproveRequests = async (req, res) => {
             approved: [],
             failed: []
         };
+
+        const scopeCache = new Map();
 
         for (const requestId of requestIds) {
             try {
@@ -1410,6 +1525,25 @@ export const bulkApproveRequests = async (req, res) => {
                     results.failed.push({
                         id: requestId,
                         reason: `Request already ${request.status}`
+                    });
+                    continue;
+                }
+
+                // ============================================================
+                // 🔹 DEPARTMENT / SELF APPROVAL CHECK
+                // ============================================================
+                const companyKey = String(request.companyId);
+                let scope = scopeCache.get(companyKey);
+                if (!scope) {
+                    scope = await getApproverScope(req, request.companyId);
+                    scopeCache.set(companyKey, scope);
+                }
+
+                const approvalCheck = await canApproveRequest(scope, request, { session });
+                if (!approvalCheck.allowed) {
+                    results.failed.push({
+                        id: requestId,
+                        reason: approvalCheck.reason
                     });
                     continue;
                 }
@@ -1570,7 +1704,7 @@ workSummary: {
 
     } catch (error) {
         await session.abortTransaction();
-        logApiError("BULK_APPROVE", "AttendanceRequest", error, req, { requestIds });
+        logApiError("BULK_APPROVE", "AttendanceRequest", error, req, { requestIds: req.body?.requestIds });
         return res.status(500).json({
             success: false,
             message: error.message
@@ -1587,15 +1721,41 @@ workSummary: {
 */
 export const getRequestStatistics = async (req, res) => {
     try {
-        const userRole = req.user.role;
-        const userId = req.user._id;
-        const companyId = req.user.companyId;
+        const userId = req.user?._id || req.user?.id || req.query.userId;
+        const resolvedCompanyId = req.user?.companyId || req.query.companyId;
 
-        let matchQuery = { companyId };
+        if (!resolvedCompanyId) {
+            return res.status(400).json({
+                success: false,
+                message: "CompanyId required"
+            });
+        }
 
-        if (userRole !== "admin") {
-            // Get employee record for non-admin users
-            const employee = await Employee.findOne({ companyId, userId });
+        if (!mongoose.Types.ObjectId.isValid(resolvedCompanyId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid companyId"
+            });
+        }
+
+        if (userId && !mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid userId"
+            });
+        }
+
+        const approverScope = await getApproverScope(req, resolvedCompanyId);
+        const isGlobalViewer = ["super_admin", "partner"].includes(req.user?.type);
+
+        let matchQuery = { companyId: resolvedCompanyId };
+
+        if (!approverScope.eligible && !isGlobalViewer) {
+            // Get employee record for non-approver users
+            const employee = await Employee.findOne({
+                companyId: resolvedCompanyId,
+                userId
+            });
             if (!employee) {
                 return res.status(404).json({
                     success: false,
@@ -1603,6 +1763,15 @@ export const getRequestStatistics = async (req, res) => {
                 });
             }
             matchQuery.employeeId = employee._id;
+        } else if (!isGlobalViewer) {
+            // Approvers only see statistics inside their configured scope
+            const scopeEmployeeIds = await getApprovalScopeEmployeeIds(
+                approverScope,
+                resolvedCompanyId
+            );
+            if (scopeEmployeeIds !== null) {
+                matchQuery.employeeId = { $in: scopeEmployeeIds };
+            }
         }
 
         const stats = await AttendanceRequest.aggregate([

@@ -3,7 +3,46 @@
 import User from "../models/userModel.js";
 import Permission from "../models/Permission.js";
 import PermissionLog from "../models/PermissionLog.js";
-import AssingPermission from "../models/AssingPermission.js";
+import AssingPermission, {
+  APPROVAL_SCOPE_TYPES,
+  normalizeDepartmentList
+} from "../models/AssingPermission.js";
+
+const parseApprovalScope = (input) => {
+  if (input === undefined || input === null || input === "") return null;
+
+  if (typeof input === "string") {
+    if (!APPROVAL_SCOPE_TYPES.includes(input)) {
+      throw new Error(`Invalid approval scope type: ${input}`);
+    }
+    if (input === "departments") {
+      return { type: "department", departments: [] };
+    }
+    return { type: input, departments: [] };
+  }
+
+  if (typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("approvalScope must be an object or a scope type string");
+  }
+
+  const type = input.type || input.scopeType || "department";
+  if (!APPROVAL_SCOPE_TYPES.includes(type)) {
+    throw new Error(`Invalid approval scope type: ${type}`);
+  }
+
+  const departments = normalizeDepartmentList(input.departments);
+
+  if (type === "company") {
+    return { type, departments: [] };
+  }
+
+  if (type === "departments" && departments.length === 0) {
+    return { type: "department", departments: [] };
+  }
+
+  return { type, departments };
+};
+
 /**
  * Assign permission to a user
  */
@@ -21,7 +60,23 @@ export const assignPermission = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    await AssingPermission.assignToUser(company, userId, permissionKey, performedBy);
+    let approvalScope;
+    try {
+      approvalScope = parseApprovalScope(
+        req.body.scope ?? req.body.approvalScope
+      );
+    } catch (err) {
+      return res.status(400).json({ message: err.message });
+    }
+
+    await AssingPermission.assignToUser(
+      company,
+      userId,
+      permissionKey,
+      performedBy,
+      null,
+      approvalScope
+    );
 
     await PermissionLog.create({
       companyId: company,

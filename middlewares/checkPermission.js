@@ -4,12 +4,14 @@ import AssingPermission from "../models/AssingPermission.js";
 
 /**
  * permissionKey: the key required to access this route
+ * options.allowRoles: employee roles that bypass the permission check
  */
-export const checkPermission = (permissionKey) => {
+export const checkPermission = (permissionKey, options = {}) => {
+    const { allowRoles = ['super_admin', 'admin'] } = options;
     return async (req, res, next) => {
         try {
             const userId = req.user?.id || req.user?._id;
-            const companyId = req.user.companyId || req.user.companyId;
+            const companyId = req.user?.companyId;
 
             if (!userId) {
                 return res.status(401).json({ message: 'Unauthorized' });
@@ -45,7 +47,7 @@ export const checkPermission = (permissionKey) => {
             }
 
             // 🔹 Role hierarchy
-            if (['super_admin', 'admin'].includes(employee.role)) {
+            if (allowRoles.includes(employee.role)) {
                 return next();
             }
 
@@ -54,7 +56,7 @@ export const checkPermission = (permissionKey) => {
                 companyId, 
                 userId: user._id 
             });
-            if (assignment && assignment.permissions.includes(permissionKey)) {
+            if (Array.isArray(assignment?.permissions) && assignment.permissions.includes(permissionKey)) {
                 return next();
             }
 

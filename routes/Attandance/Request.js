@@ -49,13 +49,15 @@ ADMIN/MANAGER ROUTES
 ====================================
 */
 
-// Approve a request (admin/manager only)
-router.put("/:requestId/approve", checkPermission('request.update'), approveAttendanceRequest);
+const APPROVAL_ROLES = ['super_admin', 'admin', 'manager','hr']; // Roles allowed to approve/reject requests
 
-// Reject a request (admin/manager only)
-router.put("/:requestId/reject", checkPermission('request.update'), rejectAttendanceRequest);
+// Approve a request (admin/manager/permitted employee only)
+router.put("/:requestId/approve", checkPermission('request.update', { allowRoles: APPROVAL_ROLES }), approveAttendanceRequest);
 
-// Bulk approve requests (admin only)
-router.post("/bulk-approve", checkPermission('request.update'), bulkApproveRequests);
+// Reject a request (admin/manager/permitted employee only)
+router.put("/:requestId/reject", checkPermission('request.update', { allowRoles: APPROVAL_ROLES }), rejectAttendanceRequest);
+
+// Bulk approve requests (admin/manager/permitted employee only)
+router.post("/bulk-approve", checkPermission('request.update', { allowRoles: APPROVAL_ROLES }), bulkApproveRequests);
 
 export default router;
