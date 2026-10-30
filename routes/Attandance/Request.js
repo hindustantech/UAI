@@ -49,15 +49,17 @@ ADMIN/MANAGER ROUTES
 ====================================
 */
 
-const APPROVAL_ROLES = ['super_admin', 'partner', 'admin', 'manager','hr']; // Roles allowed to approve/reject requests
+// partner/super_admin bypass is handled by checkPermission via user.type.
+// Every other user must hold the explicit request.update assignment.
+const APPROVAL_ROLES = [];
 
-// Approve a request (admin/manager/permitted employee only)
+// Approve a request (partner/super_admin or assigned hr/manager/admin only)
 router.put("/:requestId/approve", checkPermission('request.update', { allowRoles: APPROVAL_ROLES }), approveAttendanceRequest);
 
-// Reject a request (admin/manager/permitted employee only)
+// Reject a request (partner/super_admin or assigned hr/manager/admin only)
 router.put("/:requestId/reject", checkPermission('request.update', { allowRoles: APPROVAL_ROLES }), rejectAttendanceRequest);
 
-// Bulk approve requests (admin/manager/permitted employee only)
+// Bulk approve requests (partner/super_admin or assigned hr/manager/admin only)
 router.post("/bulk-approve", checkPermission('request.update', { allowRoles: APPROVAL_ROLES }), bulkApproveRequests);
 
 export default router;

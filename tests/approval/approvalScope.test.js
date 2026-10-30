@@ -54,11 +54,11 @@ test("isSameDepartment rejects empty or missing departments", () => {
     assert.equal(isSameDepartment(undefined, "Sales"), false);
 });
 
-test("isEligibleRole only allows admin, super_admin and manager", () => {
+test("isEligibleRole only allows hr, manager and admin", () => {
     assert.equal(isEligibleRole("admin"), true);
-    assert.equal(isEligibleRole("super_admin"), true);
     assert.equal(isEligibleRole("manager"), true);
-    assert.equal(isEligibleRole("hr"), false);
+    assert.equal(isEligibleRole("hr"), true);
+    assert.equal(isEligibleRole("super_admin"), false);
     assert.equal(isEligibleRole("employee"), false);
     assert.equal(isEligibleRole("sales"), false);
     assert.equal(isEligibleRole(undefined), false);

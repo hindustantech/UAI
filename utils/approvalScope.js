@@ -6,7 +6,7 @@ import AssingPermission, {
 
 const APPROVAL_PERMISSION = "request.update";
 const GLOBAL_TYPES = ["super_admin", "partner"];
-const ROLE_BYPASS = ["admin", "super_admin", "manager"];
+const APPROVER_ROLES = ["admin", "manager", "hr"];
 export const APPROVAL_SCOPE_TYPES = ["department", "departments", "company"];
 export const DEFAULT_APPROVAL_SCOPE = Object.freeze({
     type: "department",
@@ -25,7 +25,7 @@ export const isSameDepartment = (a, b) => {
     return !!left && !!right && left === right;
 };
 
-export const isEligibleRole = (role) => ROLE_BYPASS.includes(role);
+export const isEligibleRole = (role) => APPROVER_ROLES.includes(role);
 
 /**
  * Normalize a stored/raw approval scope into a safe, predictable shape.
@@ -77,7 +77,9 @@ export const isDepartmentInScope = (
 
 /**
  * Resolve the approver's company employee record + whether they are eligible
- * to approve attendance requests (admin/manager/super_admin role or explicit request.update).
+ * to approve attendance requests. Only partner/super_admin bypass this check;
+ * hr/manager/admin employees must have an explicit request.update assignment,
+ * which also supplies the department-wise approval scope.
  */
 export const getApproverScope = async (req, companyId) => {
     const userId = req.user?.id || req.user?._id;
@@ -161,26 +163,30 @@ export const getApproverScope = async (req, companyId) => {
         };
     }
 
-    const hasRoleBypass = isEligibleRole(employee.role);
-
-    let hasPermission = false;
-    let approvalScope = { ...DEFAULT_APPROVAL_SCOPE };
-
-    if (hasRoleBypass) {
-        approvalScope = { type: "company", departments: [] };
-    } else {
-        const assignment = await AssingPermission.findOne({
+    if (!isEligibleRole(employee.role)) {
+        return {
+            userId,
             companyId: resolvedCompanyId,
-            userId
-        })
-            .select("permissions approvalScope")
-            .lean();
-        hasPermission = Array.isArray(assignment?.permissions)
-            && assignment.permissions.includes(APPROVAL_PERMISSION);
-        approvalScope = resolveApprovalScope(assignment?.approvalScope);
+            userType: user?.type,
+            employee,
+            department: employee?.jobInfo?.department ?? null,
+            approvalScope: { ...DEFAULT_APPROVAL_SCOPE },
+            eligible: false,
+            reason: "Forbidden: insufficient permissions"
+        };
     }
 
-    const eligible = hasRoleBypass || hasPermission;
+    const assignment = await AssingPermission.findOne({
+        companyId: resolvedCompanyId,
+        userId
+    })
+        .select("permissions approvalScope")
+        .lean();
+
+    const hasPermission = Array.isArray(assignment?.permissions)
+        && assignment.permissions.includes(APPROVAL_PERMISSION);
+
+    const approvalScope = resolveApprovalScope(assignment?.approvalScope);
 
     return {
         userId,
@@ -189,8 +195,8 @@ export const getApproverScope = async (req, companyId) => {
         employee,
         department: employee?.jobInfo?.department ?? null,
         approvalScope,
-        eligible,
-        reason: eligible ? null : "Forbidden: insufficient permissions"
+        eligible: hasPermission,
+        reason: hasPermission ? null : "Forbidden: insufficient permissions"
     };
 };
 
