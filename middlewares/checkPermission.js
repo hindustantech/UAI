@@ -7,7 +7,7 @@ import AssingPermission from "../models/AssingPermission.js";
  * options.allowRoles: employee roles that bypass the permission check
  */
 export const checkPermission = (permissionKey, options = {}) => {
-    const { allowRoles = ['super_admin', 'admin'] } = options;
+    const { allowRoles = ['super_admin', 'admin', 'partner'] } = options;
     return async (req, res, next) => {
         try {
             const userId = req.user?.id || req.user?._id;
