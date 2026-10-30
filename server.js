@@ -56,6 +56,10 @@ import './cron/markAbsent.cron.js'
 import './cron/markpunchout.cron.js'
 import './cron/markSalesSessionPunchOut.cron.js'
 import './cron/compOffExpiry.cron.js'
+import LeaveMonthlyAccrualCron from './controllers/attandance/crons/leaveMonthlyAccrual.cron.js'
+import LeaveYearlyAllocationCron from './controllers/attandance/crons/leaveYearlyAllocation.cron.js'
+import LeaveEarnedAccrualCron from './controllers/attandance/crons/leaveEarnedAccrual.cron.js'
+import leaveRoutes from './routes/Attandance/LeaveRule.routes.js'
 import { startTaskSchedulers } from './cron/taskScheduler.cron.js'
 import { connectRedis, getRedisClient } from './config/redis.js';
 import { startAllWorkers, stopAllWorkers } from './src/notification/workers/index.js';
@@ -158,6 +162,7 @@ app.use('/api/shift', shift);
 app.use('/api/payment', payment);
 app.use('/api/v1/bulk/upload/SalesRoute', bulkUploadSalesRoute)
 app.use("/api/attendance/requests", attendanceRequestRoutes);
+app.use('/api/leave', leaveRoutes);
 app.use('/api/patnerProfile', patnerProfile);
 app.use('/api/subscriptionsdata', subscriptionsdata);
 app.use('/api/billedDate', billedDateRoutes);
@@ -201,6 +206,11 @@ const server = app.listen(PORT, () => {
 
   startAttendanceCron();
   startTaskSchedulers(); // Task management schedulers
+
+  // Leave accrual cron jobs
+  LeaveMonthlyAccrualCron.initializeCron();
+  LeaveYearlyAllocationCron.initializeCron();
+  LeaveEarnedAccrualCron.initializeCron();
 });
 // Increase server-level timeouts (CRITICAL for /uploader-infoong operations)
 server.timeout = 15 * 60 * 1000; // 15 minutes

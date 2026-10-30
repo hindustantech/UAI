@@ -52,6 +52,39 @@ const attendanceRequestSchema = new Schema(
         },
 
         /*
+            LEAVE TYPE & BALANCE
+        */
+        leaveTypeId: {
+            type: Schema.Types.ObjectId,
+            ref: "LeaveType"
+        },
+
+        leaveDays: {
+            type: Number,
+            default: 0
+        },
+
+        isPaid: {
+            type: Boolean,
+            default: true
+        },
+
+        balanceBefore: {
+            type: Number,
+            default: 0
+        },
+
+        balanceAfter: {
+            type: Number,
+            default: 0
+        },
+
+        policyId: {
+            type: Schema.Types.ObjectId,
+            ref: "LeavePolicy"
+        },
+
+        /*
             PUNCH CORRECTION DETAILS
         */
         punchDetails: {

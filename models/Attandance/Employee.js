@@ -2,6 +2,8 @@
 
 import mongoose from "mongoose";
 
+const { Schema } = mongoose;
+
 const employeeSchema = new mongoose.Schema({
 
     companyId: {
@@ -179,6 +181,51 @@ const employeeSchema = new mongoose.Schema({
             },
             source: {
                 type: String
+            }
+        }]
+    },
+
+    leavePolicy: {
+        policyId: {
+            type: Schema.Types.ObjectId,
+            ref: "LeavePolicy"
+        },
+        overrides: [{
+            leaveTypeId: {
+                type: Schema.Types.ObjectId,
+                ref: "LeaveType"
+            },
+            // Override specific fields from the policy
+            accrual: {
+                afterMonths: Number,
+                afterDays: Number,
+                allocationMode: String,
+                prorateOnJoining: Boolean,
+                creditPerMonth: Number,
+                creditOnDay: Number,
+                prorateFirstMonth: Boolean,
+                workingDaysPerCredit: Number,
+                creditDays: Number,
+                countStatuses: [String],
+                halfDayCredit: Number,
+                countFrom: String
+            },
+            limits: {
+                maxPerMonth: Number,
+                maxPerYear: Number,
+                maxPerRequest: Number
+            },
+            lifecycle: {
+                unusedAction: String,
+                carryTo: String,
+                maxCarryDays: Number,
+                carryExpiryMonths: Number
+            },
+            requestRules: {
+                minNoticeDays: Number,
+                allowBackdated: Boolean,
+                allowHalfDay: Boolean,
+                requiresAttachment: Boolean
             }
         }]
     }

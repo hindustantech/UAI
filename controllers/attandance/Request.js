@@ -11,6 +11,14 @@ import {
 import { logApiAction, logApiError } from "../../utils/apiLogger.js";
 import { getApproverScope, getApprovalScopeEmployeeIds, canApproveRequest, normalizeDepartment } from "../../utils/approvalScope.js";
 import NotificationService from "../../src/notification/services/NotificationService.js";
+import {
+    validateLeaveEligibility,
+    countWorkingDays,
+    reserveLeave,
+    commitLeave,
+    releaseLeave
+} from "../../services/leave/leavePolicy.service.js";
+import LeaveBalance from "../../models/Attandance/LeaveBalance.js";
 
 /*
 ====================================
@@ -239,6 +247,7 @@ export const createAttendanceRequest = async (req, res) => {
             LEAVE FLOW
             ===============================
         */
+        let leaveContext = null;
         if (requestType === "leave") {
 
             if (!leaveDetails?.startDate || !leaveDetails?.endDate) {
@@ -279,6 +288,70 @@ export const createAttendanceRequest = async (req, res) => {
                     message: "Leave request overlaps existing request"
                 });
             }
+
+            /*
+                LEAVE TYPE + BALANCE VALIDATION
+            */
+            const leaveTypeId = req.body.leaveTypeId || leaveDetails?.leaveTypeId;
+            if (!leaveTypeId) {
+                return res.status(400).json({
+                    success: false,
+                    message: "leaveTypeId is required for leave requests"
+                });
+            }
+            if (!mongoose.Types.ObjectId.isValid(leaveTypeId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid leaveTypeId"
+                });
+            }
+
+            const eligibility = await validateLeaveEligibility(
+                employee._id,
+                leaveTypeId,
+                startDate,
+                endDate
+            );
+            if (!eligibility.eligible) {
+                return res.status(400).json({
+                    success: false,
+                    message: eligibility.reason || "Employee is not eligible for this leave"
+                });
+            }
+
+            const leaveDays = await countWorkingDays(employee._id, startDate, endDate);
+            if (leaveDays <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "No chargeable working days in the requested range"
+                });
+            }
+
+            const year = startDate.getFullYear();
+            let available = 0;
+            if (eligibility.rule) {
+                const balanceDoc = await LeaveBalance.findOne({
+                    employeeId: employee._id,
+                    leaveTypeId,
+                    year
+                }).lean();
+                available = balanceDoc?.balance || 0;
+
+                if (available < leaveDays) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Insufficient leave balance (available: ${available}, required: ${leaveDays})`
+                    });
+                }
+            }
+
+            leaveContext = {
+                leaveTypeId,
+                leaveDays,
+                year,
+                balanceBefore: available,
+                policyId: eligibility.rule?.policyId || employee.leavePolicy?.policyId,
+            };
         }
 
         /*
@@ -459,6 +532,15 @@ export const createAttendanceRequest = async (req, res) => {
             };
         }
 
+        if (requestType === "leave" && leaveContext) {
+            payload.leaveTypeId = leaveContext.leaveTypeId;
+            payload.leaveDays = leaveContext.leaveDays;
+            payload.balanceBefore = leaveContext.balanceBefore;
+            payload.balanceAfter = leaveContext.balanceBefore;
+            payload.policyId = leaveContext.policyId;
+            payload.isPaid = true;
+        }
+
         if (
             ["punch_in", "punch_in_out", "punch_in_and_out"]
                 .includes(requestType)
@@ -481,6 +563,35 @@ export const createAttendanceRequest = async (req, res) => {
             STEP 4: CREATE
         */
         const request = await AttendanceRequest.create(payload);
+
+        // Reserve leave balance for pending leave requests (only when a policy applies)
+        if (requestType === "leave" && leaveContext && leaveContext.policyId) {
+            try {
+                const reservation = await reserveLeave(
+                    employee._id,
+                    leaveContext.leaveTypeId,
+                    leaveContext.leaveDays,
+                    `Reserved for request ${request._id}`,
+                    request._id,
+                    req.user?._id || req.user?.id,
+                    leaveContext.year
+                );
+
+                if (reservation.reserved < leaveContext.leaveDays) {
+                    await AttendanceRequest.findByIdAndDelete(request._id);
+                    return res.status(400).json({
+                        success: false,
+                        message: `Insufficient leave balance (available: ${reservation.balanceAfter}, required: ${leaveContext.leaveDays})`
+                    });
+                }
+
+                request.balanceAfter = reservation.balanceAfter;
+                await request.save();
+            } catch (reserveErr) {
+                await AttendanceRequest.findByIdAndDelete(request._id);
+                throw reserveErr;
+            }
+        }
 
         // Fire-and-forget notification to company admins about new request
         try {
@@ -1162,6 +1273,27 @@ export const approveAttendanceRequest = async (req, res) => {
 
         await session.commitTransaction();
 
+        // Consume reserved leave balance after the approval transaction commits
+        if (request.requestType === "leave" && request.leaveTypeId && request.leaveDays > 0) {
+            try {
+                const commit = await commitLeave(
+                    request.employeeId,
+                    request.leaveTypeId,
+                    request.leaveDays,
+                    request._id,
+                    adminId,
+                    new Date(request.leaveDetails?.startDate || Date.now()).getFullYear()
+                );
+                request.balanceAfter = commit.balanceAfter;
+                await AttendanceRequest.updateOne(
+                    { _id: request._id },
+                    { $set: { balanceAfter: commit.balanceAfter } }
+                );
+            } catch (balanceErr) {
+                logApiError("APPROVE_BALANCE", "AttendanceRequest", balanceErr, req, { requestId: request._id });
+            }
+        }
+
         logApiAction({ action: "APPROVE", model: "AttendanceRequest", req, resourceId: request?._id, after: { status: "approved", approvedBy: adminId, requestType: request.requestType } });
 
         return res.status(200).json({
@@ -1282,6 +1414,23 @@ export const rejectAttendanceRequest = async (req, res) => {
 
         await session.commitTransaction();
 
+        // Release reserved leave balance back to the employee
+        if (request.requestType === "leave" && request.leaveTypeId && request.leaveDays > 0) {
+            try {
+                await releaseLeave(
+                    request.employeeId,
+                    request.leaveTypeId,
+                    request.leaveDays,
+                    `Released for rejected request ${request._id}`,
+                    request._id,
+                    adminId,
+                    new Date(request.leaveDetails?.startDate || Date.now()).getFullYear()
+                );
+            } catch (balanceErr) {
+                logApiError("REJECT_BALANCE", "AttendanceRequest", balanceErr, req, { requestId: request._id });
+            }
+        }
+
         return res.json({
             success: true,
             message: "Request rejected successfully",
@@ -1359,6 +1508,23 @@ export const cancelAttendanceRequest = async (req, res) => {
 
         request.status = "cancelled";
         await request.save();
+
+        // Release reserved leave balance back to the employee
+        if (request.requestType === "leave" && request.leaveTypeId && request.leaveDays > 0) {
+            try {
+                await releaseLeave(
+                    request.employeeId,
+                    request.leaveTypeId,
+                    request.leaveDays,
+                    `Released for cancelled request ${request._id}`,
+                    request._id,
+                    req.user?._id || req.user?.id,
+                    new Date(request.leaveDetails?.startDate || Date.now()).getFullYear()
+                );
+            } catch (balanceErr) {
+                logApiError("CANCEL_BALANCE", "AttendanceRequest", balanceErr, req, { requestId: request._id });
+            }
+        }
 
         logApiAction({ action: "CANCEL", model: "AttendanceRequest", req, resourceId: request?._id, after: { status: "cancelled" } });
 
@@ -1448,6 +1614,57 @@ export const updateAttendanceRequest = async (req, res) => {
                 });
             }
 
+            const newLeaveDays = await countWorkingDays(employee._id, startDate, endDate);
+            if (newLeaveDays <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "No chargeable working days in the requested range"
+                });
+            }
+
+            const delta = request.leaveTypeId ? newLeaveDays - (request.leaveDays || 0) : 0;
+            if (delta > 0) {
+                const reservation = await reserveLeave(
+                    employee._id,
+                    request.leaveTypeId,
+                    delta,
+                    `Reserved for updated request ${request._id}`,
+                    request._id,
+                    userId,
+                    startDate.getFullYear()
+                );
+                if (reservation.reserved < delta) {
+                    if (reservation.reserved > 0) {
+                        await releaseLeave(
+                            employee._id,
+                            request.leaveTypeId,
+                            reservation.reserved,
+                            `Reverted partial reservation for request ${request._id}`,
+                            request._id,
+                            userId,
+                            startDate.getFullYear()
+                        );
+                    }
+                    return res.status(400).json({
+                        success: false,
+                        message: "Insufficient leave balance for the updated dates"
+                    });
+                }
+                request.balanceAfter = reservation.balanceAfter;
+            } else if (delta < 0) {
+                const release = await releaseLeave(
+                    employee._id,
+                    request.leaveTypeId,
+                    -delta,
+                    `Released for updated request ${request._id}`,
+                    request._id,
+                    userId,
+                    startDate.getFullYear()
+                );
+                request.balanceAfter = release.balanceAfter;
+            }
+
+            request.leaveDays = newLeaveDays;
             request.leaveDetails = {
                 ...request.leaveDetails,
                 ...updates.leaveDetails
@@ -1506,6 +1723,7 @@ export const bulkApproveRequests = async (req, res) => {
         };
 
         const scopeCache = new Map();
+        const approvedLeaveRequests = [];
 
         for (const requestId of requestIds) {
             try {
@@ -1686,6 +1904,16 @@ workSummary: {
                 request.approvedAt = new Date();
                 await request.save({ session });
 
+                if (request.requestType === "leave" && request.leaveTypeId && request.leaveDays > 0) {
+                    approvedLeaveRequests.push({
+                        employeeId: request.employeeId,
+                        leaveTypeId: request.leaveTypeId,
+                        leaveDays: request.leaveDays,
+                        requestId: request._id,
+                        year: new Date(request.leaveDetails?.startDate || Date.now()).getFullYear(),
+                    });
+                }
+
                 results.approved.push(requestId);
             } catch (error) {
                 results.failed.push({ id: requestId, reason: error.message });
@@ -1693,6 +1921,26 @@ workSummary: {
         }
 
         await session.commitTransaction();
+
+        // Consume reserved leave balances for approved leave requests
+        for (const leaveRequest of approvedLeaveRequests) {
+            try {
+                const commit = await commitLeave(
+                    leaveRequest.employeeId,
+                    leaveRequest.leaveTypeId,
+                    leaveRequest.leaveDays,
+                    leaveRequest.requestId,
+                    adminId,
+                    leaveRequest.year
+                );
+                await AttendanceRequest.updateOne(
+                    { _id: leaveRequest.requestId },
+                    { $set: { balanceAfter: commit.balanceAfter } }
+                );
+            } catch (balanceErr) {
+                logApiError("BULK_APPROVE_BALANCE", "AttendanceRequest", balanceErr, req, { requestId: leaveRequest.requestId });
+            }
+        }
 
         logApiAction({ action: "BULK_APPROVE", model: "AttendanceRequest", req, extra: { requestIds, approved: results.approved.length, failed: results.failed.length } });
 
