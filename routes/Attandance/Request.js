@@ -49,7 +49,7 @@ ADMIN/MANAGER ROUTES
 ====================================
 */
 
-const APPROVAL_ROLES = ['super_admin', 'admin', 'manager','hr']; // Roles allowed to approve/reject requests
+const APPROVAL_ROLES = ['super_admin', 'partner', 'admin', 'manager','hr']; // Roles allowed to approve/reject requests
 
 // Approve a request (admin/manager/permitted employee only)
 router.put("/:requestId/approve", checkPermission('request.update', { allowRoles: APPROVAL_ROLES }), approveAttendanceRequest);
