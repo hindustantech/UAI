@@ -312,6 +312,25 @@ test("evaluateApproval rejects a department outside the assignment", () => {
     assert.match(result.reason, /departments assigned to you/i);
 });
 
+test("evaluateApproval allows global approvers without an employee record", () => {
+    const result = evaluateApproval(
+        makeScope({ isGlobal: true, employee: null }),
+        makeRequest({ companyId: "another-company" }),
+        null
+    );
+    assert.equal(result.allowed, true);
+    assert.equal(result.reason, null);
+});
+
+test("canApproveRequest allows a global partner approver", async () => {
+    const result = await canApproveRequest(
+        makeScope({ isGlobal: true, employee: null }),
+        makeRequest(),
+        { requester: makeRequester("Marketing") }
+    );
+    assert.equal(result.allowed, true);
+});
+
 test("evaluateApproval still rejects self approval under company scope", () => {
     const result = evaluateApproval(
         makeScope({

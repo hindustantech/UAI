@@ -113,6 +113,22 @@ export const getApproverScope = async (req, companyId) => {
         };
     }
 
+    const isGlobal = GLOBAL_TYPES.includes(user?.type);
+
+    if (isGlobal) {
+        return {
+            userId,
+            companyId: resolvedCompanyId || null,
+            userType: user?.type,
+            employee: null,
+            department: null,
+            approvalScope: { type: "company", departments: [] },
+            isGlobal: true,
+            eligible: true,
+            reason: null
+        };
+    }
+
     if (!resolvedCompanyId) {
         return {
             userId,
@@ -145,13 +161,12 @@ export const getApproverScope = async (req, companyId) => {
         };
     }
 
-    const isGlobal = GLOBAL_TYPES.includes(user?.type);
     const hasRoleBypass = isEligibleRole(employee.role);
 
     let hasPermission = false;
     let approvalScope = { ...DEFAULT_APPROVAL_SCOPE };
 
-    if (isGlobal || hasRoleBypass) {
+    if (hasRoleBypass) {
         approvalScope = { type: "company", departments: [] };
     } else {
         const assignment = await AssingPermission.findOne({
@@ -165,7 +180,7 @@ export const getApproverScope = async (req, companyId) => {
         approvalScope = resolveApprovalScope(assignment?.approvalScope);
     }
 
-    const eligible = isGlobal || hasRoleBypass || hasPermission;
+    const eligible = hasRoleBypass || hasPermission;
 
     return {
         userId,
@@ -186,6 +201,10 @@ export const getApproverScope = async (req, companyId) => {
 export const evaluateApproval = (scope, request, requesterEmployee) => {
     if (!scope?.eligible) {
         return { allowed: false, reason: scope?.reason || "Forbidden: insufficient permissions" };
+    }
+
+    if (scope.isGlobal) {
+        return { allowed: true, reason: null };
     }
 
     if (!scope.companyId || String(request.companyId) !== String(scope.companyId)) {
@@ -231,6 +250,7 @@ export const evaluateApproval = (scope, request, requesterEmployee) => {
  */
 export const getApprovalScopeEmployeeIds = async (scope, companyId) => {
     if (!scope?.eligible) return [];
+    if (scope.isGlobal) return null;
 
     const approvalScope = resolveApprovalScope(scope.approvalScope);
     if (approvalScope.type === "company") return null;
