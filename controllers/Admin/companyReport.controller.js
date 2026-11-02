@@ -1,5 +1,5 @@
 import { Parser } from "json2csv";
-import XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import User from "../../models/userModel.js";
 import PatnerProfile from "../../models/PatnerProfile.js";
 import Employee from "../../models/Attandance/Employee.js";
@@ -32,6 +32,16 @@ const ALLOWED_SORT_FIELDS = {
 };
 
 const SECONDS_IN_DAY = 1000 * 60 * 60 * 24;
+
+const EXPIRING_SOON_DAYS = 7;
+
+const SUBSCRIPTION_TYPES = ["PAID", "FREE", "NONE"];
+
+const SUBSCRIPTION_TYPE_LABELS = {
+    PAID: "PAID ACTIVE",
+    FREE: "FREE PLAN",
+    NONE: "NO ACTIVE SUBSCRIPTION"
+};
 
 /* =========================================================
    HELPERS
@@ -113,6 +123,8 @@ const buildReportPipeline = ({
     fromDate,
     toDate,
     hasActiveSubscription,
+    subscriptionType,
+    expiringSoon,
     startOfDay,
     endOfDay,
     sortStage,
@@ -274,6 +286,101 @@ const buildReportPipeline = ({
         });
     }
 
+    /* ---------- Subscription classification ---------- */
+
+    pipeline.push({
+        $addFields: {
+            isFreeSubscription: {
+                $and: [
+                    "$hasActiveSubscription",
+                    {
+                        $or: [
+                            {
+                                $eq: [
+                                    "$activeSubscription.payment.paymentGateway",
+                                    "FREE_PLAN"
+                                ]
+                            },
+                            {
+                                $eq: [
+                                    "$activeSubscription.payment.amountPaid",
+                                    0
+                                ]
+                            },
+                            {
+                                $eq: [
+                                    "$activeSubscription.planSnapshot.finalPrice",
+                                    0
+                                ]
+                            },
+                            {
+                                $eq: [
+                                    "$activeSubscription.planSnapshot.price",
+                                    0
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    });
+
+    pipeline.push({
+        $addFields: {
+            subscriptionType: {
+                $cond: [
+                    "$hasActiveSubscription",
+                    {
+                        $cond: [
+                            "$isFreeSubscription",
+                            "FREE",
+                            "PAID"
+                        ]
+                    },
+                    "NONE"
+                ]
+            },
+            subscriptionDaysRemaining: {
+                $cond: [
+                    "$hasActiveSubscription",
+                    {
+                        $ceil: {
+                            $divide: [
+                                {
+                                    $subtract: [
+                                        "$activeSubscription.endDate",
+                                        now
+                                    ]
+                                },
+                                SECONDS_IN_DAY
+                            ]
+                        }
+                    },
+                    null
+                ]
+            }
+        }
+    });
+
+    if (subscriptionType) {
+        pipeline.push({
+            $match: { subscriptionType }
+        });
+    }
+
+    if (expiringSoon) {
+        pipeline.push({
+            $match: {
+                subscriptionType: { $ne: "NONE" },
+                subscriptionDaysRemaining: {
+                    $gte: 0,
+                    $lte: EXPIRING_SOON_DAYS
+                }
+            }
+        });
+    }
+
     /* ---------- Employee statistics ---------- */
 
     pipeline.push({
@@ -391,6 +498,9 @@ const buildReportPipeline = ({
             logo: "$profile.logo",
             accountStatus: "$accountStatus",
             companyType: "$type",
+            subscriptionType: "$subscriptionType",
+            isFreeSubscription: "$isFreeSubscription",
+            subscriptionDaysRemaining: "$subscriptionDaysRemaining",
             companyCreatedAt: "$createdAt",
             employeeCreatedAt: "$employeeStats.firstEmployeeCreatedAt",
             lastEmployeeCreatedAt: "$employeeStats.lastEmployeeCreatedAt",
@@ -408,6 +518,8 @@ const buildReportPipeline = ({
                 status: "$activeSubscription.status",
                 paymentStatus: "$activeSubscription.payment.paymentStatus",
                 transactionId: "$activeSubscription.payment.transactionId",
+                paymentGateway: "$activeSubscription.payment.paymentGateway",
+                amountPaid: "$activeSubscription.payment.amountPaid",
                 maxEmployees: {
                     $ifNull: ["$activeSubscription.usage.maxEmployees", 0]
                 },
@@ -463,6 +575,58 @@ const buildReportPipeline = ({
                             ]
                         }
                     },
+                    paidActiveCompanies: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$subscriptionType", "PAID"] },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    freeCompanies: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$subscriptionType", "FREE"] },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    noActiveSubscriptionCompanies: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$subscriptionType", "NONE"] },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    expiringSoonCompanies: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $ne: ["$subscriptionType", "NONE"] },
+                                        {
+                                            $gte: [
+                                                "$subscriptionDaysRemaining",
+                                                0
+                                            ]
+                                        },
+                                        {
+                                            $lte: [
+                                                "$subscriptionDaysRemaining",
+                                                EXPIRING_SOON_DAYS
+                                            ]
+                                        }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    },
                     totalEmployees: {
                         $sum: "$employees.totalEmployees"
                     },
@@ -510,6 +674,8 @@ export const buildCompanyReport = async ({
         fromDate,
         toDate,
         hasActiveSubscription,
+        subscriptionType,
+        expiringSoon,
         date
     } = query;
 
@@ -554,6 +720,15 @@ export const buildCompanyReport = async ({
             hasActiveSubscription === "true";
     }
 
+    const normalizedSubscriptionType = SUBSCRIPTION_TYPES.includes(
+        String(subscriptionType || "").toUpperCase()
+    )
+        ? String(subscriptionType).toUpperCase()
+        : undefined;
+
+    const expiringSoonFilter =
+        expiringSoon === true || expiringSoon === "true";
+
     const now = new Date();
 
     const pipeline = buildReportPipeline({
@@ -561,6 +736,8 @@ export const buildCompanyReport = async ({
         fromDate,
         toDate,
         hasActiveSubscription: subscriptionFilter,
+        subscriptionType: normalizedSubscriptionType,
+        expiringSoon: expiringSoonFilter,
         startOfDay,
         endOfDay,
         sortStage,
@@ -579,6 +756,11 @@ export const buildCompanyReport = async ({
         totalCompanies: rawSummary.totalCompanies || 0,
         companiesWithActiveSubscription:
             rawSummary.companiesWithActiveSubscription || 0,
+        paidActiveCompanies: rawSummary.paidActiveCompanies || 0,
+        freeCompanies: rawSummary.freeCompanies || 0,
+        noActiveSubscriptionCompanies:
+            rawSummary.noActiveSubscriptionCompanies || 0,
+        expiringSoonCompanies: rawSummary.expiringSoonCompanies || 0,
         totalEmployees: rawSummary.totalEmployees || 0,
         totalActiveEmployees: rawSummary.totalActiveEmployees || 0,
         totalPunchInToday: rawSummary.totalPunchInToday || 0
@@ -620,6 +802,8 @@ export const buildCompanyReport = async ({
             fromDate: fromDate || null,
             toDate: toDate || null,
             hasActiveSubscription: subscriptionFilter ?? null,
+            subscriptionType: normalizedSubscriptionType ?? null,
+            expiringSoon: expiringSoonFilter,
             date: reportDate
         },
         sorting: {
@@ -651,11 +835,17 @@ export const mapRowForExport = (row) => {
         State: address.state || "",
         Address: address.manual || "",
         "Account Status": row.accountStatus || "",
+        "Subscription Type":
+            SUBSCRIPTION_TYPE_LABELS[row.subscriptionType] ||
+            SUBSCRIPTION_TYPE_LABELS.NONE,
         "Active Subscription": subscription.hasActiveSubscription
             ? "YES"
             : "NO",
+        "Free Plan": row.isFreeSubscription ? "YES" : "NO",
         "Plan Name": subscription.planName || "",
         "Plan Price": subscription.planPrice ?? "",
+        "Payment Gateway": subscription.paymentGateway || "",
+        "Amount Paid": subscription.amountPaid ?? "",
         "Subscription Start": formatDate(subscription.startDate),
         "Subscription End": formatDate(subscription.endDate),
         "Days Remaining": subscription.daysRemaining ?? "",
@@ -765,6 +955,72 @@ export const exportCompaniesReportCSV = async (req, res) => {
     }
 };
 
+const EXCEL_COLORS = {
+    header: "FF1E3A5F",
+    headerText: "FFFFFFFF",
+    paid: "FFDCFCE7",
+    paidRow: "FFF0FDF4",
+    paidText: "FF166534",
+    free: "FFDBEAFE",
+    freeRow: "FFEFF6FF",
+    freeText: "FF1D4ED8",
+    none: "FFFEE2E2",
+    noneRow: "FFFEF2F2",
+    noneText: "FFB91C1C",
+    expiring: "FFFEF3C7",
+    expiringText: "FFB45309",
+    punch: "FFDCFCE7",
+    punchText: "FF166534",
+    muted: "FFF3F4F6",
+    border: "FFE5E7EB"
+};
+
+const EXCEL_COLUMN_WIDTHS = {
+    "Company Name": 30,
+    "Company ID": 26,
+    Email: 30,
+    Phone: 18,
+    City: 16,
+    State: 16,
+    Address: 28,
+    "Account Status": 16,
+    "Subscription Type": 24,
+    "Active Subscription": 18,
+    "Free Plan": 12,
+    "Plan Name": 22,
+    "Plan Price": 14,
+    "Payment Gateway": 18,
+    "Amount Paid": 14,
+    "Subscription Start": 18,
+    "Subscription End": 18,
+    "Days Remaining": 14,
+    "Payment Status": 16,
+    "Total Employees": 16,
+    "Active Employees": 16,
+    "Inactive Employees": 18,
+    "Punch In Today": 16,
+    "First Employee Created": 22,
+    "Last Employee Created": 22,
+    "Company Created At": 22
+};
+
+const fillExcelCell = (cell, color) => {
+    cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: color }
+    };
+};
+
+const applyExcelBorder = (cell) => {
+    cell.border = {
+        top: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+        left: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+        bottom: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+        right: { style: "thin", color: { argb: EXCEL_COLORS.border } }
+    };
+};
+
 export const exportCompaniesReportExcel = async (req, res) => {
     try {
         const report = await buildCompanyReport({
@@ -780,45 +1036,159 @@ export const exportCompaniesReportExcel = async (req, res) => {
         }
 
         const rows = report.data.map(mapRowForExport);
+        const headers = Object.keys(rows[0]);
+        const summary = report.summary || {};
 
-        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = "UAI Admin";
+        workbook.created = new Date();
 
-        worksheet["!cols"] = [
-            { wch: 28 },
-            { wch: 26 },
-            { wch: 28 },
-            { wch: 18 },
-            { wch: 16 },
-            { wch: 16 },
-            { wch: 24 },
-            { wch: 16 },
-            { wch: 18 },
-            { wch: 22 },
-            { wch: 12 },
-            { wch: 18 },
-            { wch: 18 },
-            { wch: 14 },
-            { wch: 16 },
-            { wch: 16 },
-            { wch: 16 },
-            { wch: 18 },
-            { wch: 16 },
-            { wch: 22 },
-            { wch: 22 },
-            { wch: 22 }
-        ];
-
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(
-            workbook,
-            worksheet,
-            "Companies Report"
-        );
-
-        const buffer = XLSX.write(workbook, {
-            type: "buffer",
-            bookType: "xlsx"
+        const sheet = workbook.addWorksheet("Companies Report", {
+            views: [{ state: "frozen", ySplit: 4 }]
         });
+
+        const titleRow = sheet.getRow(1);
+        sheet.mergeCells(1, 1, 1, headers.length);
+        titleRow.getCell(1).value = "COMPANIES REPORT";
+        titleRow.getCell(1).font = {
+            bold: true,
+            size: 16,
+            color: { argb: EXCEL_COLORS.headerText }
+        };
+        titleRow.getCell(1).alignment = {
+            vertical: "middle",
+            horizontal: "center"
+        };
+        fillExcelCell(titleRow.getCell(1), EXCEL_COLORS.header);
+        titleRow.height = 28;
+
+        const summaryRow = sheet.getRow(2);
+        sheet.mergeCells(2, 1, 2, headers.length);
+        summaryRow.getCell(1).value =
+            `Total Companies: ${summary.totalCompanies || 0}` +
+            `   |   Paid Active: ${summary.paidActiveCompanies || 0}` +
+            `   |   Free: ${summary.freeCompanies || 0}` +
+            `   |   No Active Subscription: ${summary.noActiveSubscriptionCompanies || 0}` +
+            `   |   Expiring Soon: ${summary.expiringSoonCompanies || 0}` +
+            `   |   Punch In Today: ${summary.totalPunchInToday || 0}`;
+        summaryRow.getCell(1).font = {
+            bold: true,
+            size: 11,
+            color: { argb: EXCEL_COLORS.header }
+        };
+        summaryRow.getCell(1).alignment = { horizontal: "center" };
+        summaryRow.height = 20;
+
+        const legendRow = sheet.getRow(3);
+        sheet.mergeCells(3, 1, 3, headers.length);
+        legendRow.getCell(1).value =
+            "Colour guide: Green = Paid active subscription | Blue = Free plan | Red = No active subscription | Amber = Expiring within 7 days";
+        legendRow.getCell(1).font = {
+            italic: true,
+            size: 10,
+            color: { argb: "FF475569" }
+        };
+        legendRow.getCell(1).alignment = { horizontal: "center" };
+
+        const headerRow = sheet.getRow(4);
+        headers.forEach((header, index) => {
+            const cell = headerRow.getCell(index + 1);
+            cell.value = header;
+            cell.font = {
+                bold: true,
+                color: { argb: EXCEL_COLORS.headerText }
+            };
+            cell.alignment = {
+                vertical: "middle",
+                horizontal: "center",
+                wrapText: true
+            };
+            fillExcelCell(cell, EXCEL_COLORS.header);
+            applyExcelBorder(cell);
+            sheet.getColumn(index + 1).width =
+                EXCEL_COLUMN_WIDTHS[header] || 18;
+        });
+        headerRow.height = 30;
+
+        const typeColumn = headers.indexOf("Subscription Type") + 1;
+        const punchColumn = headers.indexOf("Punch In Today") + 1;
+
+        rows.forEach((row, rowIndex) => {
+            const excelRow = sheet.getRow(5 + rowIndex);
+            const subscriptionType = row["Subscription Type"];
+            const rowColor =
+                subscriptionType === "PAID ACTIVE"
+                    ? EXCEL_COLORS.paidRow
+                    : subscriptionType === "FREE PLAN"
+                        ? EXCEL_COLORS.freeRow
+                        : EXCEL_COLORS.noneRow;
+
+            headers.forEach((header, columnIndex) => {
+                const cell = excelRow.getCell(columnIndex + 1);
+                cell.value = row[header];
+                cell.font = { size: 10 };
+                cell.alignment = {
+                    vertical: "middle",
+                    horizontal:
+                        columnIndex === typeColumn - 1 ||
+                        columnIndex === punchColumn - 1
+                            ? "center"
+                            : "left"
+                };
+                applyExcelBorder(cell);
+                fillExcelCell(cell, rowColor);
+            });
+
+            const typeCell = excelRow.getCell(typeColumn);
+            const isExpiringSoon =
+                row["Active Subscription"] === "YES" &&
+                Number(row["Days Remaining"]) >= 0 &&
+                Number(row["Days Remaining"]) <= EXPIRING_SOON_DAYS;
+
+            if (subscriptionType === "PAID ACTIVE") {
+                fillExcelCell(typeCell, EXCEL_COLORS.paid);
+                typeCell.font = {
+                    bold: true,
+                    color: { argb: EXCEL_COLORS.paidText }
+                };
+            } else if (subscriptionType === "FREE PLAN") {
+                fillExcelCell(typeCell, EXCEL_COLORS.free);
+                typeCell.font = {
+                    bold: true,
+                    color: { argb: EXCEL_COLORS.freeText }
+                };
+            } else {
+                fillExcelCell(typeCell, EXCEL_COLORS.none);
+                typeCell.font = {
+                    bold: true,
+                    color: { argb: EXCEL_COLORS.noneText }
+                };
+            }
+
+            if (isExpiringSoon) {
+                fillExcelCell(typeCell, EXCEL_COLORS.expiring);
+                typeCell.font = {
+                    bold: true,
+                    color: { argb: EXCEL_COLORS.expiringText }
+                };
+            }
+
+            const punchCell = excelRow.getCell(punchColumn);
+            if (Number(row["Punch In Today"]) > 0) {
+                fillExcelCell(punchCell, EXCEL_COLORS.punch);
+                punchCell.font = {
+                    bold: true,
+                    color: { argb: EXCEL_COLORS.punchText }
+                };
+            }
+        });
+
+        sheet.autoFilter = {
+            from: { row: 4, column: 1 },
+            to: { row: 4 + rows.length, column: headers.length }
+        };
+
+        const buffer = await workbook.xlsx.writeBuffer();
 
         const fileName = `companies_report_${Date.now()}.xlsx`;
 
@@ -831,7 +1201,7 @@ export const exportCompaniesReportExcel = async (req, res) => {
             `attachment; filename="${fileName}"`
         );
 
-        return res.send(buffer);
+        return res.send(Buffer.from(buffer));
     } catch (error) {
         console.error("EXPORT COMPANIES REPORT EXCEL ERROR:", error);
 
