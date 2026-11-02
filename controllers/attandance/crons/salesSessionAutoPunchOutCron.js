@@ -223,14 +223,17 @@ class SalesSessionAutoPunchOutCron {
                 return;
             }
 
-            // Find today's attendance record
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
+            // Match the attendance record for the session's punch-in day.
+            // A session closed after midnight belongs to the previous day.
+            const sessionDate = new Date(sessionDoc.punchInTime);
+            const dayStart = new Date(sessionDate);
+            dayStart.setUTCHours(0, 0, 0, 0);
+            const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 
             const attendance = await Attendance.findOne({
                 companyId,
                 employeeId,
-                date: today,
+                date: { $gte: dayStart, $lt: dayEnd },
             }).session(dbSession);
 
             if (!attendance) {
@@ -251,7 +254,8 @@ class SalesSessionAutoPunchOutCron {
                     $set: {
                         punchOut: autoPunchOutTime,
                         lastPunchAt: autoPunchOutTime,
-                        status: "present autocheckout",
+                        status: "absent",
+                        remarks: "System Auto Punch-Out (sales session) — Marked absent; working hours counted as 0",
                         totalWorkingHours: 0,
                         workSummary: {
                             totalMinutes: 0,

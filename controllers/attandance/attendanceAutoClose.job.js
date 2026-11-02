@@ -1,10 +1,13 @@
 import Attendance from "../../models/Attandance/Attendance.js";
 import dayjs from "dayjs";
 import cron from "node-cron";
+import { logCronExecution } from "../../config/cronLogger.js";
 // jobs/autoCloseAttendance.js
 
 
 export const autoCloseAttendance = async () => {
+    logCronExecution("attendanceAutoClose", "STARTED", new Date().toISOString());
+
     try {
         const now = dayjs();
         const startOfToday = now.startOf("day");
@@ -19,6 +22,7 @@ export const autoCloseAttendance = async () => {
 
         if (!openAttendances.length) {
             console.log("No open attendance found.");
+            logCronExecution("attendanceAutoClose", "SUCCESS", "No open attendance found.");
             return;
         }
 
@@ -29,7 +33,7 @@ export const autoCloseAttendance = async () => {
                 .add(2, "minute")
                 .toDate();
 
-            // RULE: Auto punch-out (midnight) results in zero working hours
+            // RULE: Auto punch-out (midnight) marks the day absent with zero working hours
             return {
                 updateOne: {
                     filter: { _id: att._id },
@@ -37,7 +41,7 @@ export const autoCloseAttendance = async () => {
                         $set: {
                             punchOut: autoPunchOutTime,
                             lastPunchAt: autoPunchOutTime,
-                            status: "present autocheckout",
+                            status: "absent",
                             isAutoMarked: true,
                             totalWorkingHours: 0,
                             "workSummary.totalMinutes": 0,
@@ -45,12 +49,13 @@ export const autoCloseAttendance = async () => {
                             "workSummary.overtimeMinutes": 0,
                             "workSummary.totalBreakMinutes": 0,
                             "workSummary.totalBreakExceededMinutes": 0,
-                            remarks: "System Auto Punch-Out at 00:02 AM — Working hours counted as 0 per auto-punch-out policy"
+                            remarks: "System Auto Punch-Out at 00:02 AM — Marked absent; working hours counted as 0 per auto-punch-out policy"
                         },
                         $push: {
                             punchHistory: {
-                                punchOut: autoPunchOutTime,
-                                source: "system",
+                                type: "out",
+                                time: autoPunchOutTime,
+                                source: "system_auto",
                                 deviceInfo: { system: true },
                                 geoLocation: { system: true }
                             },
@@ -68,8 +73,10 @@ export const autoCloseAttendance = async () => {
         await Attendance.bulkWrite(bulkOps);
 
         console.log(`Auto-closed ${bulkOps.length} attendance records`);
+        logCronExecution("attendanceAutoClose", "SUCCESS", `Auto-closed ${bulkOps.length} attendance records`);
     } catch (error) {
         console.error("Auto Close Attendance Error:", error);
+        logCronExecution("attendanceAutoClose", "FAILED", error.message);
     }
 };
 

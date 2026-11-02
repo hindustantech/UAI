@@ -131,7 +131,8 @@ async function getAttendanceSummary(employeeId, month, year, employee) {
                     if (rec.workSummary?.lateMinutes > 0) lateDays++;
                     break;
                 case "present autocheckout":
-                    // Auto punch-out days are excluded from salary calculation
+                    // Legacy auto punch-out records: treat as absent (LOP)
+                    absentDays++;
                     break;
                 case "half_day":
                     halfDays++;

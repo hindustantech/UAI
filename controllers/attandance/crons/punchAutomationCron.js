@@ -92,9 +92,17 @@ class PunchAutomationCron {
         todayStart.setHours(0, 0, 0, 0);
         const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
+        // Also retry previous days: if a run was missed (server restart, cron
+        // skip, night shift ending after midnight) yesterday's open punch-ins
+        // would otherwise stay open forever.
+        const LOOKBACK_DAYS = 2;
+        const lookbackStart = new Date(
+            todayStart.getTime() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000
+        );
+
         // Fetch active punch-ins WITHOUT a session (read-only, no need to block)
         const activePunchIns = await Attendance.find({
-            date: { $gte: todayStart, $lt: todayEnd },
+            date: { $gte: lookbackStart, $lt: todayEnd },
             punchIn: { $ne: null },
             punchOut: null,
         })
@@ -185,7 +193,29 @@ class PunchAutomationCron {
         // Fetch shift (within transaction session for consistency)
         const shift = await Shift.findById(employee.shift).session(session).lean();
 
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const attendanceDayStart = new Date(attendance.date);
+        attendanceDayStart.setHours(0, 0, 0, 0);
+        const isStaleRecord = attendanceDayStart < todayStart;
+
         if (!shift) {
+            // A stale record with no shift can never be evaluated against a
+            // shift end, so close it at the end of its attendance day.
+            if (isStaleRecord) {
+                const endOfAttendanceDay = new Date(
+                    attendanceDayStart.getTime() + 24 * 60 * 60 * 1000 - 1000
+                );
+                await this.#executePunchOut(
+                    attendance,
+                    null,
+                    endOfAttendanceDay,
+                    "Auto punch-out: no shift assigned, stale open punch-in closed at end of day",
+                    session
+                );
+                return "punched_out";
+            }
+
             console.warn(
                 `[PUNCH CRON] ⚠️  No shift found for employee ${employee._id}, skipping.`
             );
@@ -230,6 +260,18 @@ class PunchAutomationCron {
 
             const shiftEndDateTime = new Date(attendance.date);
             shiftEndDateTime.setHours(shiftEndHour, shiftEndMin, 0, 0);
+
+            // Night shift: the end time belongs to the following day.
+            const [shiftStartHour, shiftStartMin] = (shift.startTime || "00:00")
+                .split(":")
+                .map(Number);
+            if (
+                shift.isNightShift &&
+                (shiftEndHour < shiftStartHour ||
+                    (shiftEndHour === shiftStartHour && shiftEndMin < shiftStartMin))
+            ) {
+                shiftEndDateTime.setDate(shiftEndDateTime.getDate() + 1);
+            }
 
             const gracePeriodMs =
                 (shift.gracePeriod?.earlyExit || 10) * 60 * 1000;
@@ -312,13 +354,13 @@ class PunchAutomationCron {
             0
         );
 
-        // ---- Persist to DB — working hours zeroed, status marked as present autocheckout ----
+        // ---- Persist to DB — working hours zeroed, auto punch-out marks the day absent ----
         await Attendance.findByIdAndUpdate(
             attendance._id,
             {
                 punchOut: punchOutTime,
                 lastPunchAt: punchOutTime,
-                status: "present autocheckout",
+                status: "absent",
                 isAutoMarked: true,
                 totalWorkingHours: 0,
                 workSummary: {
@@ -338,7 +380,7 @@ class PunchAutomationCron {
                         createdAt: new Date(),
                     },
                 },
-                remarks: `${reason} — Working hours counted as 0 per auto-punch-out policy`,
+                remarks: `${reason} — Marked absent; working hours counted as 0 per auto-punch-out policy`,
             },
             { session, new: true }
         );
