@@ -1,4 +1,7 @@
+import dayjs from "dayjs";
+
 const STANDARD_MONTHLY_HOURS = 240;
+const STANDARD_MONTH_DAYS = 30;
 
 const MONTHS_31_DAYS = [1, 3, 5, 7, 8, 10, 12]; // Jan, Mar, May, Jul, Aug, Oct, Dec
 
@@ -42,8 +45,8 @@ export function calculateSalary({
             : "monthly";
     const salaryApproach = employee.salaryStructure?.salaryApproach || "full_minus_lop";
 
-    // Use provided standardDays or detect from current month
-    const stdDays = standardDays || getCurrentMonthStandardDays();
+    // Use provided standardDays, otherwise derive from the payroll month
+    const stdDays = standardDays || getCurrentMonthDays(payPeriod?.month, payPeriod?.year) || getCurrentMonthStandardDays();
 
     let result;
     if (payType === "hourly") {
@@ -120,7 +123,7 @@ function calculateHourly({ employee, attendance, payrollRule, payPeriod, payDate
             joiningDate: jobInfo.joiningDate
         },
 
-        attendance: buildAttendanceBlock(attendance, { totalPayableMinutes }),
+        attendance: buildAttendanceBlock(attendance, { totalPayableMinutes, standardDays: stdDays }),
 
         salaryRuleDeductions: { lateCutDays: 0, halfDayCutDays: 0, totalCutDays: 0, salaryRuleCutAmount: 0 },
         payableDays: 0,
@@ -150,7 +153,7 @@ function calculateHourly({ employee, attendance, payrollRule, payPeriod, payDate
     };
 }
 
-function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy, extraWorkDays = 0 }) {
+function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPeriod, payDate, generatedBy, stdDays, extraWorkDays = 0 }) {
     const sal = employee.salaryStructure;
     const perDayRate = sal.perDay ?? 0;
     const overtimeRate = sal.overtimeRate ?? 0;
@@ -220,7 +223,7 @@ function calculatePerDay({ employee, attendance, salaryRule, payrollRule, payPer
             joiningDate: jobInfo.joiningDate
         },
 
-        attendance: buildAttendanceBlock(attendance, { paidLeaveDays, unpaidLeaveDays }),
+        attendance: buildAttendanceBlock(attendance, { paidLeaveDays, unpaidLeaveDays, standardDays: stdDays }),
 
         salaryRuleDeductions: {
             lateCutDays,
@@ -349,7 +352,7 @@ function calculateMonthlyProRata({ employee, attendance, salaryRule, payrollRule
             joiningDate: jobInfo.joiningDate
         },
 
-        attendance: buildAttendanceBlock(attendance, { paidLeaveDays, unpaidLeaveDays }),
+        attendance: buildAttendanceBlock(attendance, { paidLeaveDays, unpaidLeaveDays, standardDays: stdDays }),
 
         salaryRuleDeductions: {
             lateCutDays,
@@ -482,7 +485,7 @@ function calculateMonthlyFullMinusLOP({ employee, attendance, salaryRule, payrol
             joiningDate: jobInfo.joiningDate
         },
 
-        attendance: buildAttendanceBlock(attendance, { paidLeaveDays, unpaidLeaveDays }),
+        attendance: buildAttendanceBlock(attendance, { paidLeaveDays, unpaidLeaveDays, standardDays: stdDays }),
 
         salaryRuleDeductions: {
             lateCutDays,
@@ -526,10 +529,10 @@ function buildAttendanceBlock(attendance, extras = {}) {
         totalPayableMinutes = 0, totalMinutes = 0, overtimeMinutes = 0,
         compOffDaysUsed = 0
     } = attendance;
-    const { paidLeaveDays = 0, unpaidLeaveDays = 0 } = extras;
+    const { paidLeaveDays = 0, unpaidLeaveDays = 0, standardDays = STANDARD_MONTH_DAYS } = extras;
 
     return {
-        standardDays: STANDARD_MONTH_DAYS,
+        standardDays,
         weeklyOffDays,
         weekOffHalfDays,
         holidays,
