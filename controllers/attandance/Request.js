@@ -1222,7 +1222,11 @@ export const approveAttendanceRequest = async (req, res) => {
                 updateFields.lateByMinutes = workingHoursData.lateByMinutes;
 
                 // Update status based on working hours
-                if (workingHoursData.totalWorkingHours > 0) {
+                // For punch_in_and_out or punch_in_out, if both are approved, mark as present
+                if (
+                    ["punch_in_out", "punch_in_and_out"].includes(request.requestType) ||
+                    workingHoursData.totalWorkingHours > 0
+                ) {
                     updateFields.status = "present";
                 }
             } else if (effectivePunchIn && !effectivePunchOut) {
@@ -1944,6 +1948,14 @@ export const bulkApproveRequests = async (req, res) => {
                             updateFields.totalWorkingHours = workingHoursData.totalWorkingHours;
                             updateFields.workSummary = workingHoursData.workSummary;
                             updateFields.lateByMinutes = workingHoursData.lateByMinutes;
+
+                            // Mark as present if it's a double punch request or has hours
+                            if (
+                                ["punch_in_out", "punch_in_and_out"].includes(request.requestType) ||
+                                workingHoursData.totalWorkingHours > 0
+                            ) {
+                                updateFields.status = "present";
+                            }
                         }
 
                         if (!existingAttendance && (shiftOverrides.startTime || shiftOverrides.shiftMinutes)) {
