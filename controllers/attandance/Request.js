@@ -1222,7 +1222,7 @@ export const approveAttendanceRequest = async (req, res) => {
                 updateFields.lateByMinutes = workingHoursData.lateByMinutes;
 
                 // Update status based on working hours
-                // For punch_in_and_out or punch_in_out, if both are approved, mark as present
+                // Mark as present for punch_in_out or punch_in_and_out
                 if (
                     ["punch_in_out", "punch_in_and_out"].includes(request.requestType) ||
                     workingHoursData.totalWorkingHours > 0
@@ -1230,8 +1230,8 @@ export const approveAttendanceRequest = async (req, res) => {
                     updateFields.status = "present";
                 }
             } else if (effectivePunchIn && !effectivePunchOut) {
-                // Only punch-in, no punch-out yet
-                updateFields.status = "pending_approval";
+                // Only punch-in, no punch-out yet. Mark as present since request is approved.
+                updateFields.status = "present";
             }
 
             // ───────── AUDIT LOG ─────────
@@ -1949,13 +1949,8 @@ export const bulkApproveRequests = async (req, res) => {
                             updateFields.workSummary = workingHoursData.workSummary;
                             updateFields.lateByMinutes = workingHoursData.lateByMinutes;
 
-                            // Mark as present if it's a double punch request or has hours
-                            if (
-                                ["punch_in_out", "punch_in_and_out"].includes(request.requestType) ||
-                                workingHoursData.totalWorkingHours > 0
-                            ) {
-                                updateFields.status = "present";
-                            }
+                            // Mark as present for any approved punch request
+                            updateFields.status = "present";
                         }
 
                         if (!existingAttendance && (shiftOverrides.startTime || shiftOverrides.shiftMinutes)) {
