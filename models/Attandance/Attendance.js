@@ -271,6 +271,21 @@ const attendanceSchema = new mongoose.Schema({
         default: "present"
     },
 
+    /* ===========================
+       Leave markers (set when a
+       leave request is approved)
+    ============================ */
+
+    leaveTypeId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "LeaveType"
+    },
+
+    isPaidLeave: {
+        type: Boolean,
+        default: null
+    },
+
 
     approvalStatus: {
         type: String,

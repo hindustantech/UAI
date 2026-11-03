@@ -478,11 +478,30 @@ Notes:
 - `leaveTypeId` is required for leave requests (top-level or inside `leaveDetails`).
 - `leaveDays` is calculated by the server (weekly offs, half-day offs and
   company holidays are excluded). Do not send it.
+- `isPaid` is copied from `LeaveType.paid` and cannot be overridden by the
+  client. Paid leave stays payable in payroll; unpaid leave becomes LOP.
+- Half-day leave is supported when the leave type has `allowHalfDay: true`.
+  Send `isHalfDay: true` (inside `leaveDetails` is also accepted) with
+  `halfDaySession` of `first` or `second`; `startDate` and `endDate` must be
+  the same day. The server stores `leaveDays: 0.5`.
 - If the employee has a policy, eligibility and balance are validated. The days
   are reserved (`pending`) immediately.
 - If the employee has no policy assigned, no balance check is performed.
 - Overlapping pending/approved leave requests are rejected.
 - Admins can create on behalf of an employee with `?userId=<userId>`.
+
+Half-day example:
+
+```json
+{
+  "requestType": "leave",
+  "reason": "Doctor appointment",
+  "leaveTypeId": "674f...",
+  "isHalfDay": true,
+  "halfDaySession": "first",
+  "leaveDetails": { "startDate": "2026-11-02", "endDate": "2026-11-02" }
+}
+```
 
 Response `201`:
 
@@ -503,6 +522,7 @@ Response `201`:
     "leaveTypeId": "674f...",
     "leaveDays": 2,
     "isPaid": true,
+    "isHalfDay": false,
     "balanceBefore": 11,
     "balanceAfter": 9,
     "policyId": "674f...",

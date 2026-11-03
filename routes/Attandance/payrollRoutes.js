@@ -4,6 +4,8 @@ import express from "express";
 import {
     generatePayroll,
     generateBulkPayroll,
+    previewPayroll,
+    recalculatePayroll,
     getEmployeePayroll,
     getCompanyPayroll,
     updatePayrollStatus,
@@ -58,6 +60,27 @@ router.post(
     "/generate-bulk",
     authMiddleware,
     generateBulkPayroll
+);
+
+/**
+ * POST /api/payroll/preview
+ * Calculate salary + LOP for one employee without saving.
+ * Body: { employeeId, month, year, payDate? }
+ */
+router.post(
+    "/preview",
+    authMiddleware,
+    previewPayroll
+);
+
+/**
+ * POST /api/payroll/:payrollId/recalculate
+ * Recompute a draft payroll from current attendance and leave.
+ */
+router.post(
+    "/:payrollId/recalculate",
+    authMiddleware,
+    recalculatePayroll
 );
 
 

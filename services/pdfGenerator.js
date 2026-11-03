@@ -56,6 +56,7 @@ export async function generateSalarySlipPDF(payroll, filePath) {
     const att = payroll.attendance           ?? {};
     const ear = payroll.earnings             ?? {};
     const std = payroll.statutoryDeductions  ?? {};
+    const employer = payroll.employerContributions ?? {};
     const oth = payroll.otherDeductions      ?? {};
     const rul = payroll.salaryRuleDeductions ?? {};
     const lop = payroll.lossOfPay            ?? {};
@@ -108,15 +109,15 @@ export async function generateSalarySlipPDF(payroll, filePath) {
         ["Pay type", "Hourly"],
         ["Hourly rate", INR(ear.perHourRate ?? 0)],
         ["Payable hours", `${ear.totalPayableHours ?? 0} hrs`],
-        ["Overtime hours", `${ear.overtime ?? 0 > 0 ? "—" : ""}`],
+        ["Overtime hours", `${roundTo2((att.overtimeMinutes ?? 0) / 60)} hrs`],
         ["Work days", `${att.presentDays ?? 0} / ${att.standardDays ?? STD_DAYS}`],
         ["Leaves (Paid / Unpaid)", `${att.paidLeaveDays ?? 0} / ${att.unpaidLeaveDays ?? 0}`],
       ];
     } else {
       payFields = [
-        ["Standard days", STD_DAYS],
+        ["Standard days", att.standardDays ?? STD_DAYS],
         ["Payable days", payroll.payableDays ?? "—"],
-        ...(isProRata ? [["Proration factor", `${roundTo2((payroll.payableDays ?? 0) / STD_DAYS)}x`]] : []),
+        ...(isProRata ? [["Proration factor", `${roundTo2((payroll.payableDays ?? 0) / (att.standardDays ?? STD_DAYS))}x`]] : []),
         ["Present days", att.presentDays ?? "—"],
         ["Absent days", att.absentDays ?? "—"],
         ["Leaves (Paid / Unpaid)", `${att.paidLeaveDays ?? 0} / ${att.unpaidLeaveDays ?? 0}`],
@@ -172,15 +173,26 @@ export async function generateSalarySlipPDF(payroll, filePath) {
     /* ───────────────────── LOSS OF PAY STRIP ───────────────────── */
     const lopDays = lop.lopDays ?? 0;
     const lopAmount = lop.lopAmount ?? 0;
-    if (!isHourly && (lopDays > 0 || lopAmount > 0)) {
-      const lopH = 30;
+    const prorationDays = lop.prorationDays ?? 0;
+    const prorationAmount = lop.prorationAmount ?? 0;
+    const showLop = !isHourly && (lopDays > 0 || lopAmount > 0);
+
+    if (showLop) {
+      const lopH = 44;
       doc.roundedRect(MARGIN, y, CW, lopH, 6).fill(WARN_BG);
       doc.fillColor(WARN).font("Helvetica-Bold").fontSize(8.5)
-         .text(`Loss of Pay`, MARGIN + 14, y + 10);
-      doc.fillColor(WARN).font("Helvetica").fontSize(8.5)
-         .text(`${lopDays} day(s) × per-day rate`, MARGIN + 90, y + 10.5);
+         .text(`Loss of Pay`, MARGIN + 14, y + 9);
       doc.fillColor(WARN).font("Helvetica-Bold").fontSize(9)
-         .text(INR(lopAmount), MARGIN, y + 9.5, { width: CW - 14, align: "right" });
+         .text(INR(lopAmount), MARGIN, y + 8, { width: CW - 14, align: "right" });
+      doc.fillColor(WARN).font("Helvetica").fontSize(7.8)
+         .text(
+           `${lopDays} day(s) × per-day rate   ·   ` +
+           `Absent: ${lop.absentDays ?? 0}d   ·   ` +
+           `Unpaid leave: ${lop.unpaidLeaveDays ?? 0}d   ·   ` +
+           `Unpaid half-days: ${lop.unpaidHalfDays ?? 0}d` +
+           (prorationDays > 0 ? `   ·   Proration: ${prorationDays}d (${INR(prorationAmount)})` : ""),
+           MARGIN + 14, y + 24, { width: CW - 28 }
+         );
       y += lopH + 14;
     } else {
       y += 2;
@@ -218,13 +230,16 @@ export async function generateSalarySlipPDF(payroll, filePath) {
         ].filter(([, v]) => (v ?? 0) > 0);
 
     const dedRows = [
-      ["Provident Fund (12%)", std.pf],
-      ["ESI (0.75%)", std.esi],
-      ["Gratuity (4.81%)", std.gratuity],
+      ["Provident Fund", std.pf],
+      ["ESI", std.esi],
       ["Income Tax", oth.incomeTax],
       ["Professional Tax", oth.professionalTax],
       ...(oth.additionalLines ?? []).map((d) => [d.name, d.amount]),
       ...(lopAmount > 0 ? [[`Loss of Pay (${lopDays}d)`, lopAmount]] : []),
+      ...(prorationAmount > 0 ? [[`Proration (${prorationDays}d)`, prorationAmount]] : []),
+      ...((rul.salaryRuleCutAmount ?? 0) > 0
+        ? [[`Attendance Rule Cut (${rul.totalCutDays ?? 0}d)`, rul.salaryRuleCutAmount]]
+        : []),
     ].filter(([, v]) => (v ?? 0) > 0);
 
     const drawLineRow = (label, val, x, w, rowY, isLOP = false) => {
@@ -261,7 +276,19 @@ export async function generateSalarySlipPDF(payroll, filePath) {
     doc.fillColor(BAD).font("Helvetica-Bold").fontSize(9.5)
        .text(INR(payroll.totalDeductions), dedX + 12, totalRowY + 8, { width: halfW - 24, align: "right" });
 
-    y = totalRowY + 26 + 20;
+    y = totalRowY + 26 + 14;
+
+    const gratuity = employer.gratuity ?? std.gratuity ?? 0;
+    if (gratuity > 0) {
+      doc.fillColor(FAINT).font("Helvetica").fontSize(7.8)
+         .text(
+           `Employer contributions (not deducted from net pay): Gratuity ${INR(gratuity)}`,
+           MARGIN, y, { width: CW }
+         );
+      y += 14;
+    }
+
+    y += 6;
 
     /* ───────────────────── NET PAY BANNER ───────────────────── */
     const netH = 58;

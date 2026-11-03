@@ -765,7 +765,7 @@ async function processAttendanceForEmployee({
     if (attendance.status === 'holiday') {
       errorMessage = 'Cannot punch out on a holiday. This day is already marked as holiday.';
       errorDetails = { date: dateString, status: attendance.status, action: 'Holiday detected - No punch-out required' };
-    } else if (attendance.status === 'weekly_off') {
+    } else if (['week_off', 'weekly_off'].includes(attendance.status)) {
       errorMessage = 'Cannot punch out on a weekly off. This day is already marked as weekly off.';
       errorDetails = { date: dateString, status: attendance.status, action: 'Weekly off detected - No punch-out required' };
     } else if (attendance.punchIn && !attendance.punchOut) {

@@ -2,6 +2,8 @@
 import cron from "node-cron";
 import Employee from "../models/Attandance/Employee.js";
 import Attendance from "../models/Attandance/Attendance.js";
+import Holiday from "../models/Attandance/Holiday.js";
+import { holidayAppliesToEmployee } from "../services/payroll/attendanceLedger.service.js";
 import Shift from "../models/Attandance/Shift.js";
 import User from "../models/userModel.js";
 import { NotificationService } from "../src/notification/services/NotificationService.js";
@@ -104,7 +106,7 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
                                 employeeId: emp._id,
                                 userId: emp.userId,
                                 date: startOfDay,
-                                status: "weekly_off",
+                                status: "week_off",
                                 shiftId: shift._id,
                                 isAutoMarked: true,
                                 remarks: "Auto-marked weekly off"
@@ -163,7 +165,39 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
                     continue;
                 }
 
-                // ─── 3. Check if shift end time has passed ──────────────────
+                // ─── 3. Check if today is a company holiday ─────────────────
+                const todayHoliday = await Holiday.findOne({
+                    companyId: emp.companyId,
+                    date: { $gte: startOfDay, $lte: endOfDay }
+                }).lean();
+
+                if (todayHoliday && holidayAppliesToEmployee(todayHoliday, emp)) {
+                    await Attendance.findOneAndUpdate(
+                        {
+                            companyId: emp.companyId,
+                            employeeId: emp._id,
+                            date: { $gte: startOfDay, $lte: endOfDay }
+                        },
+                        {
+                            $setOnInsert: {
+                                companyId: emp.companyId,
+                                employeeId: emp._id,
+                                userId: emp.userId,
+                                date: startOfDay,
+                                status: "holiday",
+                                shiftId: shift?._id ?? null,
+                                isAutoMarked: true,
+                                remarks: `Auto-marked company holiday: ${todayHoliday.name}`
+                            }
+                        },
+                        { upsert: true, new: true }
+                    );
+
+                    console.log(`🎉 Holiday marked for employee ${emp._id}: ${todayHoliday.name}`);
+                    continue;
+                }
+
+                // ─── 4. Check if shift end time has passed ──────────────────
                 const [endHour, endMin] = shift.endTime.split(":").map(Number);
 
                 let shiftEndDateTime = new Date(
@@ -186,7 +220,7 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
                     continue;
                 }
 
-                // ─── 4. Skip if attendance already exists ───────────────────
+                // ─── 5. Skip if attendance already exists ───────────────────
                 const existing = await Attendance.findOne({
                     companyId: emp.companyId,
                     employeeId: emp._id,
@@ -195,7 +229,7 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
 
                 if (existing) continue;
 
-                // ─── 5. Mark as absent ──────────────────────────────────────
+                // ─── 6. Mark as absent ──────────────────────────────────────
                 await Attendance.create({
                     companyId: emp.companyId,
                     employeeId: emp._id,

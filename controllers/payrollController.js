@@ -9,8 +9,7 @@ import Payroll from "../models/Attandance/Payroll.js";
 import Employee from "../models/Attandance/Employee.js";
 import SalaryRule from "../models/salaryRules.js";
 import PayrollRule from "../models/PayrollRuleSchema.js";
-import Attendance from "../models/Attandance/Attendance.js";
-import AttendanceRequest from "../models/Attandance/Request.js";
+import { buildAttendanceLedger } from "../services/payroll/attendanceLedger.service.js";
 import { calculateSalary } from "../services/salaryCalculator.js";
 import { generatePayrollExcel } from "../services/excelGenerator.js";
 import { generateSalarySlipPDF } from "../services/pdfGenerator.js";
@@ -21,171 +20,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TMP_DIR = path.join(__dirname, "../tmp");
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
-
-/* ═══════════════════════════════════════════════════════════════
-   HELPER — build attendance summary from Attendance collection
-   for a given employee + month + year.
-   Reconciles against the FULL calendar month so days with no
-   punch-in record at all are correctly counted as absent
-   (unless they fall on the employee's weekly off).
-═══════════════════════════════════════════════════════════════ */
-async function getAttendanceSummary(employeeId, month, year, employee) {
-    const start = new Date(year, month - 1, 1);
-    const end = new Date(year, month, 0, 23, 59, 59);
-    const totalDaysInMonth = end.getDate();
-
-    const records = await Attendance.find({
-        employeeId,
-        date: { $gte: start, $lte: end }
-    }).lean();
-
-    // Fetch all approved leave requests covering this month
-    const approvedLeaveRequests = await AttendanceRequest.find({
-        employeeId,
-        companyId: employee.companyId,
-        requestType: "leave",
-        status: "approved",
-        "leaveDetails.startDate": { $lte: end },
-        "leaveDetails.endDate": { $gte: start }
-    }).lean();
-
-    // Build set of date strings covered by approved leave requests
-    const approvedLeaveDates = new Set();
-    for (const req of approvedLeaveRequests) {
-        const s = new Date(req.leaveDetails.startDate);
-        const e = new Date(req.leaveDetails.endDate);
-        for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-            approvedLeaveDates.add(d.toISOString().slice(0, 10));
-        }
-    }
-
-    // Fetch all approved comp-off requests covering this month
-    const approvedCompOffRequests = await AttendanceRequest.find({
-        employeeId,
-        companyId: employee.companyId,
-        requestType: "comp_off",
-        status: "approved",
-        "leaveDetails.startDate": { $lte: end },
-        "leaveDetails.endDate": { $gte: start }
-    }).lean();
-
-    // Build set of date strings covered by approved comp-off requests
-    const approvedCompOffDates = new Set();
-    for (const req of approvedCompOffRequests) {
-        const s = new Date(req.leaveDetails.startDate);
-        const e = new Date(req.leaveDetails.endDate);
-        for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-            approvedCompOffDates.add(d.toISOString().slice(0, 10));
-        }
-    }
-
-    // Map records by day-of-month for quick lookup
-    const recordByDay = new Map();
-    for (const rec of records) {
-        const day = new Date(rec.date).getDate();
-        recordByDay.set(day, rec);
-    }
-
-    let presentDays = 0;
-    let absentDays = 0;
-    let leaveDays = 0;
-    let paidLeaveDays = 0;
-    let unpaidLeaveDays = 0;
-    let holidays = 0;
-    let weeklyOffDays = 0;
-    let halfDays = 0;
-    let lateDays = 0;
-    let totalPayableMinutes = 0;
-    let totalMinutes = 0;
-    let overtimeMinutes = 0;
-    let compOffUsed = 0;
-
-    const weeklyOffSet = new Set(
-        (employee?.weeklyOff && employee.weeklyOff.length) ? employee.weeklyOff 
-        : (employee?.shift?.weeklyOff?.length ? employee.shift.weeklyOff : [])
-    );
-    const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
-    for (let day = 1; day <= totalDaysInMonth; day++) {
-        const rec = recordByDay.get(day);
-
-        if (rec) {
-            const isAutoCheckout = rec.status === "present autocheckout";
-
-            if (!isAutoCheckout) {
-                totalPayableMinutes += rec.workSummary?.payableMinutes ?? 0;
-                totalMinutes += rec.workSummary?.totalMinutes ?? 0;
-            }
-
-            // Weekend / holiday / week-off OT is compensated as comp-off, NOT cash
-            const dowName = DOW[new Date(rec.date).getDay()];
-            const isOffDay =
-                weeklyOffSet.has(dowName) ||
-                rec.status === "holiday" ||
-                rec.status === "week_off";
-            if (!isOffDay && !isAutoCheckout) overtimeMinutes += rec.workSummary?.overtimeMinutes ?? 0;
-
-            switch (rec.status) {
-                case "present":
-                    presentDays++;
-                    if (rec.workSummary?.lateMinutes > 0) lateDays++;
-                    break;
-                case "present autocheckout":
-                    // Legacy auto punch-out records: treat as absent (LOP)
-                    absentDays++;
-                    break;
-                case "half_day":
-                    halfDays++;
-                    presentDays += 0.5;
-                    break;
-                case "absent":
-                    absentDays++;
-                    break;
-                case "leave":
-                    leaveDays++;
-                    const dateStr = new Date(rec.date).toISOString().slice(0, 10);
-                    if (approvedLeaveDates.has(dateStr)) {
-                        paidLeaveDays++;
-                    } else {
-                        unpaidLeaveDays++;
-                    }
-                    break;
-                case "comp_off":
-                    compOffUsed++;
-                    presentDays++;
-                    break;
-                case "holiday":
-                    holidays++;
-                    break;
-                case "week_off":
-                    weeklyOffDays++;
-                    break;
-                default:
-                    break;
-            }
-        } else {
-            const dateObj = new Date(year, month - 1, day);
-            const dowName = DOW[dateObj.getDay()];
-            if (weeklyOffSet.has(dowName)) {
-                weeklyOffDays++;
-            } else {
-                const dateStr = new Date(year, month - 1, day).toISOString().slice(0, 10);
-                if (approvedLeaveDates.has(dateStr)) {
-                    leaveDays++;
-                    paidLeaveDays++;
-                } else if (approvedCompOffDates.has(dateStr)) {
-                    // Approved comp-off on a day with no record → paid day
-                    compOffUsed++;
-                    presentDays++;
-                } else {
-                    absentDays++;
-                }
-            }
-        }
-    }
-
-    return { presentDays, absentDays, leaveDays, paidLeaveDays, unpaidLeaveDays, holidays, weeklyOffDays, halfDays, lateDays, totalPayableMinutes, totalMinutes, overtimeMinutes, compOffUsed };
-}
 
 
 /**
@@ -358,7 +192,7 @@ export const getPayrollByEmployeeAndCompany = async (req, res) => {
 ═══════════════════════════════════════════════════════════════ */
 export const generatePayroll = async (req, res) => {
     try {
-        const { employeeId, month, year, payDate, overrideAttendance } = req.body;
+        const { employeeId, month, year, payDate, overrideAttendance, force } = req.body;
         let companyId;
         if (req.user.type === 'partner') {
             companyId = req.user.id;
@@ -369,27 +203,36 @@ export const generatePayroll = async (req, res) => {
         if (!employeeId || !month || !year) {
             return res.status(400).json({ success: false, message: "employeeId, month, and year are required." });
         }
-        if (month < 1 || month > 12) {
+
+        const m = Number(month);
+        const y = Number(year);
+        if (m < 1 || m > 12) {
             return res.status(400).json({ success: false, message: "month must be 1–12." });
         }
 
         const exists = await Payroll.findOne({
             companyId, employeeId,
-            "payPeriod.month": month, "payPeriod.year": year
+            "payPeriod.month": m, "payPeriod.year": y
         });
-        if (exists) {
+
+        if (exists && !force) {
             return res.status(409).json({
                 success: false,
-                message: `Payroll for ${month}/${year} already exists. Use the update endpoint.`,
+                message: `Payroll for ${m}/${y} already exists. Pass force=true to regenerate a draft, or use the recalculate endpoint.`,
+                payrollId: exists._id
+            });
+        }
+
+        if (exists && force && exists.status !== "draft") {
+            return res.status(400).json({
+                success: false,
+                message: "Only draft payroll can be regenerated. Cancel or create an adjustment instead.",
                 payrollId: exists._id
             });
         }
 
         const employee = await Employee.findOne({ _id: employeeId, companyId }).lean();
         if (!employee) return res.status(404).json({ success: false, message: "Employee not found." });
-        if (employee.employmentStatus === "inactive") {
-            return res.status(400).json({ success: false, message: "Employee is inactive." });
-        }
         if (!employee.salaryStructure?.basic && !employee.salaryStructure?.perHour && !employee.salaryStructure?.perDay) {
             return res.status(400).json({ success: false, message: "Employee salary structure is not configured." });
         }
@@ -400,17 +243,61 @@ export const generatePayroll = async (req, res) => {
             PayrollRule.findOne({ companyId, isActive: true }).lean()
         ]);
 
-        const attendance = overrideAttendance ?? await getAttendanceSummary(employeeId, month, year, employee);
-        const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
-        const startDate = new Date(year, month - 1, 1);
-        const endDate = new Date(year, month, 0);
+        const attendance = overrideAttendance ?? await buildAttendanceLedger({
+            employee,
+            month: m,
+            year: y,
+        });
+
+        if (!overrideAttendance && attendance.employmentCalendarDays <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Employee was not employed during the selected pay period.",
+            });
+        }
+
+        const monthLabel = new Date(y, m - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+        const startDate = new Date(y, m - 1, 1);
+        const endDate = new Date(y, m, 0);
 
         const payrollData = calculateSalary({
             employee, attendance, salaryRule, payrollRule,
-            payPeriod: { month, year, label: monthLabel, startDate, endDate },
+            payPeriod: { month: m, year: y, label: monthLabel, startDate, endDate },
             payDate: payDate ? new Date(payDate) : endDate,
             generatedBy: req.user._id
         });
+
+        if (exists) {
+            const updated = await Payroll.findByIdAndUpdate(
+                exists._id,
+                {
+                    $set: payrollData,
+                    $push: {
+                        editLogs: {
+                            editedBy: req.user._id,
+                            reason: "Payroll regenerated (force)",
+                            oldValue: {
+                                netSalary: exists.netSalary,
+                                lopDays: exists.lossOfPay?.lopDays,
+                                lopAmount: exists.lossOfPay?.lopAmount,
+                            },
+                            newValue: {
+                                netSalary: payrollData.netSalary,
+                                lopDays: payrollData.lossOfPay?.lopDays,
+                                lopAmount: payrollData.lossOfPay?.lopAmount,
+                            },
+                        },
+                    },
+                },
+                { new: true, runValidators: true }
+            );
+
+            return res.status(200).json({
+                success: true,
+                message: "Draft payroll regenerated successfully.",
+                data: updated,
+            });
+        }
 
         const payroll = await Payroll.create(payrollData);
         return res.status(201).json({ success: true, message: "Payroll generated successfully.", data: payroll });
@@ -430,7 +317,24 @@ export const generatePayroll = async (req, res) => {
    Returns: { created: [], skipped: [], failed: [] }
 ═══════════════════════════════════════════════════════════════ */
 async function generatePayrollsForCompany({ companyId, month, year, payDate, generatedBy }) {
-    const employees = await Employee.find({ companyId, employmentStatus: "active" }).lean();
+    const m = Number(month);
+    const y = Number(year);
+
+    const monthLabel = new Date(y, m - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+    const startDate = new Date(y, m - 1, 1);
+    const endDate = new Date(y, m, 0);
+    const resolvedPayDate = payDate ? new Date(payDate) : endDate;
+
+    // Active employees plus anyone who exited during this pay period, so
+    // their final settlement is generated.
+    const employees = await Employee.find({
+        companyId,
+        $or: [
+            { employmentStatus: "active" },
+            { deactivatedAt: { $gte: startDate, $lte: new Date(y, m, 0, 23, 59, 59, 999) } },
+        ],
+    }).lean();
+
     if (!employees.length) {
         return { created: [], skipped: [], failed: [], message: "No active employees found." };
     }
@@ -441,18 +345,13 @@ async function generatePayrollsForCompany({ companyId, month, year, payDate, gen
         PayrollRule.findOne({ companyId, isActive: true }).lean()
     ]);
 
-    const monthLabel = new Date(year, month - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0);
-    const resolvedPayDate = payDate ? new Date(payDate) : endDate;
-
     const results = { created: [], skipped: [], failed: [] };
 
     for (const employee of employees) {
         try {
             const exists = await Payroll.exists({
                 companyId, employeeId: employee._id,
-                "payPeriod.month": month, "payPeriod.year": year
+                "payPeriod.month": m, "payPeriod.year": y
             });
             if (exists) {
                 results.skipped.push({ employeeId: employee._id, empCode: employee.empCode, reason: "Already exists" });
@@ -464,10 +363,20 @@ async function generatePayrollsForCompany({ companyId, month, year, payDate, gen
                 continue;
             }
 
-            const attendance = await getAttendanceSummary(employee._id, month, year, employee);
+            const attendance = await buildAttendanceLedger({ employee, month: m, year: y });
+
+            if (attendance.employmentCalendarDays <= 0) {
+                results.skipped.push({
+                    employeeId: employee._id,
+                    empCode: employee.empCode,
+                    reason: "Not employed during this pay period",
+                });
+                continue;
+            }
+
             const payrollData = calculateSalary({
                 employee, attendance, salaryRule, payrollRule,
-                payPeriod: { month, year, label: monthLabel, startDate, endDate },
+                payPeriod: { month: m, year: y, label: monthLabel, startDate, endDate },
                 payDate: resolvedPayDate,
                 generatedBy
             });
@@ -518,6 +427,161 @@ export const generateBulkPayroll = async (req, res) => {
 
     } catch (err) {
         console.error("[generateBulkPayroll]", err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+
+/* ═══════════════════════════════════════════════════════════════
+   2b. POST /api/payroll/preview
+       Calculate salary + LOP for one employee WITHOUT saving.
+       Body: { employeeId, month, year, payDate? }
+═══════════════════════════════════════════════════════════════ */
+export const previewPayroll = async (req, res) => {
+    try {
+        const { employeeId, month, year, payDate } = req.body || {};
+        let companyId;
+        if (req.user.type === 'partner') {
+            companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
+        }
+
+        if (!employeeId || !month || !year) {
+            return res.status(400).json({ success: false, message: "employeeId, month and year are required." });
+        }
+
+        const m = Number(month);
+        const y = Number(year);
+        if (m < 1 || m > 12) {
+            return res.status(400).json({ success: false, message: "month must be 1–12." });
+        }
+
+        const employee = await Employee.findOne({ _id: employeeId, companyId }).lean();
+        if (!employee) {
+            return res.status(404).json({ success: false, message: "Employee not found." });
+        }
+        if (!employee.salaryStructure?.basic && !employee.salaryStructure?.perHour && !employee.salaryStructure?.perDay) {
+            return res.status(400).json({ success: false, message: "Employee salary structure is not configured." });
+        }
+
+        const [salaryRule, payrollRule] = await Promise.all([
+            SalaryRule.findOne({ companyId }).lean(),
+            PayrollRule.findOne({ companyId, isActive: true }).lean()
+        ]);
+
+        const attendance = await buildAttendanceLedger({ employee, month: m, year: y });
+        if (attendance.employmentCalendarDays <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Employee was not employed during the selected pay period.",
+                attendance,
+            });
+        }
+
+        const monthLabel = new Date(y, m - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+        const startDate = new Date(y, m - 1, 1);
+        const endDate = new Date(y, m, 0);
+
+        const payroll = calculateSalary({
+            employee, attendance, salaryRule, payrollRule,
+            payPeriod: { month: m, year: y, label: monthLabel, startDate, endDate },
+            payDate: payDate ? new Date(payDate) : endDate,
+            generatedBy: req.user._id,
+        });
+
+        return res.status(200).json({ success: true, data: { attendance, payroll } });
+    } catch (err) {
+        console.error("[previewPayroll]", err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+
+/* ═══════════════════════════════════════════════════════════════
+   2c. POST /api/payroll/:payrollId/recalculate
+       Recompute a DRAFT payroll from current attendance/leave.
+═══════════════════════════════════════════════════════════════ */
+export const recalculatePayroll = async (req, res) => {
+    try {
+        const { payrollId } = req.params;
+        let companyId;
+        if (req.user.type === 'partner') {
+            companyId = req.user.id;
+        } else {
+            companyId = req.user.companyId;
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(payrollId)) {
+            return res.status(400).json({ success: false, message: "Invalid payrollId." });
+        }
+
+        const payroll = await Payroll.findOne({ _id: payrollId, companyId });
+        if (!payroll) {
+            return res.status(404).json({ success: false, message: "Payroll not found." });
+        }
+        if (payroll.status !== "draft") {
+            return res.status(400).json({
+                success: false,
+                message: `Only draft payroll can be recalculated. Current status: ${payroll.status}.`
+            });
+        }
+
+        const employee = await Employee.findOne({ _id: payroll.employeeId, companyId }).lean();
+        if (!employee) {
+            return res.status(404).json({ success: false, message: "Employee not found." });
+        }
+
+        const m = Number(payroll.payPeriod.month);
+        const y = Number(payroll.payPeriod.year);
+
+        const [salaryRule, payrollRule] = await Promise.all([
+            SalaryRule.findOne({ companyId }).lean(),
+            PayrollRule.findOne({ companyId, isActive: true }).lean()
+        ]);
+
+        const attendance = await buildAttendanceLedger({ employee, month: m, year: y });
+
+        const monthLabel = new Date(y, m - 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+        const startDate = new Date(y, m - 1, 1);
+        const endDate = new Date(y, m, 0);
+
+        const payrollData = calculateSalary({
+            employee, attendance, salaryRule, payrollRule,
+            payPeriod: { month: m, year: y, label: monthLabel, startDate, endDate },
+            payDate: payroll.payDate || endDate,
+            generatedBy: req.user._id,
+        });
+
+        const oldNet = payroll.netSalary;
+        const oldLop = payroll.lossOfPay?.lopAmount ?? 0;
+
+        const updated = await Payroll.findByIdAndUpdate(
+            payroll._id,
+            {
+                $set: payrollData,
+                $push: {
+                    editLogs: {
+                        editedBy: req.user._id,
+                        reason: "Payroll recalculated from attendance",
+                        oldValue: { netSalary: oldNet, lopAmount: oldLop },
+                        newValue: {
+                            netSalary: payrollData.netSalary,
+                            lopAmount: payrollData.lossOfPay?.lopAmount,
+                        },
+                    },
+                },
+            },
+            { new: true, runValidators: true }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Payroll recalculated successfully.",
+            data: { payroll: updated, attendance },
+        });
+    } catch (err) {
+        console.error("[recalculatePayroll]", err);
         return res.status(500).json({ success: false, message: err.message });
     }
 };

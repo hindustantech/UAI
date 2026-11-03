@@ -69,6 +69,16 @@ const attendanceRequestSchema = new Schema(
             default: true
         },
 
+        isHalfDay: {
+            type: Boolean,
+            default: false
+        },
+
+        halfDaySession: {
+            type: String,
+            enum: ["first", "second"]
+        },
+
         balanceBefore: {
             type: Number,
             default: 0

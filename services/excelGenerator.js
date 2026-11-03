@@ -153,6 +153,7 @@ async function createMonthlySalarySheet(wb, records) {
         { header: "Paid Leave", key: "paidLeave", width: 11 },
         { header: "Comp Off", key: "compOff", width: 9 },
         { header: "Unpaid Leave", key: "unpaidLeave", width: 13 },
+        { header: "Unpaid Half", key: "unpaidHalf", width: 11 },
         { header: "Late Days", key: "lateDays", width: 10 },
         { header: "Half Days", key: "halfDays", width: 10 },
         { header: "Payable Days", key: "payableDays", width: 12 },
@@ -164,11 +165,13 @@ async function createMonthlySalarySheet(wb, records) {
         { header: "Gross Salary", key: "gross", width: 16 },
         { header: "PF", key: "pf", width: 14 },
         { header: "ESI", key: "esi", width: 14 },
+        { header: "Employer Gratuity", key: "gratuity", width: 16 },
         { header: "Income Tax", key: "incomeTax", width: 14 },
         { header: "Prof. Tax", key: "professionalTax", width: 14 },
         { header: "Other Ded.", key: "otherDeductions", width: 14 },
         { header: "LOP Days", key: "lopDays", width: 10 },
         { header: "LOP Amount", key: "lopAmount", width: 14 },
+        { header: "Proration Days", key: "prorationDays", width: 14 },
         { header: "Total Ded.", key: "totalDeductions", width: 16 },
         { header: "Net Salary", key: "netSalary", width: 16 }
     ];
@@ -191,6 +194,7 @@ async function createMonthlySalarySheet(wb, records) {
         const oth = p.otherDeductions ?? {};
         const lop = p.lossOfPay ?? {};
         const emp = p.employeeSnapshot ?? {};
+        const employer = p.employerContributions ?? {};
 
         return [
             emp.empCode, emp.name, emp.department, emp.designation,
@@ -199,6 +203,7 @@ async function createMonthlySalarySheet(wb, records) {
             att.paidLeaveDays ?? 0,
             att.compOffDaysUsed ?? 0,
             att.unpaidLeaveDays ?? 0,
+            att.unpaidHalfDays ?? 0,
             att.lateDays ?? 0,
             att.halfDays ?? 0,
             p.payableDays ?? 0,
@@ -206,20 +211,22 @@ async function createMonthlySalarySheet(wb, records) {
             (ear.otherAllowances ?? []).reduce((s, a) => s + (a.amount ?? 0), 0),
             p.grossSalary ?? 0,
             std.pf ?? 0, std.esi ?? 0,
+            employer.gratuity ?? std.gratuity ?? 0,
             oth.incomeTax ?? 0, oth.professionalTax ?? 0,
             (oth.additionalLines ?? []).reduce((s, d) => s + (d.amount ?? 0), 0),
             lop.lopDays ?? 0,
             lop.lopAmount ?? 0,
+            lop.prorationDays ?? 0,
             p.totalDeductions ?? 0,
             p.netSalary ?? 0
         ];
     });
 
     const dataStart = row;
-    const moneyCols = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26];
+    const moneyCols = [14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 29, 30];
     row = writeDataRows(ws, rows, row, moneyCols);
     writeTotalsRow(ws, columns, dataStart, row,
-        [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26],
+        [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
         moneyCols);
 }
 
@@ -316,7 +323,9 @@ async function createPerDayWageSheet(wb, records) {
         { header: "Total Days", key: "totalDays", width: 11 },
         { header: "Present", key: "present", width: 10 },
         { header: "Absent", key: "absent", width: 9 },
-        { header: "Leave", key: "leave", width: 9 },
+        { header: "Paid Leave", key: "paidLeave", width: 11 },
+        { header: "Unpaid Leave", key: "unpaidLeave", width: 12 },
+        { header: "Unpaid Half", key: "unpaidHalf", width: 11 },
         { header: "Comp Off", key: "compOff", width: 9 },
         { header: "Late Days", key: "lateDays", width: 10 },
         { header: "Payable Days", key: "payableDays", width: 12 },
@@ -356,7 +365,9 @@ async function createPerDayWageSheet(wb, records) {
             att.standardDays ?? 30,
             att.presentDays ?? 0,
             att.absentDays ?? 0,
-            att.leaveDays ?? 0,
+            att.paidLeaveDays ?? 0,
+            att.unpaidLeaveDays ?? 0,
+            att.unpaidHalfDays ?? 0,
             att.compOffDaysUsed ?? 0,
             att.lateDays ?? 0,
             payableDays,
@@ -367,8 +378,8 @@ async function createPerDayWageSheet(wb, records) {
     });
 
     const dataStart = row;
-    row = writeDataRows(ws, rows, row, [11, 12, 13, 14, 15]);
-    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 13, 14, 15], [13, 14, 15]);
+    row = writeDataRows(ws, rows, row, [13, 14, 15, 16, 17, 18]);
+    writeTotalsRow(ws, columns, dataStart, row, [5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18], [13, 16, 17, 18]);
 }
 
 /**

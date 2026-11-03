@@ -972,7 +972,7 @@ workSummary: {
                         status: attendance.status,
                         action: "Half-day weekly off detected - No punch-out required"
                     };
-                } else if (attendance.status === "weekly_off") {
+                } else if (["week_off", "weekly_off"].includes(attendance.status)) {
                     errorMessage = "Cannot punch out on a weekly off. This day is already marked as weekly off.";
                     errorDetails = {
                         date: dateString,
@@ -1971,7 +1971,7 @@ workSummary: {
                         status: attendance.status,
                         action: "Half-day weekly off detected - No punch-out required"
                     };
-                } else if (attendance.status === "weekly_off") {
+                } else if (["week_off", "weekly_off"].includes(attendance.status)) {
                     errorMessage = "Cannot punch out on a weekly off. This day is already marked as weekly off.";
                     errorDetails = {
                         date: dateString,

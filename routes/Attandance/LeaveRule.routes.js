@@ -34,17 +34,17 @@ const resolveCompanyId = (req) =>
 router.use(authMiddleware);
 
 // CRUD on LeaveType catalog (company-level)
-router.post("/", checkPermission("leave.create"), createLeaveType);
-router.get("/", checkPermission("leave.read"), getLeaveTypes);
-router.put("/:id", checkPermission("leave.update"), updateLeaveType);
-router.delete("/:id", checkPermission("leave.delete"), deleteLeaveType);
+router.post("/", createLeaveType);
+router.get("/", getLeaveTypes);
+router.put("/:id", updateLeaveType);
+router.delete("/:id", deleteLeaveType);
 
 /*====================================
   LEAVE POLICIES
   ================================*/
 
 router.post("/policies", checkPermission("policy.create"), createLeavePolicy);
-router.get("/policies", checkPermission("policy.read"), getLeavePolicies);
+router.get("/policies",  getLeavePolicies);
 router.get("/policies/:id/resolved", checkPermission("policy.read"), getLeavePolicyResolved);
 router.put("/policies/:id", checkPermission("policy.update"), updateLeavePolicy);
 router.delete("/policies/:id", checkPermission("policy.delete"), deleteLeavePolicy);

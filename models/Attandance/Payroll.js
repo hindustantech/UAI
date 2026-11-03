@@ -68,12 +68,16 @@ const PayrollSchema = new mongoose.Schema(
 
         /* ── Attendance Summary ── */
         attendance: {
-            standardDays: { type: Number, default: 30 },   // always 30
+            standardDays: { type: Number, default: 30 },   // calendar days in the pay month
+            employmentCalendarDays: { type: Number, default: 0 }, // days inside joining..exit
+            workingDays: { type: Number, default: 0 },     // working days excl. offs/holidays
             weeklyOffDays: { type: Number, default: 0 },
+            weeklyOffHalfDays: { type: Number, default: 0 },
             holidays: { type: Number, default: 0 },
             leaveDays: { type: Number, default: 0 },
             paidLeaveDays: { type: Number, default: 0 },
             unpaidLeaveDays: { type: Number, default: 0 },
+            unpaidHalfDays: { type: Number, default: 0 },
             absentDays: { type: Number, default: 0 },
             lateDays: { type: Number, default: 0 },    // attendance "late" count
             halfDays: { type: Number, default: 0 },
@@ -81,14 +85,22 @@ const PayrollSchema = new mongoose.Schema(
             totalPayableMinutes: { type: Number, default: 0 },  // for hourly employees
             totalMinutes: { type: Number, default: 0 },   // gross minutes (incl. breaks)
             overtimeMinutes: { type: Number, default: 0 }, // overtime minutes
-            compOffDaysUsed: { type: Number, default: 0 }  // comp-off days taken (paid days)
+            compOffDaysUsed: { type: Number, default: 0 }, // comp-off days taken (paid days)
+            leaveBreakdown: [{
+                leaveTypeId: { type: mongoose.Schema.Types.ObjectId, ref: "LeaveType" },
+                leaveTypeName: { type: String },
+                leaveTypeCode: { type: String },
+                paid: { type: Boolean, default: true },
+                days: { type: Number, default: 0 }
+            }]
         },
 
         /* ── Salary Rule Deductions (from SalaryRule model) ── */
         salaryRuleDeductions: {
             lateCutDays: { type: Number, default: 0 },   // days deducted due to late rule
             halfDayCutDays: { type: Number, default: 0 },   // days deducted due to half-day rule
-            totalCutDays: { type: Number, default: 0 }    // sum
+            totalCutDays: { type: Number, default: 0 },   // sum
+            salaryRuleCutAmount: { type: Number, default: 0 } // rupee value of the cut
         },
 
         /* ── Payable Days ── */
@@ -101,7 +113,13 @@ const PayrollSchema = new mongoose.Schema(
             da: { type: Number, default: 0 },
             bonus: { type: Number, default: 0 },
             overtime: { type: Number, default: 0 },
-            otherAllowances: { type: [AllowanceLineSchema], default: [] }
+            otherAllowances: { type: [AllowanceLineSchema], default: [] },
+            /* hourly / per-day specific values */
+            regularEarnings: { type: Number, default: 0 },
+            dayWages: { type: Number, default: 0 },
+            totalPayableHours: { type: Number, default: 0 },
+            /* pro-rata transparency */
+            prorationFactor: { type: Number, default: 1 }
         },
         grossSalary: { type: Number, default: 0 },   // sum of all earnings
 
@@ -109,6 +127,11 @@ const PayrollSchema = new mongoose.Schema(
         statutoryDeductions: {
             pf: { type: Number, default: 0 },
             esi: { type: Number, default: 0 },
+            gratuity: { type: Number, default: 0 }   // employer contribution, not deducted from net
+        },
+
+        /* ── Employer contributions (cost to company, not deducted) ── */
+        employerContributions: {
             gratuity: { type: Number, default: 0 }
         },
 
@@ -125,7 +148,16 @@ const PayrollSchema = new mongoose.Schema(
         netSalary: { type: Number, default: 0 },   // grossSalary - totalDeductions
         lossOfPay: {
             lopDays: { type: Number, default: 0 },
-            lopAmount: { type: Number, default: 0 }
+            lopAmount: { type: Number, default: 0 },
+            absentDays: { type: Number, default: 0 },
+            unpaidLeaveDays: { type: Number, default: 0 },
+            unpaidHalfDays: { type: Number, default: 0 },
+            prorationDays: { type: Number, default: 0 },
+            prorationAmount: { type: Number, default: 0 },
+            totalDeductedDays: { type: Number, default: 0 },
+            totalDeductedAmount: { type: Number, default: 0 },
+            deducted: { type: Boolean, default: true }, // false for pro-rata / per-day / hourly
+            mode: { type: String, default: "full_minus_lop" }
         },
         /* ── Salary approach used ── */
         salaryApproach: {

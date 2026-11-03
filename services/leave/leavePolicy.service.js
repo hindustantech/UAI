@@ -30,7 +30,13 @@ const startOfDay = (date) => {
     return d;
 };
 
-const dayKey = (date) => startOfDay(date).toISOString().slice(0, 10);
+const dayKey = (date) => {
+    const d = startOfDay(date);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+};
 
 /**
  * Resolve the leave policy and per-employee overrides for a given employee.
@@ -136,7 +142,7 @@ export const validateLeaveEligibility = async (
     }
 
     const accrual = rule.accrual || {};
-    const joining = emp.joiningDate ? new Date(emp.joiningDate) : null;
+    const joining = emp?.jobInfo?.joiningDate || emp?.joiningDate || null;
 
     // No joining date configured -> treat as eligible (data not set up yet)
     if (!joining || Number.isNaN(joining.getTime())) {

@@ -19,6 +19,15 @@ import {
     releaseLeave
 } from "../../services/leave/leavePolicy.service.js";
 import LeaveBalance from "../../models/Attandance/LeaveBalance.js";
+import LeaveType from "../../models/Attandance/LeaveType.js";
+import Holiday from "../../models/Attandance/Holiday.js";
+import {
+    getWeeklyOffs,
+    getWeeklyOffHalfDays,
+    toDateKey,
+    startOfDay,
+    holidayAppliesToEmployee
+} from "../../services/payroll/attendanceLedger.service.js";
 
 /*
 ====================================
@@ -306,6 +315,36 @@ export const createAttendanceRequest = async (req, res) => {
                 });
             }
 
+            const leaveType = await LeaveType.findOne({
+                _id: leaveTypeId,
+                companyId: employee.companyId
+            }).lean();
+
+            if (!leaveType || leaveType.isActive === false) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Leave type not found or inactive"
+                });
+            }
+
+            const isHalfDay = Boolean(req.body.isHalfDay || leaveDetails?.isHalfDay);
+            const halfDaySession = req.body.halfDaySession || leaveDetails?.halfDaySession;
+
+            if (isHalfDay) {
+                if (!leaveType.allowHalfDay) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Half-day leave is not allowed for this leave type"
+                    });
+                }
+                if (startDate.getTime() !== endDate.getTime()) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Half-day leave must be requested for a single date"
+                    });
+                }
+            }
+
             const eligibility = await validateLeaveEligibility(
                 employee._id,
                 leaveTypeId,
@@ -319,7 +358,9 @@ export const createAttendanceRequest = async (req, res) => {
                 });
             }
 
-            const leaveDays = await countWorkingDays(employee._id, startDate, endDate);
+            const chargeableDays = await countWorkingDays(employee._id, startDate, endDate);
+            const leaveDays = isHalfDay ? Math.min(0.5, chargeableDays) : chargeableDays;
+
             if (leaveDays <= 0) {
                 return res.status(400).json({
                     success: false,
@@ -350,6 +391,9 @@ export const createAttendanceRequest = async (req, res) => {
                 leaveDays,
                 year,
                 balanceBefore: available,
+                isPaid: leaveType.paid !== false,
+                isHalfDay,
+                halfDaySession,
                 policyId: eligibility.rule?.policyId || employee.leavePolicy?.policyId,
             };
         }
@@ -538,7 +582,11 @@ export const createAttendanceRequest = async (req, res) => {
             payload.balanceBefore = leaveContext.balanceBefore;
             payload.balanceAfter = leaveContext.balanceBefore;
             payload.policyId = leaveContext.policyId;
-            payload.isPaid = true;
+            payload.isPaid = leaveContext.isPaid;
+            payload.isHalfDay = leaveContext.isHalfDay;
+            if (leaveContext.halfDaySession) {
+                payload.halfDaySession = leaveContext.halfDaySession;
+            }
         }
 
         if (
@@ -578,6 +626,17 @@ export const createAttendanceRequest = async (req, res) => {
                 );
 
                 if (reservation.reserved < leaveContext.leaveDays) {
+                    if (reservation.reserved > 0) {
+                        await releaseLeave(
+                            employee._id,
+                            leaveContext.leaveTypeId,
+                            reservation.reserved,
+                            `Reverted partial reservation for request ${request._id}`,
+                            request._id,
+                            req.user?._id || req.user?.id,
+                            leaveContext.year
+                        );
+                    }
                     await AttendanceRequest.findByIdAndDelete(request._id);
                     return res.status(400).json({
                         success: false,
@@ -891,6 +950,112 @@ export const getAttendanceRequestById = async (req, res) => {
 
 /*
 ====================================
+UTIL: Apply an approved leave request to the attendance register.
+Only working days are marked. Weekly offs, half-day weekly offs and
+company holidays are left untouched, and days the employee actually
+worked (present / half_day / comp_off) are never overwritten.
+====================================
+*/
+const applyApprovedLeaveToAttendance = async (request, session = null) => {
+    const sessionOpt = session ? { session } : {};
+
+    const employeeQuery = Employee.findById(request.employeeId);
+    if (session) employeeQuery.session(session);
+    const employee = await employeeQuery.lean();
+
+    if (!employee) throw new Error("Employee not found");
+
+    if (!request?.leaveDetails?.startDate || !request?.leaveDetails?.endDate) {
+        throw new Error("Invalid leave dates");
+    }
+
+    const weeklyOffs = getWeeklyOffs(employee);
+    const weeklyOffHalfDays = getWeeklyOffHalfDays(employee);
+
+    const startDate = startOfDay(request.leaveDetails.startDate);
+    const endDate = startOfDay(request.leaveDetails.endDate);
+
+    const holidaysQuery = Holiday.find({
+        companyId: request.companyId,
+        date: { $gte: startDate, $lte: new Date(endDate.getTime() + 86400000) }
+    });
+    if (session) holidaysQuery.session(session);
+    const holidays = await holidaysQuery.lean();
+
+    const holidayKeys = new Set(
+        holidays
+            .filter((holiday) => holidayAppliesToEmployee(holiday, employee))
+            .map((holiday) => toDateKey(holiday.date))
+    );
+
+    const isHalfDay = Boolean(request.isHalfDay);
+    let marked = 0;
+
+    for (
+        let d = new Date(startDate.getTime());
+        d <= endDate;
+        d = new Date(d.getTime() + 86400000)
+    ) {
+        if (isHalfDay && d.getTime() !== startDate.getTime()) break;
+
+        const key = toDateKey(d);
+        const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
+
+        if (holidayKeys.has(key)) continue;
+        if (weeklyOffs.includes(dayName)) continue;
+        if (weeklyOffHalfDays.includes(dayName)) continue;
+
+        const { start, end } = getDayBounds(d);
+
+        const existingQuery = Attendance.findOne({
+            companyId: request.companyId,
+            employeeId: request.employeeId,
+            date: { $gte: start, $lt: end }
+        });
+        if (session) existingQuery.session(session);
+        const existing = await existingQuery.lean();
+
+        if (existing && ["present", "half_day", "comp_off"].includes(existing.status)) {
+            // Employee actually worked — do not overwrite the attendance record.
+            continue;
+        }
+
+        await Attendance.findOneAndUpdate(
+            {
+                companyId: request.companyId,
+                employeeId: request.employeeId,
+                date: { $gte: start, $lt: end }
+            },
+            {
+                $set: {
+                    date: start,
+                    status: isHalfDay ? "half_day" : "leave",
+                    approvalStatus: "approved",
+                    leaveTypeId: request.leaveTypeId || null,
+                    isPaidLeave: request.isPaid !== false,
+                    isAutoMarked: false,
+                    totalWorkingHours: 0,
+                    workSummary: {
+                        totalMinutes: 0,
+                        payableMinutes: 0,
+                        overtimeMinutes: 0,
+                        lateMinutes: 0,
+                        earlyLeaveMinutes: 0
+                    },
+                    remarks: `Leave approved via request ${request._id}`
+                }
+            },
+            { upsert: true, new: true, ...sessionOpt }
+        );
+
+        marked += 1;
+    }
+
+    return marked;
+};
+
+/*
+====================================
 4. APPROVE REQUEST
 ====================================
 */
@@ -931,60 +1096,7 @@ export const approveAttendanceRequest = async (req, res) => {
         // 🔹 LEAVE FLOW
         // ============================================================
         if (request.requestType === "leave") {
-            const startDate = parseValidDate(request?.leaveDetails?.startDate);
-            const endDate = parseValidDate(request?.leaveDetails?.endDate);
-
-            if (!startDate || !endDate) {
-                throw new Error("Invalid leave dates");
-            }
-
-            const employee = await Employee.findById(request.employeeId).session(session);
-            if (!employee) throw new Error("Employee not found");
-
-            const weeklyOffHalfDays = employee.weeklyOffHalfDay || [];
-
-            for (
-                let d = new Date(startDate.getTime());
-                d <= endDate;
-                d = new Date(d.getTime() + 86400000)
-            ) {
-                const { start, end } = getDayBounds(d);
-                const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
-                const isHalfDayOff = weeklyOffHalfDays.includes(dayName);
-
-                const status = isHalfDayOff ? "week_off_half" : "leave";
-
-                await Attendance.findOneAndUpdate(
-                    {
-                        companyId: request.companyId,
-                        employeeId: request.employeeId,
-                        date: { $gte: start, $lt: end }
-                    },
-                    {
-                        $set: {
-                            date: start,
-                            status: status,
-                            approvalStatus: "approved",
-                            totalWorkingHours: 0,
-                            workSummary: {
-                                totalMinutes: 0,
-                                payableMinutes: 0,
-                                overtimeMinutes: 0,
-                                lateMinutes: 0,
-                                earlyLeaveMinutes: 0
-                            },
-                            remarks: `Leave approved via request ${requestId}`,
-                            geoLocation: {
-                                type: "Point",
-                                coordinates: [0, 0],
-                                verified: false,
-                                source: "manual"
-                            }
-                        }
-                    },
-                    { upsert: true, new: true, session }
-                );
-            }
+            await applyApprovedLeaveToAttendance(request, session);
         }
 
         // ============================================================
@@ -1768,50 +1880,7 @@ export const bulkApproveRequests = async (req, res) => {
 
                 // Process approval based on type
                 if (request.requestType === "leave") {
-                    const start = new Date(request.leaveDetails.startDate);
-                    const end = new Date(request.leaveDetails.endDate);
-
-                    start.setHours(0, 0, 0, 0);
-                    end.setHours(23, 59, 59, 999);
-
-                    const leaveEmployee = await Employee.findById(request.employeeId).session(session);
-                    const weeklyOffHalfDays = leaveEmployee?.weeklyOffHalfDay || [];
-
-                    for (
-                        let d = new Date(start);
-                        d <= end;
-                        d.setDate(d.getDate() + 1)
-                    ) {
-                        const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
-                        const isHalfDayOff = weeklyOffHalfDays.includes(dayName);
-                        const status = isHalfDayOff ? "week_off_half" : "leave";
-
-                        await Attendance.findOneAndUpdate(
-                            {
-                                companyId: request.companyId,
-                                employeeId: request.employeeId,
-                                date: d
-                            },
-                            {
-                                $set: {
-                                    status: status,
-                                    approvalStatus: "approved",
-                                    totalWorkingHours: 0,
-workSummary: {
-                                totalMinutes: 0,
-                                payableMinutes: 0,
-                                overtimeMinutes: 0,
-                                lateMinutes: 0,
-                                earlyLeaveMinutes: 0,
-                                totalBreakMinutes: 0,
-                                totalBreakExceededMinutes: 0
-                                    },
-                                    remarks: `Leave approved via bulk action`
-                                }
-                            },
-                            { upsert: true, session }
-                        );
-                    }
+                    await applyApprovedLeaveToAttendance(request, session);
                 }
 
                 // Handle punch requests in bulk
