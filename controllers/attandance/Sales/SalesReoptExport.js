@@ -842,23 +842,19 @@ export const exportSalesReport = async (req, res) => {
             { label: 'Company Name', value: 'companyName' },
             { label: 'Contact Name', value: 'contactName' },
             { label: 'Phone Number', value: 'phoneNumber' },
-            { label: 'Address', value: 'address' },
             { label: 'Landmark', value: 'landmark' },
             { label: 'Customer Type', value: 'customerType' },
-            { label: 'Sales Logs', value: 'salesLogs' },
             { label: 'Total Sales Amount', value: 'totalSalesAmount' },
             { label: 'Payment Collected', value: 'paymentCollected' },
             { label: 'Meeting Logs', value: 'meetingLogs' },
             { label: 'Next Meeting Decided', value: 'nextMeetingDecided' },
             { label: 'Next Meeting Date', value: 'nextMeetingDate' },
             { label: 'Next Meeting Time', value: 'nextMeetingTime' },
-            { label: 'Next Meeting Notes', value: 'nextMeetingNotes' },
             { label: 'Sales Status', value: 'salesStatus' },
             { label: 'Punch In Time', value: 'punchInTime' },
             { label: 'Punch In Location', value: 'punchInLocation' },
             { label: 'Punch Out Time', value: 'punchOutTime' },
             { label: 'Punch Out Location', value: 'punchOutLocation' },
-            { label: 'Punch Out Address', value: 'punchOutAddress' },
             { label: 'Duration (minutes)', value: 'duration' },
             { label: 'Total Distance (km)', value: 'totalDistance' }
         ];
@@ -897,26 +893,6 @@ export const exportSalesReport = async (req, res) => {
  * Helper function to create a formatted row for company report
  */
 const createCompanyReportRow = (session, employeeData) => {
-    // Format sales logs for this employee only
-    const salesLogsFormatted = (session.salesLogs || [])
-        .filter(log => {
-            if (!employeeData) return true; // Include all if no specific employee
-            const logUserId = log.userId?._id?.toString() || log.userId?.toString();
-            return logUserId === employeeData.userId?.toString();
-        })
-        .map(log => {
-            const parts = [];
-            if (log.dealStatus) parts.push(`Status: ${log.dealStatus}`);
-            if (log.amount) parts.push(`Amount: ₹${log.amount.toLocaleString()}`);
-            if (log.paymentCollected !== undefined) parts.push(`Payment: ${log.paymentCollected ? 'Yes' : 'No'}`);
-            if (log.paymentMode) parts.push(`Mode: ${log.paymentMode}`);
-            if (log.note) parts.push(`Note: ${log.note}`);
-            if (log.createdAt) parts.push(`Date: ${new Date(log.createdAt).toLocaleDateString()}`);
-            return parts.join(' | ');
-        })
-        .filter(Boolean)
-        .join('\n');
-
     // Calculate total sales amount for this employee
     const employeeSalesAmount = (session.salesLogs || [])
         .filter(log => {
@@ -971,12 +947,10 @@ const createCompanyReportRow = (session, employeeData) => {
         companyName: session.customer?.companyName || '',
         contactName: session.customer?.contactName || '',
         phoneNumber: session.customer?.phoneNumber || '',
-        address: session.customer?.address || '',
         landmark: session.customer?.landmark || '',
         customerType: session.customer?.type || '',
 
         // Sales Information
-        salesLogs: salesLogsFormatted || 'No sales logs',
         totalSalesAmount: employeeSalesAmount || 0,
         paymentCollected: hasPaymentCollected ? 'Yes' : 'No',
 
@@ -987,7 +961,6 @@ const createCompanyReportRow = (session, employeeData) => {
             ? new Date(session.nextMeeting.date).toLocaleDateString()
             : '',
         nextMeetingTime: session.nextMeeting?.time || '',
-        nextMeetingNotes: session.nextMeeting?.notes || '',
 
         // Status
         salesStatus: session.SalesStatus || 'N/A',
@@ -997,7 +970,6 @@ const createCompanyReportRow = (session, employeeData) => {
         punchInLocation: formatCoordinates(session.punchInLocation),
         punchOutTime: session.punchOutTime ? new Date(session.punchOutTime).toLocaleString() : '',
         punchOutLocation: formatCoordinates(session.punchOutLocation),
-        punchOutAddress: session.punchOutAddress || '',
         duration: session.duration ? Math.round(session.duration / 60) : 0,
         totalDistance: session.totalDistance ? Math.round(session.totalDistance / 1000 * 100) / 100 : 0
     };
@@ -1421,86 +1393,46 @@ export const exportSalesPersonExitReport = async (req, res) => {
 
         const rows = sessions.map((s) => {
             const custLoc = coords(s.customer?.location);
-            const punchInLoc = coords(s.punchInLocation);
-            const punchOutLoc = coords(s.punchOutLocation);
 
             return {
-                sessionId: s.sessionId,
-                status: s.status,
                 salesStatus: s.SalesStatus,
-                formCompleted: s.formCompleted,
 
                 // ---- Customer ----
                 customerId: s.customer?.customerId || "",
                 companyName: s.customer?.companyName || "",
                 contactName: s.customer?.contactName || "",
                 phoneNumber: s.customer?.phoneNumber || "",
-                address: s.customer?.address || "",
                 landmark: s.customer?.landmark || "",
                 customerLng: custLoc.lng,
                 customerLat: custLoc.lat,
 
                 // ---- People ----
                 employeeName: s.employeeId?.name || "",
-                employeeEmail: s.employeeId?.email || "",
                 createdByName: s.createdBy?.name || "",
                 assignedTo: (s.assignedTo || []).map((u) => u.name || u._id).join("; "),
 
-                // ---- Punch info ----
-                punchInTime: s.punchInTime ? new Date(s.punchInTime).toISOString() : "",
-                punchInLng: punchInLoc.lng,
-                punchInLat: punchInLoc.lat,
-                punchOutTime: s.punchOutTime ? new Date(s.punchOutTime).toISOString() : "",
-                punchOutLng: punchOutLoc.lng,
-                punchOutLat: punchOutLoc.lat,
-                punchOutAddress: s.punchOutAddress || "",
+                // ---- Punch / route summary ----
                 lastPunchAt: s.lastPunchAt ? new Date(s.lastPunchAt).toISOString() : "",
 
                 // ---- Route / distance ----
                 totalDistance: s.totalDistance || 0,
                 duration: s.duration || 0,
-                routePointsCount: (s.routePath || []).length,
-
-                // ---- Logs (summarized counts + raw JSON for full detail) ----
-                visitLogsCount: (s.visitLogs || []).length,
-                salesLogsCount: (s.salesLogs || []).length,
-                meetingLogsCount: (s.meetingLogs || []).length,
-                visitNotesCount: (s.visitNotes || []).length,
-
-                visitLogsJson: JSON.stringify(s.visitLogs || []),
-                salesLogsJson: JSON.stringify(s.salesLogs || []),
-                meetingLogsJson: JSON.stringify(s.meetingLogs || []),
-                visitNotesJson: JSON.stringify(s.visitNotes || []),
-                routePathJson: JSON.stringify(s.routePath || []),
 
                 // ---- Next meeting ----
-                nextMeetingDecided: s.nextMeeting?.decided || false,
                 nextMeetingDate: s.nextMeeting?.date ? new Date(s.nextMeeting.date).toISOString() : "",
                 nextMeetingTime: s.nextMeeting?.time || "",
                 nextMeetingNotes: s.nextMeeting?.notes || "",
-
-                // ---- Evidence ----
-                evidenceVisitNotes: s.evidence?.visitNotes || "",
-                evidenceVisitPhotoUrl: s.evidence?.visitPhoto?.url || "",
-
-                createdAt: s.createdAt ? new Date(s.createdAt).toISOString() : "",
-                updatedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : "",
             };
         });
 
         const fields = [
-            "sessionId", "status", "salesStatus", "formCompleted",
-            "customerId", "companyName", "contactName", "phoneNumber", "address", "landmark",
+            "salesStatus",
+            "customerId", "companyName", "contactName", "phoneNumber", "landmark",
             "customerLng", "customerLat",
-            "employeeName", "employeeEmail", "createdByName", "assignedTo",
-            "punchInTime", "punchInLng", "punchInLat",
-            "punchOutTime", "punchOutLng", "punchOutLat", "punchOutAddress", "lastPunchAt",
-            "totalDistance", "duration", "routePointsCount",
-            "visitLogsCount", "salesLogsCount", "meetingLogsCount", "visitNotesCount",
-            "visitLogsJson", "salesLogsJson", "meetingLogsJson", "visitNotesJson", "routePathJson",
-            "nextMeetingDecided", "nextMeetingDate", "nextMeetingTime", "nextMeetingNotes",
-            "evidenceVisitNotes", "evidenceVisitPhotoUrl",
-            "createdAt", "updatedAt",
+            "employeeName", "createdByName", "assignedTo",
+            "lastPunchAt",
+            "totalDistance", "duration",
+            "nextMeetingDate", "nextMeetingTime", "nextMeetingNotes",
         ];
 
         return sendCsv(res, `sales-person-exit-report-${personId}-${Date.now()}.csv`, rows, fields);
