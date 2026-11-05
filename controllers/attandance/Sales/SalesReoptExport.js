@@ -56,6 +56,56 @@ const safeNumber = (value, defaultValue = 0) => {
 };
 
 /* ============================================================
+DATE / TIME FORMATTERS - FIXED IST, DD/MM/YYYY + HH:MM
+============================================================ */
+const IST_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+});
+
+const istParts = (date) => {
+    if (!(date instanceof Date) || isNaN(date.getTime())) return null;
+    const parts = IST_FORMATTER.formatToParts(date);
+    const get = (type) => parts.find((p) => p.type === type)?.value ?? "";
+    return {
+        d: get("day"),
+        m: get("month"),
+        y: get("year"),
+        h: get("hour"),
+        mi: get("minute")
+    };
+};
+
+const formatDateDMY = (date, fallback = "-") => {
+    const p = istParts(date);
+    return p ? `${p.d}/${p.m}/${p.y}` : fallback;
+};
+
+const formatTimeHM = (date, fallback = "-") => {
+    const p = istParts(date);
+    return p ? `${p.h}:${p.mi}` : fallback;
+};
+
+const formatDateTimeDMYHM = (date, fallback = "-") => {
+    const p = istParts(date);
+    return p ? `${p.d}/${p.m}/${p.y} ${p.h}:${p.mi}` : fallback;
+};
+
+// Duration is stored in seconds; render as HH:MM (hours not wrapped at 24)
+const formatDurationHM = (seconds, fallback = "00:00") => {
+    const totalMinutes = Math.round(Number(seconds) / 60);
+    if (!Number.isFinite(totalMinutes) || totalMinutes < 0) return fallback;
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+};
+
+/* ============================================================
 EXPORT SALES REPORT
 ============================================================ */
 export const exportSalesPersonReport = async (req, res) => {
@@ -337,11 +387,6 @@ export const exportSalesPersonReport = async (req, res) => {
                                 ? new Date(session.nextMeeting.date)
                                 : null;
 
-                        // Validate dates
-                        const isValidDate = (date) => {
-                            return date instanceof Date && !isNaN(date.getTime());
-                        };
-
                         /* ============================================================
                         PUSH ROW - ALL VALUES AS STRINGS TO PREVENT TYPE ERRORS
                         ============================================================ */
@@ -349,20 +394,14 @@ export const exportSalesPersonReport = async (req, res) => {
                         exportRows.push({
                             "S.N": String(srNo++),
                             "Call Id": safeString(session.sessionId, "-"),
-                            "Date": isValidDate(punchInTime)
-                                ? punchInTime.toLocaleDateString("en-IN")
-                                : "-",
+                            "Date": formatDateDMY(punchInTime, "-"),
                             "Sales Person Name": safeString(
                                 employee?.userId?.name ||
                                 employee?.user_name
                             ),
                             "Call Generation": safeString(callGeneration),
-                            "Check In": isValidDate(punchInTime)
-                                ? punchInTime.toLocaleTimeString("en-IN")
-                                : "-",
-                            "Check Out": isValidDate(punchOutTime)
-                                ? punchOutTime.toLocaleTimeString("en-IN")
-                                : "-",
+                            "Check In": formatTimeHM(punchInTime, "-"),
+                            "Check Out": formatTimeHM(punchOutTime, "-"),
                             "Distance Between CheckIn & CheckOut (KM)":
                                 String(safeNumber(visitDistance)),
                             "Distance From Previous Call (KM)":
@@ -382,9 +421,7 @@ export const exportSalesPersonReport = async (req, res) => {
                                 firstSalesLog?.paymentMode
                             ),
                             "Sales Status": safeString(session?.SalesStatus),
-                            "Next Meeting Date": isValidDate(nextMeetingDate)
-                                ? nextMeetingDate.toLocaleDateString("en-IN")
-                                : "-",
+                            "Next Meeting Date": formatDateDMY(nextMeetingDate, "-"),
                             "Meeting Notes": safeString(
                                 firstMeetingLog?.notes
                             ),
@@ -834,7 +871,13 @@ export const exportSalesReport = async (req, res) => {
             });
         }
 
+        // Serial number column (1-based)
+        reportData.forEach((row, index) => {
+            row.srNo = index + 1;
+        });
+
         const fields = [
+            { label: 'S.No', value: 'srNo' },
             { label: 'Date', value: 'date' },
             { label: 'Employee Code', value: 'empCode' },
             { label: 'Employee Name', value: 'empName' },
@@ -855,7 +898,7 @@ export const exportSalesReport = async (req, res) => {
             { label: 'Punch In Location', value: 'punchInLocation' },
             { label: 'Punch Out Time', value: 'punchOutTime' },
             { label: 'Punch Out Location', value: 'punchOutLocation' },
-            { label: 'Duration (minutes)', value: 'duration' },
+            { label: 'Duration (HH:MM)', value: 'duration' },
             { label: 'Total Distance (km)', value: 'totalDistance' }
         ];
 
@@ -920,7 +963,7 @@ const createCompanyReportRow = (session, employeeData) => {
         })
         .map(log => {
             const parts = [];
-            if (log.date) parts.push(`Date: ${new Date(log.date).toLocaleDateString()}`);
+            if (log.date) parts.push(`Date: ${formatDateDMY(new Date(log.date), '')}`);
             if (log.time) parts.push(`Time: ${log.time}`);
             if (log.notes) parts.push(`Notes: ${log.notes}`);
             return parts.join(' | ');
@@ -938,7 +981,7 @@ const createCompanyReportRow = (session, employeeData) => {
 
     return {
         // Date & Employee Info
-        date: session.createdAt ? new Date(session.createdAt).toISOString().split('T')[0] : '',
+        date: formatDateDMY(session.createdAt ? new Date(session.createdAt) : null, ''),
         empCode: employeeData?.empCode || 'N/A',
         empName: employeeData?.user_name || 'Unknown',
 
@@ -957,20 +1000,27 @@ const createCompanyReportRow = (session, employeeData) => {
         // Meeting Information
         meetingLogs: meetingLogsFormatted || 'No meeting logs',
         nextMeetingDecided: session.nextMeeting?.decided ? 'Yes' : 'No',
-        nextMeetingDate: session.nextMeeting?.date
-            ? new Date(session.nextMeeting.date).toLocaleDateString()
-            : '',
+        nextMeetingDate: formatDateDMY(
+            session.nextMeeting?.date ? new Date(session.nextMeeting.date) : null,
+            ''
+        ),
         nextMeetingTime: session.nextMeeting?.time || '',
 
         // Status
         salesStatus: session.SalesStatus || 'N/A',
 
         // Time Tracking
-        punchInTime: session.punchInTime ? new Date(session.punchInTime).toLocaleString() : '',
+        punchInTime: formatDateTimeDMYHM(
+            session.punchInTime ? new Date(session.punchInTime) : null,
+            ''
+        ),
         punchInLocation: formatCoordinates(session.punchInLocation),
-        punchOutTime: session.punchOutTime ? new Date(session.punchOutTime).toLocaleString() : '',
+        punchOutTime: formatDateTimeDMYHM(
+            session.punchOutTime ? new Date(session.punchOutTime) : null,
+            ''
+        ),
         punchOutLocation: formatCoordinates(session.punchOutLocation),
-        duration: session.duration ? Math.round(session.duration / 60) : 0,
+        duration: formatDurationHM(session.duration, "00:00"),
         totalDistance: session.totalDistance ? Math.round(session.totalDistance / 1000 * 100) / 100 : 0
     };
 };
@@ -1391,10 +1441,11 @@ export const exportSalesPersonExitReport = async (req, res) => {
             .populate("assignedTo", "name email")
             .lean();
 
-        const rows = sessions.map((s) => {
+        const rows = sessions.map((s, index) => {
             const custLoc = coords(s.customer?.location);
 
             return {
+                srNo: index + 1,
                 salesStatus: s.SalesStatus,
 
                 // ---- Customer ----
@@ -1412,27 +1463,44 @@ export const exportSalesPersonExitReport = async (req, res) => {
                 assignedTo: (s.assignedTo || []).map((u) => u.name || u._id).join("; "),
 
                 // ---- Punch / route summary ----
-                lastPunchAt: s.lastPunchAt ? new Date(s.lastPunchAt).toISOString() : "",
+                lastPunchAt: formatDateTimeDMYHM(
+                    s.lastPunchAt ? new Date(s.lastPunchAt) : null,
+                    ""
+                ),
 
                 // ---- Route / distance ----
                 totalDistance: s.totalDistance || 0,
-                duration: s.duration || 0,
+                duration: formatDurationHM(s.duration, "00:00"),
 
                 // ---- Next meeting ----
-                nextMeetingDate: s.nextMeeting?.date ? new Date(s.nextMeeting.date).toISOString() : "",
+                nextMeetingDate: formatDateDMY(
+                    s.nextMeeting?.date ? new Date(s.nextMeeting.date) : null,
+                    ""
+                ),
                 nextMeetingTime: s.nextMeeting?.time || "",
                 nextMeetingNotes: s.nextMeeting?.notes || "",
             };
         });
 
         const fields = [
-            "salesStatus",
-            "customerId", "companyName", "contactName", "phoneNumber", "landmark",
-            "customerLng", "customerLat",
-            "employeeName", "createdByName", "assignedTo",
-            "lastPunchAt",
-            "totalDistance", "duration",
-            "nextMeetingDate", "nextMeetingTime", "nextMeetingNotes",
+            { label: "S.No", value: "srNo" },
+            { label: "Sales Status", value: "salesStatus" },
+            { label: "Customer ID", value: "customerId" },
+            { label: "Company Name", value: "companyName" },
+            { label: "Contact Name", value: "contactName" },
+            { label: "Phone Number", value: "phoneNumber" },
+            { label: "Landmark", value: "landmark" },
+            { label: "Customer Lng", value: "customerLng" },
+            { label: "Customer Lat", value: "customerLat" },
+            { label: "Employee Name", value: "employeeName" },
+            { label: "Created By", value: "createdByName" },
+            { label: "Assigned To", value: "assignedTo" },
+            { label: "Last Punch At", value: "lastPunchAt" },
+            { label: "Total Distance (m)", value: "totalDistance" },
+            { label: "Duration (HH:MM)", value: "duration" },
+            { label: "Next Meeting Date", value: "nextMeetingDate" },
+            { label: "Next Meeting Time", value: "nextMeetingTime" },
+            { label: "Next Meeting Notes", value: "nextMeetingNotes" },
         ];
 
         return sendCsv(res, `sales-person-exit-report-${personId}-${Date.now()}.csv`, rows, fields);
