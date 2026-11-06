@@ -88,6 +88,23 @@ try {
   console.warn('⚠️ Could not seed request.update permission:', error.message);
 }
 
+// Ensure the request report export permission exists
+try {
+  const reportExportPermission = await Permission.findOne({ key: 'request.export' });
+  if (!reportExportPermission) {
+    await Permission.create({
+      resource: 'request',
+      action: 'export',
+      name: 'Request report export',
+      description: 'Export attendance and leave request reports',
+      system: true
+    });
+    console.log('✅ Seeded request.export permission');
+  }
+} catch (error) {
+  console.warn('⚠️ Could not seed request.export permission:', error.message);
+}
+
 await connectRedis();
 
 let notificationWorkers;

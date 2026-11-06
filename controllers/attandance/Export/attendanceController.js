@@ -423,6 +423,7 @@ const makeDummySummaryRow = (index) => ({
     presentableDays: "—",
     present: "—",
     otDays: "—",
+    totalPresentDays: "—",
     coUsed: "—",
     coBalance: "—",
     coExpired: "—",
@@ -431,6 +432,7 @@ const makeDummySummaryRow = (index) => ({
     leave: "—",
     late: "—",
     earlyExit: "—",
+    totalGrossHrs: "—",
     totalWorkHrs: "—",
     avgWorkHrs: "—",
     totalOTHrs: "—",
@@ -1519,6 +1521,7 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 presentableDays,
                 present,
                 otDays,
+                totalPresentDays: present + otDays,
                 coUsed,
                 coBalance,
                 coExpired,
@@ -1566,10 +1569,10 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
 
         const sheetName = exceedsFreeLimit ? "⚠️ Sample Summary" : "Attendance Summary";
         const wsSummary = wb.addWorksheet(sheetName, {
-            views: [{ state: "frozen", ySplit: 3 }],
+            views: [{ state: "frozen", ySplit: exceedsFreeLimit ? 4 : 3 }],
         });
 
-        const sCols = 32;
+        const sCols = 36;
 
         wsSummary.mergeCells(1, 1, 1, sCols);
         const sTitleCell = wsSummary.getCell(1, 1);
@@ -1680,11 +1683,13 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
         const grpRowNum = exceedsFreeLimit ? 3 : 2;
         const groups = [
             { label: "EMPLOYEE INFO", start: 1, span: 5 },
-            { label: "DATE BREAKDOWN", start: 6, span: 9 },
-            { label: "WORKING HOURS", start: 15, span: 3 },
-            { label: "BREAK SUMMARY", start: 18, span: 2 },
-            { label: "HOURS", start: 20, span: 6 },
-            { label: "SALARY (₹)", start: 26, span: 7 },
+            { label: "DAY SUMMARY", start: 6, span: 12 },
+            { label: "ATTENDANCE", start: 18, span: 1 },
+            { label: "WORKING HOURS", start: 19, span: 3 },
+            { label: "BREAKS", start: 22, span: 2 },
+            { label: "OVERTIME", start: 24, span: 2 },
+            { label: "COMP OFF", start: 26, span: 3 },
+            { label: "SALARY (₹)", start: 29, span: 8 },
         ];
         const grpRow = wsSummary.getRow(grpRowNum);
         grpRow.height = 16;
@@ -1699,14 +1704,16 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
 
         const subRowNum = grpRowNum + 1;
         const sHeaders = [
-            "#", "Emp Code", "Emp Name", "Department", "Designation",
-            "Total Days", "Week Off", "Holiday", "Presentable Days", 
-            "Present", "Half Day", "Absent", "Leave", "Late Days",
+            "#", "Emp Code", "Employee Name", "Department", "Designation",
+            "Total Days", "Week Off", "Holiday", "Presentable Days",
+            "Present", "OT Days", "Total Present Days", "Half Day", "Absent", "Leave",
+            "Late Days", "Early Exit Days",
+            "Attendance %",
             "Gross Hrs", "Net Hrs", "Avg Hrs/Day",
-            "Break Hrs", "Deducted Hrs",
-            "OT Hrs", "OT Days", "Late Hrs",
-            "CO Used", "CO Bal", "CO Expired",
-            "Basic", "HRA", "DA", "Bonus", "Per Day", "Per Hour", "OT Rate",
+            "Break Hrs", "Break Deducted Hrs",
+            "OT Hrs", "Late Hrs",
+            "CO Used", "CO Balance", "CO Expired",
+            "Basic", "HRA", "DA", "Bonus", "Per Day", "Per Hour", "OT Rate", "Shift",
         ];
         const sHeaderRow = wsSummary.getRow(subRowNum);
         sHeaderRow.height = 18;
@@ -1718,7 +1725,11 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             cell.alignment = { horizontal: "center", vertical: "middle" };
         });
 
-        wsSummary.columns = Array(sCols).fill({ width: 14 });
+        wsSummary.columns = [
+            { width: 5 }, { width: 12 }, { width: 22 }, { width: 18 }, { width: 18 },
+            ...Array(31).fill({ width: 14 }),
+        ];
+        wsSummary.getColumn(36).width = 22;
 
         const dataStartRow = subRowNum + 1;
 
@@ -1732,12 +1743,14 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
             const vals = [
                 idx + 1, r.empCode, r.empName, r.department, r.designation,
                 r.totalDays, r.weekOff, r.holiday, r.presentableDays,
-                r.present, r.halfDay, r.absent, r.leave, r.late,
+                r.present, r.otDays, r.totalPresentDays, r.halfDay, r.absent, r.leave, r.late, r.earlyExit,
+                r.attPct,
                 r.totalGrossHrs, r.totalWorkHrs, r.avgWorkHrs,
                 r.totalBreakHrs, r.totalDeductedHrs,
-                r.totalOTHrs, r.otDays, r.totalLateHrs,
+                r.totalOTHrs, r.totalLateHrs,
                 r.coUsed, r.coBalance, r.coExpired,
                 r.basic, r.hra, r.da, r.bonus, r.perDay, r.perHour, r.overtimeRate,
+                r.shift,
             ];
 
             vals.forEach((v, i) => {
@@ -1745,29 +1758,29 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
                 c.value = v;
                 c.font = { name: "Arial", size: 9, bold: i <= 1, color: { argb: isDummy ? "FF888888" : "FF000000" } };
                 c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
-                c.alignment = { horizontal: (i === 2 || i === 3 || i === 4) ? "left" : "center", vertical: "middle" };
-                
-                // Highlight flexible shifts in shift column
-                if (!isDummy && i === 4 && r.isFlexible) {
+                c.alignment = { horizontal: (i === 2 || i === 3 || i === 4 || i === 35) ? "left" : "center", vertical: "middle" };
+
+                // Highlight flexible shifts in the Shift column
+                if (!isDummy && i === 35 && r.isFlexible) {
                     c.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF0B5394" } };
                 }
-                
+
                 if (!isDummy && typeof v === "number") {
-                    if (i >= 14 && i <= 25) c.numFmt = "0.00";
-                    if (i >= 26) c.numFmt = "#,##0.00";
+                    if (i >= 17 && i <= 20) c.numFmt = "0.00";
+                    if (i >= 28 && i <= 34) c.numFmt = "#,##0.00";
                 }
             });
 
             // Highlight break deductions
             if (!isDummy && r.totalDeductedHrs > 0) {
-                const deductCell = row.getCell(19);
+                const deductCell = row.getCell(23);
                 deductCell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
             }
 
             // Absent highlight
             if (!isDummy && r.absent > 0) {
-                row.getCell(12).font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
-                row.getCell(12).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+                row.getCell(14).font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9C0006" } };
+                row.getCell(14).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
             }
         });
 
@@ -1778,26 +1791,29 @@ export const generateAttendanceSummaryCSV = async (req, res) => {
 
         [
             [1, "Total / Avg"],
-            [6, `=SUM(F${dataStartRow}:F${lastReal})`],
-            [7, `=SUM(G${dataStartRow}:G${lastReal})`],
-            [8, `=SUM(H${dataStartRow}:H${lastReal})`],
-            [9, `=SUM(I${dataStartRow}:I${lastReal})`],
-            [10, `=SUM(J${dataStartRow}:J${lastReal})`],
-            [11, `=SUM(K${dataStartRow}:K${lastReal})`],
-            [12, `=SUM(L${dataStartRow}:L${lastReal})`],
-            [13, `=SUM(M${dataStartRow}:M${lastReal})`],
-            [14, `=SUM(N${dataStartRow}:N${lastReal})`],
-            [15, `=SUM(O${dataStartRow}:O${lastReal})`],
-            [16, `=SUM(P${dataStartRow}:P${lastReal})`],
-            [17, `=AVERAGE(Q${dataStartRow}:Q${lastReal})`],
-            [18, `=SUM(R${dataStartRow}:R${lastReal})`],
-            [19, `=SUM(S${dataStartRow}:S${lastReal})`],
-            [20, `=SUM(T${dataStartRow}:T${lastReal})`],
-            [21, `=SUM(U${dataStartRow}:U${lastReal})`],
-            [22, `=SUM(V${dataStartRow}:V${lastReal})`],
-            [23, `=SUM(W${dataStartRow}:W${lastReal})`],
-            [24, `=SUM(X${dataStartRow}:X${lastReal})`],
-            [25, `=SUM(Y${dataStartRow}:Y${lastReal})`],
+            [6, `=SUM(F${dataStartRow}:F${lastReal})`],   // Total Days
+            [7, `=SUM(G${dataStartRow}:G${lastReal})`],   // Week Off
+            [8, `=SUM(H${dataStartRow}:H${lastReal})`],   // Holiday
+            [9, `=SUM(I${dataStartRow}:I${lastReal})`],   // Presentable Days
+            [10, `=SUM(J${dataStartRow}:J${lastReal})`],  // Present
+            [11, `=SUM(K${dataStartRow}:K${lastReal})`],  // OT Days
+            [12, `=SUM(L${dataStartRow}:L${lastReal})`],  // Total Present Days
+            [13, `=SUM(M${dataStartRow}:M${lastReal})`],  // Half Day
+            [14, `=SUM(N${dataStartRow}:N${lastReal})`],  // Absent
+            [15, `=SUM(O${dataStartRow}:O${lastReal})`],  // Leave
+            [16, `=SUM(P${dataStartRow}:P${lastReal})`],  // Late Days
+            [17, `=SUM(Q${dataStartRow}:Q${lastReal})`],  // Early Exit Days
+            [18, `=AVERAGE(R${dataStartRow}:R${lastReal})`], // Attendance %
+            [19, `=SUM(S${dataStartRow}:S${lastReal})`],  // Gross Hrs
+            [20, `=SUM(T${dataStartRow}:T${lastReal})`],  // Net Hrs
+            [21, `=AVERAGE(U${dataStartRow}:U${lastReal})`], // Avg Hrs/Day
+            [22, `=SUM(V${dataStartRow}:V${lastReal})`],  // Break Hrs
+            [23, `=SUM(W${dataStartRow}:W${lastReal})`],  // Break Deducted Hrs
+            [24, `=SUM(X${dataStartRow}:X${lastReal})`],  // OT Hrs
+            [25, `=SUM(Y${dataStartRow}:Y${lastReal})`],  // Late Hrs
+            [26, `=SUM(Z${dataStartRow}:Z${lastReal})`],  // CO Used
+            [27, `=SUM(AA${dataStartRow}:AA${lastReal})`], // CO Balance
+            [28, `=SUM(AB${dataStartRow}:AB${lastReal})`], // CO Expired
         ].forEach(([col, val]) => {
             const c = totRow.getCell(col);
             c.value = val;

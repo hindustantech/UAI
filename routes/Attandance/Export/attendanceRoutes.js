@@ -2,6 +2,7 @@
 
 import express from "express";
 import { generateAttendanceCSV, generateAttendanceMatrixCSV,generateAttendanceSummaryCSV } from "../../../controllers/attandance/Export/attendanceController.js";
+import { exportRequestReport } from "../../../controllers/attandance/Export/requestReportController.js";
 import authMiddleware from "../../../middlewares/authMiddleware.js";
 import { checkPermission } from "../../../middlewares/checkPermission.js";
 
@@ -26,6 +27,15 @@ router.get(
     authMiddleware,
     checkPermission('attendance_matrix.export'),
     generateAttendanceMatrixCSV
+);
+
+// Request report export (leave / punch correction / overtime / comp off)
+// Limited to the current month + previous month.
+router.get(
+    "/requests/export/request-report",
+    authMiddleware,
+    checkPermission('request.export'),
+    exportRequestReport
 );
 
 export default router;
