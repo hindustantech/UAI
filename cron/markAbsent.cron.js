@@ -106,7 +106,7 @@ cron.schedule("0 0,4,8,12,16,20 * * *", async () => {
                                 employeeId: emp._id,
                                 userId: emp.userId,
                                 date: startOfDay,
-                                status: "week_off",
+                                status: "weekly_off",
                                 shiftId: shift._id,
                                 isAutoMarked: true,
                                 remarks: "Auto-marked weekly off"

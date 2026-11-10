@@ -273,6 +273,21 @@ test("half-day weekly off counts as half a paid day", async () => {
     assert.equal(ledger.payableDays, 26);
 });
 
+test("explicit weekly_off status counts as a paid weekly off", async () => {
+    const ledger = await buildAttendanceLedger({
+        employee: makeEmployee(),
+        month: 2,
+        year: 2026,
+        // Feb 3 2026 is a Tuesday (not a scheduled weekly off), but the record
+        // explicitly carries the legacy weekly_off status.
+        data: { records: [record(2026, 2, 3, "weekly_off")] },
+    });
+
+    assert.equal(ledger.weeklyOffDays, 5); // 4 Sundays + explicit weekly_off
+    assert.equal(ledger.absentDays, 23);
+    assert.equal(ledger.lopDays, 23);
+});
+
 /* ───────────────────── employment window ───────────────────── */
 
 test("mid-month joiner is not marked absent before joining date", async () => {

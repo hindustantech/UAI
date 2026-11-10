@@ -2362,7 +2362,8 @@ export const getTodaySummary = async (req, res) => {
             if (empId) markedIds.add(empId);
 
             const isLate = rec.status === "present" && (rec.workSummary?.lateMinutes ?? 0) > 0;
-            const bucket = isLate ? "late" : rec.status;
+            const normalizedStatus = rec.status === "weekly_off" ? "week_off" : rec.status;
+            const bucket = isLate ? "late" : normalizedStatus;
 
             if (bucket in grouped) grouped[bucket].push(formatRecord(rec));  // format here, not later
         }
@@ -2501,8 +2502,9 @@ export const getAttendanceSummary = async (req, res) => {
         let uniqueEmployeeIds = new Set();
 
         attendanceSummary.forEach(item => {
-            if (summary.hasOwnProperty(item._id)) {
-                summary[item._id] = item.count;
+            const statusKey = item._id === "weekly_off" ? "week_off" : item._id;
+            if (summary.hasOwnProperty(statusKey)) {
+                summary[statusKey] += item.count;
             }
 
             // Add employee IDs to the set
@@ -3961,8 +3963,8 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
             if (!rec && isWeekOff(date, shift, employee)) {
                 report.push({
                     Date: key,
-                    Status: "week_off",
-                    TimeIn: "Week Off",
+                    Status: "weekly_off",
+                    TimeIn: "weekly_off",
                     TimeOut: "-",
                     BreakTime: "-",
                     TotalHours: "-"
@@ -4203,7 +4205,8 @@ export const getMonthlySummary = async (req, res) => {
 
         summary.forEach(item => {
 
-            stats[item._id] = item.days;
+            const statusKey = item._id === "weekly_off" ? "week_off" : item._id;
+            stats[statusKey] = (stats[statusKey] || 0) + (item.days || 0);
 
             payrollMinutes += item.totalMinutes || 0;
 
@@ -4509,7 +4512,8 @@ export const getRangeSummary = async (req, res) => {
 
         summary.forEach(i => {
 
-            stats[i._id] = i.days;
+            const statusKey = i._id === "weekly_off" ? "week_off" : i._id;
+            stats[statusKey] = (stats[statusKey] || 0) + (i.days || 0);
 
             workMinutes += i.totalMinutes || 0;
 

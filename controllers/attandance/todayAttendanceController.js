@@ -60,6 +60,7 @@ const resolveTodayStatus = (attendance) => {
         case "leave": return { code: "leave", label: "Leave" };
         case "holiday": return { code: "holiday", label: "Holiday" };
         case "week_off": return { code: "week_off", label: "Week Off" };
+        case "weekly_off": return { code: "week_off", label: "Week Off" };
         case "week_off_half": return { code: "week_off_half", label: "Half Day Off" };
         case "comp_off": return { code: "comp_off", label: "Comp Off" };
         case "absent": return { code: "absent", label: "Absent" };
@@ -104,6 +105,7 @@ const STATUS_FILL = {
     leave: "FFD9D2E9",
     holiday: "FFB7E1CD",
     week_off: "FFD0E4F7",
+    weekly_off: "FFD0E4F7",
     week_off_half: "FFD0E4F7",
     comp_off: "FFD6B4D8",
     pending_approval: "FFFFF2CC",
@@ -133,6 +135,7 @@ const EXPORT_STATUS_FONT = {
     rejected: "FF9C0006",
     leave: "FF6A0DAD",
     week_off: "FF1155CC",
+    weekly_off: "FF1155CC",
     week_off_half: "FF1155CC",
     holiday: "FF137333",
     comp_off: "FF7D3C98",
@@ -1104,6 +1107,7 @@ class TodayAttendanceController {
                             acc.holiday += 1;
                             break;
                         case "week_off":
+                        case "weekly_off":
                         case "week_off_half":
                             acc.weekOff += 1;
                             break;

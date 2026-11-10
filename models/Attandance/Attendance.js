@@ -262,6 +262,7 @@ const attendanceSchema = new mongoose.Schema({
             "holiday",
             "half_day",
             "week_off",
+            "weekly_off",
             "week_off_half",
             "comp_off",
             "pending_approval",

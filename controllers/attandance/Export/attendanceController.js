@@ -285,6 +285,7 @@ const resolveDayStatus = (attendance, isWeeklyOff, isWeeklyOffHalf = false, shif
         case "leave": return { code: "L", label: "Leave", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "holiday": return { code: "H", label: "Holiday", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "week_off": return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
+        case "weekly_off": return { code: "WO", label: "Week Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "week_off_half": return { code: "WOH", label: "Half Day Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "comp_off": return { code: "CO", label: "Comp Off", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
         case "absent": return { code: "A", label: "Absent", punchIn: "—", punchOut: "—", hours: "0:00", breakInfo: "", isFlexible: false, isAutoPunchOut: false };
@@ -678,6 +679,7 @@ export const generateAttendanceCSV = async (req, res) => {
                         case "half_day": statusLabel = "Half Day"; break;
                         case "holiday": statusLabel = "Holiday"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;
                         case "week_off": statusLabel = "Week Off"; break;
+                        case "weekly_off": statusLabel = "Week Off"; break;
                         case "comp_off": statusLabel = "Comp Off"; punchInTime = punchOutTime = "—"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;
                         case "absent": statusLabel = "Absent"; break;
                         case "present autocheckout": statusLabel = "Absent (Auto Checkout)"; totalHours = "0:00"; grossHours = "0:00"; breakDeducted = "0:00"; breakDetails = ""; break;

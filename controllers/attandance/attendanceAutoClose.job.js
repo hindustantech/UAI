@@ -2,6 +2,7 @@ import Attendance from "../../models/Attandance/Attendance.js";
 import dayjs from "dayjs";
 import cron from "node-cron";
 import { logCronExecution } from "../../config/cronLogger.js";
+import { resolveAutoPunchOutStatus, buildAutoPunchOutRemarks } from "./autoPunchOutStatus.js";
 // jobs/autoCloseAttendance.js
 
 
@@ -18,7 +19,13 @@ export const autoCloseAttendance = async () => {
             punchIn: { $exists: true },
             punchOut: null,
             date: { $lt: startOfToday.toDate() }
-        });
+        })
+            .populate({
+                path: "employeeId",
+                select: "weeklyOff weeklyOffHalfDay shift",
+                populate: { path: "shift", select: "weeklyOff weeklyOffHalfDay" }
+            })
+            .lean();
 
         if (!openAttendances.length) {
             console.log("No open attendance found.");
@@ -33,7 +40,12 @@ export const autoCloseAttendance = async () => {
                 .add(2, "minute")
                 .toDate();
 
-            // RULE: Auto punch-out (midnight) marks the day absent with zero working hours
+            const employee = att.employeeId;
+            const shift = employee?.shift;
+            const status = resolveAutoPunchOutStatus(employee, shift, att.date);
+
+            // RULE: Auto punch-out (midnight) zeroes working hours. If the day
+            // is the employee's weekly off it is marked weekly_off, else absent.
             return {
                 updateOne: {
                     filter: { _id: att._id },
@@ -41,7 +53,7 @@ export const autoCloseAttendance = async () => {
                         $set: {
                             punchOut: autoPunchOutTime,
                             lastPunchAt: autoPunchOutTime,
-                            status: "absent",
+                            status,
                             isAutoMarked: true,
                             totalWorkingHours: 0,
                             "workSummary.totalMinutes": 0,
@@ -49,7 +61,10 @@ export const autoCloseAttendance = async () => {
                             "workSummary.overtimeMinutes": 0,
                             "workSummary.totalBreakMinutes": 0,
                             "workSummary.totalBreakExceededMinutes": 0,
-                            remarks: "System Auto Punch-Out at 00:02 AM — Marked absent; working hours counted as 0 per auto-punch-out policy"
+                            remarks: buildAutoPunchOutRemarks(
+                                status,
+                                "System Auto Punch-Out at 00:02 AM"
+                            )
                         },
                         $push: {
                             punchHistory: {

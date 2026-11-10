@@ -1103,7 +1103,7 @@ export const getTodayAllCompaniesAttendance = async (req, res) => {
 
                                 weekOffCount: {
                                     $sum: {
-                                        $cond: [{ $eq: ["$status", "week_off"] }, 1, 0]
+                                        $cond: [{ $in: ["$status", ["week_off", "weekly_off"]] }, 1, 0]
                                     }
                                 },
 
@@ -1787,7 +1787,7 @@ export const getCompanyAttendanceDashboard = async (req, res) => {
                     },
                     weekOffCount: {
                         $sum: {
-                            $cond: [{ $eq: ["$status", "week_off"] }, 1, 0]
+                            $cond: [{ $in: ["$status", ["week_off", "weekly_off"]] }, 1, 0]
                         }
                     }
                 }

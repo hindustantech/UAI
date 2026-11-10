@@ -25,7 +25,7 @@ A controller file may export helpers used by other controllers, not only route h
 ---
 
 <!-- AUTO:START:controllers -->
-**Total controller files: 79**
+**Total controller files: 80**
 
 | Controller file | Exported functions | Models imported | Used by routes |
 |---|---|---|---|
@@ -41,11 +41,12 @@ A controller file may export helpers used by other controllers, not only route h
 | `controllers/attandance/attendanceHelper.js` | `buildShiftWindow`, `calculateDistance`, `calculateEarlyLeave`, `calculateLate`, `calculateOvertime`, `calculatePayableMinutes`, `calculateWork`, `checkDeviceFraud`, `checkHoliday`, `checkJoiningDate`, `checkWeeklyOff`, `createDateTime`, `determineAttendanceStatus`, `diffMinutes`, `getErrorMessage`, `logAttendanceAction`, `logAttendanceError`, `normalizeDate`, `sanitizeAttendanceData`, `validateGeoLocation`, `validatePunch`, `validatePunchDates`, `validateShiftWindow` | — | — |
 | `controllers/attandance/attendanceReportController.js` | — | — | — |
 | `controllers/attandance/attendanceValidation.js` | `handleValidationErrors`, `validateAttendanceReportRules`, `validateBreaks`, `validateCorrectAttendanceRules`, `validateDateRange`, `validateDeleteAttendanceRules`, `validateDeviceInfo`, `validateGeoLocation`, `validateGetAttendanceRules`, `validateISODate`, `validateMarkAttendanceRules`, `validateObjectId`, `validatePunchTimesMiddleware`, `validatePunchTiming` | `User`, `Shift`, `Employee`, `Attendance` | — |
+| `controllers/attandance/autoPunchOutStatus.js` | `buildAutoPunchOutRemarks`, `resolveAutoPunchOutStatus` | — | — |
 | `controllers/attandance/crons/leaveEarnedAccrual.cron.js` | `initializeCron`, `processEarnedAccrual` | `Employee` | — |
 | `controllers/attandance/crons/leaveMonthlyAccrual.cron.js` | `initializeCron`, `processMonthlyCredit` | `Employee` | — |
 | `controllers/attandance/crons/leaveYearlyAllocation.cron.js` | `initializeCron`, `processYearlyAllocation` | `Employee` | — |
 | `controllers/attandance/crons/punchAutomationCron.js` | — | `Attendance`, `Shift`, `Employee` | — |
-| `controllers/attandance/crons/salesSessionAutoPunchOutCron.js` | — | `SalesSession`, `Attendance` | — |
+| `controllers/attandance/crons/salesSessionAutoPunchOutCron.js` | — | `SalesSession`, `Attendance`, `Employee` | — |
 | `controllers/attandance/dashboardController.js` | `getDashboardData`, `getDashboardStats`, `getPlanDistribution`, `getRecentAuditLogs`, `getRecentUsers`, `getRevenueOverview`, `getUserGrowth` | `Subscription`, `User`, `Plan`, `PaymentLog` | — |
 | `controllers/attandance/Employee.js` | `activateEmployee`, `changeEmployeeRole`, `checkEmpButton`, `createEmployee`, `deactivateEmployee`, `downloadDeductionTemplate`, `findbyPhone`, `findbyReferralCode`, `getAllEmployees`, `getCompanyByUser`, `getEmpByUserId`, `getEmpDetails`, `getEmployees`, `getLatestSubscription`, `getPayslipAllDownloadStatus`, `getPayslipDownloadStatus`, `getSalesEmployeesByCompanyPaginated`, `togglePayslipDownloadForCompany`, `updateEmployee`, `uploadEmployeeDeductions` | `Subscription`, `User`, `Employee`, `Attendance`, `Holiday`, `Payroll`, `PatnerProfile`, `Shift` | GET `/api/auth/manul/getAllEmployees`<br>GET `/api/employee`<br>POST `/api/employee`<br>GET `/api/employee/:empId`<br>PUT `/api/employee/activateEmployee/:empId`<br>POST `/api/employee/changeEmployeeRole/:empId`<br>+15 more |
 | `controllers/attandance/Export/attendanceController.js` | `formatLateTime`, `formatTime`, `generateAttendanceCSV`, `generateAttendanceMatrixCSV`, `generateAttendanceSummaryCSV` | `Subscription`, `Attendance`, `Employee` | GET `/api/ExportRoutes/attendance/export/csv`<br>GET `/api/ExportRoutes/attendance/export/matrix-csv`<br>GET `/api/ExportRoutes/generateAttendanceSummaryCSV` |

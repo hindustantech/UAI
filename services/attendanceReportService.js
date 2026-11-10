@@ -201,6 +201,7 @@ class AttendanceReportService {
                             holiday++;
                             break;
                         case 'week_off':
+                        case 'weekly_off':
                             weekOff++;
                             break;
                         case 'week_off_half':
@@ -214,7 +215,7 @@ class AttendanceReportService {
                     if (isWeekend) {
                         const dayName = this.getDayName(dayOfWeek);
                         const isHalfDayOff = employee.weeklyOffHalfDay?.includes(dayName);
-                        record.status = isHalfDayOff ? 'week_off_half' : 'week_off';
+                        record.status = isHalfDayOff ? 'week_off_half' : 'weekly_off';
                         if (isHalfDayOff) {
                             weekOffHalf++;
                         } else {

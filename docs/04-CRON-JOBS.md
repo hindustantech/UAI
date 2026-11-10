@@ -106,9 +106,21 @@ option is passed; the jobs below do not pass one).
 Runs at 02:00 daily (6-field expression `0 2 0 * * *`). Closes attendance records that were
 never punched out. There is a commented-out every-minute variant used for testing.
 
+When the record's own date is the employee's weekly off, the closed record is marked
+`status: "weekly_off"`; otherwise it is marked `absent`. Weekly off is read from
+`employee.weeklyOff` first and falls back to `shift.weeklyOff` (same precedence as
+`markAbsent.cron.js`). Working hours are always zeroed on auto punch-out. The two punch-automation
+crons (`punchAutomationCron.js`, `salesSessionAutoPunchOutCron.js`) use the same rule via
+`controllers/attandance/autoPunchOutStatus.js`.
+
 ### Mark absent
 Runs six times a day (`0 0,4,8,12,16,20 * * *`) so late timezones and delayed check-ins are
-caught. Creates absent records for employees with no attendance on a working day.
+caught. Creates absent records for employees with no attendance on a working day. Weekly off days
+are written as `weekly_off` (half days as `week_off_half`); no-shift employees fall back to an
+absent record after 20:00.
+
+> Legacy attendance rows that still carry `week_off` can be rewritten with
+> `npm run migrate:week-off` (dry run) or `npm run migrate:week-off -- --apply`.
 
 ### Subscription billing
 Runs at 23:58 daily. Acquires a Redis lock (`src/notification/utils/redisLock.js`) so only one

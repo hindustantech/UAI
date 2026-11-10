@@ -103,7 +103,8 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
         const isOffDay =
           weeklyOffSet.has(DOW[dateObj.getDay()]) ||
           rec.status === "holiday" ||
-          rec.status === "week_off";
+          rec.status === "week_off" ||
+          rec.status === "weekly_off";
         const isPresentOnWeekOff = rec.status === "present" && weeklyOffSet.has(DOW[dateObj.getDay()]);
         if ((!isOffDay || isPresentOnWeekOff) && !isAutoCheckout) overtimeMinutes += ws.overtimeMinutes || 0;
 
@@ -131,6 +132,7 @@ const getEmployeeAttendance = async (employeeDocId, empCode, month, year, weekOf
           case "leave": leaveDays++; break;
           case "holiday": holidays++; break;
           case "week_off": weeklyOffTotal++; break;
+          case "weekly_off": weeklyOffTotal++; break;
         }
       } else {
         const dateObj = new Date(year, month - 1, day);

@@ -6,6 +6,7 @@ import Attendance from "../../../models/Attandance/Attendance.js";
 import Shift from "../../../models/Attandance/Shift.js";
 import Employee from "../../../models/Attandance/Employee.js";
 import { logCronExecution } from "../../../config/cronLogger.js";
+import { resolveAutoPunchOutStatus, buildAutoPunchOutRemarks } from "../autoPunchOutStatus.js";
 
 /**
  * ============================================
@@ -354,13 +355,20 @@ class PunchAutomationCron {
             0
         );
 
-        // ---- Persist to DB — working hours zeroed, auto punch-out marks the day absent ----
+        // Weekly off days are marked weekly_off instead of absent.
+        const autoStatus = resolveAutoPunchOutStatus(
+            employee,
+            shift,
+            attendance.date
+        );
+
+        // ---- Persist to DB — working hours zeroed; weekly off preserved ----
         await Attendance.findByIdAndUpdate(
             attendance._id,
             {
                 punchOut: punchOutTime,
                 lastPunchAt: punchOutTime,
-                status: "absent",
+                status: autoStatus,
                 isAutoMarked: true,
                 totalWorkingHours: 0,
                 workSummary: {
@@ -380,7 +388,7 @@ class PunchAutomationCron {
                         createdAt: new Date(),
                     },
                 },
-                remarks: `${reason} — Marked absent; working hours counted as 0 per auto-punch-out policy`,
+                remarks: buildAutoPunchOutRemarks(autoStatus, reason),
             },
             { session, new: true }
         );

@@ -332,7 +332,7 @@ export async function buildAttendanceLedger({ employee, employeeId, month, year,
             if (rec.status !== "present autocheckout") {
                 totalPayableMinutes += rec.workSummary?.payableMinutes ?? 0;
                 totalMinutes += rec.workSummary?.totalMinutes ?? 0;
-                if (!isWeeklyOff && !isHoliday && rec.status !== "holiday" && rec.status !== "week_off") {
+                if (!isWeeklyOff && !isHoliday && rec.status !== "holiday" && rec.status !== "week_off" && rec.status !== "weekly_off") {
                     overtimeMinutes += rec.workSummary?.overtimeMinutes ?? 0;
                 }
             }

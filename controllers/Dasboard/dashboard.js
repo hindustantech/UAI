@@ -11,6 +11,7 @@ const VALID_ATTENDANCE_STATUSES = [
     "holiday",
     "half_day",
     "week_off",
+    "weekly_off",
     "comp_off",
     "pending_approval",
     "rejected",

@@ -4,7 +4,9 @@ import cron from "node-cron";
 import mongoose from "mongoose";
 import { SalesSession } from "../../../models/Attandance/Salses/Salses.js";
 import Attendance from "../../../models/Attandance/Attendance.js";
+import Employee from "../../../models/Attandance/Employee.js";
 import { logCronExecution } from "../../../config/cronLogger.js";
+import { resolveAutoPunchOutStatus, buildAutoPunchOutRemarks } from "../autoPunchOutStatus.js";
 
 /**
  * ============================================
@@ -248,14 +250,28 @@ class SalesSessionAutoPunchOutCron {
                 return;
             }
 
+            const employee = await Employee.findById(employeeId)
+                .select("weeklyOff weeklyOffHalfDay shift")
+                .populate("shift", "weeklyOff weeklyOffHalfDay")
+                .lean();
+
+            const autoStatus = resolveAutoPunchOutStatus(
+                employee,
+                employee?.shift,
+                sessionDoc.punchInTime
+            );
+
             await Attendance.updateOne(
                 { _id: attendance._id },
                 {
                     $set: {
                         punchOut: autoPunchOutTime,
                         lastPunchAt: autoPunchOutTime,
-                        status: "absent",
-                        remarks: "System Auto Punch-Out (sales session) — Marked absent; working hours counted as 0",
+                        status: autoStatus,
+                        remarks: buildAutoPunchOutRemarks(
+                            autoStatus,
+                            "System Auto Punch-Out (sales session)"
+                        ),
                         totalWorkingHours: 0,
                         workSummary: {
                             totalMinutes: 0,
